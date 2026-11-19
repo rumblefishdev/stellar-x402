@@ -17,7 +17,9 @@
   2026-11-09 (task 0027 decision 73: OpenBao's audit log disk at 90%, the server's disk at 80%)
   and 2026-11-17 (task 0138: metrics and alerts move to Prometheus and Alertmanager on
   a separate Hetzner Cloud VM; CloudWatch keeps the logs and the off-server checks) and
-  2026-11-19 (task 0134: a search-model container, 512 MiB, joins the totals)
+  2026-11-18 (task 0106: an API key crosses Cloudflare in plain text, in a pubnet request and
+  in the portal backend's answer to `reveal`) and 2026-11-19 (task 0134: a search-model
+  container, 512 MiB, joins the totals)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -401,8 +403,10 @@ One request or one stop must never outlast the layer in front of it:
     UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`, the Compose
     service; anything else gets 404. The server opens no port for it. The compose file keeps
     `PORT` at 4021; changing it means changing `cloudflare/x402.tf` too.
-  - HTTPS ends at Cloudflare, so Cloudflare sees the requests in plain text. They carry signed
-    payments, never keys.
+  - HTTPS ends at Cloudflare, so Cloudflare sees the requests and their answers in plain text.
+    They carry signed payments, never a signing key; a pubnet request also carries its seller's
+    API key (0105), and the portal's backend, behind the same tunnel, answers the hub's `reveal`
+    with one (0106).
   - The tunnel, its routing and the DNS record are Terraform in the `soroban-infrastructure`
     repo's `cloudflare/`, beside the `sorobanscan.com` zone, so routing changes are reviewed
     there. Task 0062 sets up the zone and the tunnel, the facilitator's prerequisite.

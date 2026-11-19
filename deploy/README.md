@@ -6,7 +6,8 @@ Testnet and mainnet run as separate deployments. They never share keys.
   Copy to a `.env` file (git-ignored) and fill in, for local runs only. The deployed networks get
   their secrets from encrypted systemd credentials and sign through OpenBao (ADR 0011, ADR 0013).
 - `scripts/`: operational scripts (signer funding, testnet reset recovery, contract deploy) and
-  CI's check of production's Postgres.
+  CI's check of production's Postgres. `check-production-portal.sh` is run by hand: it builds
+  both images and starts the portal's backend from its compose file.
   - `deploy-contract.sh <upto-proxy|test-token>`: builds and deploys a contract to testnet. The
     salt is the WASM hash, so a rerun deploys nothing, changed code gets a new ID, and after a
     testnet reset the same code returns under the same ID. Every run then extends the contract
@@ -24,3 +25,10 @@ Hosting: Docker Compose on the company Hetzner server, one facilitator and one P
 container per network, with stop-before-start deploys and the facilitator key in OpenBao Transit
 ([ADR 0011](../docs/adr/0011-facilitator-hosting.md), ADR 0013). Task 0026 builds the Dockerfile,
 the compose file, the deploy script and the workflow.
+
+The portal's backend (`apps/portal`, task 0106) runs on the same server with a deploy of its own,
+so neither restarts for the other: `production/portal.compose.yaml` (a Compose project of its
+own on the facilitator's two networks), `production/deploy-portal.sh` (its deploy key's forced
+command), `libexec/x402-portal-compose` and `x402-portal-deploy`, the units `x402-portal@` and
+`x402-portal-deploy@`, and the workflow **Deploy portal production**
+([runbook](../docs/runbook.md#the-portals-backend)).

@@ -187,7 +187,11 @@ describe("the units' output", () => {
     "x402-tunnel@.service": "cloudflared",
     "x402-openbao.service": "openbao",
     "x402-deploy@.service": "deploy",
+    "x402-portal@.service": "portal",
+    "x402-portal-deploy@.service": "portal-deploy",
   };
+  /** The oneshots that start no container of their own. */
+  const deploys = ["x402-deploy@.service", "x402-portal-deploy@.service"];
 
   test("every file a unit appends to is a row, and every unit's row has its unit", () => {
     const rows = new Set(FILES.map(absolute));
@@ -211,7 +215,7 @@ describe("the units' output", () => {
   });
 
   test("every docker compose up writes raw lines", () => {
-    for (const file of Object.keys(writers).filter((f) => f !== "x402-deploy@.service")) {
+    for (const file of Object.keys(writers).filter((f) => !deploys.includes(f))) {
       const ups = settings(unit(file), "ExecStart").filter((e) => / up /.test(e));
       expect(ups, file).toHaveLength(1);
       expect(ups[0], file).toMatch(/ up --no-log-prefix --no-color /);
@@ -263,12 +267,15 @@ describe("the units' output", () => {
   });
 
   // Under set -e, a failed echo into a full disk ended the deploy before its rollback.
-  test("the deploy prints only through say, which ignores a failed write", () => {
-    const script = read("libexec/x402-deploy");
-    expect(script).toContain(`say() { printf '%s\\n' "$*" || :; }`);
-    expect(script).not.toMatch(/^\s*(echo|printf '%s\\n' "\$\w+" >&2)\b/m);
-    expect(script.match(/\becho\b/g)).toBeNull();
-  });
+  test.each(["x402-deploy", "x402-portal-deploy"])(
+    "%s prints only through say, which ignores a failed write",
+    (name) => {
+      const script = read(`libexec/${name}`);
+      expect(script).toContain(`say() { printf '%s\\n' "$*" || :; }`);
+      expect(script).not.toMatch(/^\s*(echo|printf '%s\\n' "\$\w+" >&2)\b/m);
+      expect(script.match(/\becho\b/g)).toBeNull();
+    },
+  );
 });
 
 // OpenBao's snapshot job against the probe, the playbook and ADR 0013 (task 0026).

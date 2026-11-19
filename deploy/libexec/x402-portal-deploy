@@ -1,0 +1,87 @@
+#!/bin/sh
+# The deploy of the portal's backend, run by x402-portal-deploy@<environment>.service, which
+# deploy-portal.sh starts after writing portal.digest.next under its lock (task 0106 decision 5).
+# It pulls the image, restarts x402-portal@<environment> on it and waits up to 60 s for /health,
+# which answers 200 once the database does. A failed start goes back to portal.digest.good. It
+# never touches the facilitator, and it migrates nothing: the schema is the facilitator's, so a
+# backend that needs a new table is deployed after the facilitator that makes it (runbook).
+#   x402-portal-deploy <environment>           the unit's ExecStart
+#   x402-portal-deploy <environment> stopped   its ExecStopPost, after any end
+set -eu
+# Its output goes to /var/log/x402/<env>/portal-deploy.log. Under set -e a failed write, a full
+# disk, would end the script before a rollback, so every message goes through this.
+say() { printf '%s\n' "$*" || :; }
+# Overridable for the test, which runs this with fakes for docker and systemctl.
+: "${X402_SRV:=/srv/x402}"
+: "${X402_RUN:=/run/x402}"
+: "${X402_LIBEXEC:=/usr/local/libexec/x402}"
+: "${X402_PORTAL_WAIT:=60}"
+export X402_SRV
+env=$1
+repo=ghcr.io/rumblefishdev/x402-portal
+run=$X402_RUN/$env
+cd "$X402_SRV/$env"
+
+# StartLimitBurst counts every start, these included; the count is for crash loops.
+restart() {
+  systemctl reset-failed "x402-portal@$env" || true
+  systemctl restart "$@" "x402-portal@$env"
+}
+
+if [ "${2:-}" = stopped ]; then
+  rm -f "$run/portal.deploying"
+  # Stopped by the cap or by hand after `portal.digest` moved: end on the last good image, written
+  # before the restart since x402-portal-compose reads `portal.digest` at ExecStart. After a
+  # success or the script's own rollback, the two are the same and nothing happens.
+  if [ "${SERVICE_RESULT:-}" != success ] && [ -s portal.digest.good ] &&
+    ! cmp -s portal.digest portal.digest.good; then
+    say "the deploy ended with ${SERVICE_RESULT:-no result}; back to portal.digest.good" >&2
+    cp portal.digest.good portal.digest.tmp && mv portal.digest.tmp portal.digest
+    restart --no-block
+  fi
+  exit 0
+fi
+
+# x402-creds makes the directory for the unit; a first deploy runs before the unit ever has.
+# x402-portal@ keeps `portal.digest` as it is while the marker is here; ExecStopPost removes it,
+# and a reboot clears it.
+install -d -m 0700 "$run"
+touch "$run/portal.deploying"
+
+new=$(cat portal.digest.next)
+good=$(cat portal.digest.good 2>/dev/null || true)
+docker pull --quiet "$repo@$new"
+
+# The healthcheck's one-liner.
+probe="fetch('http://127.0.0.1:4022/health',{signal:AbortSignal.timeout(5000)}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"
+started() {
+  restart || return 1
+  deadline=$(($(date +%s) + X402_PORTAL_WAIT))
+  until "$X402_LIBEXEC/x402-portal-compose" "$env" exec -T portal node -e "$probe"; do
+    [ "$(date +%s)" -lt "$deadline" ] || return 1
+    sleep 2
+  done
+}
+
+printf '%s\n' "$new" > portal.digest.tmp && mv portal.digest.tmp portal.digest
+if started; then
+  printf '%s\n' "$new" > portal.digest.good.tmp && mv portal.digest.good.tmp portal.digest.good
+  # The disk is shared: keep this image and the previous good one.
+  docker image ls --digests --format '{{.Digest}}' "$repo" | while read -r digest; do
+    case $digest in "$new" | "$good") ;; *) docker image rm "$repo@$digest" > /dev/null || true ;; esac
+  done
+  say "deployed $new"
+  exit 0
+fi
+
+say "$new didn't answer /health within $X402_PORTAL_WAIT s; back to ${good:-nothing, the first deploy}" >&2
+if [ -n "$good" ]; then
+  printf '%s\n' "$good" > portal.digest.tmp && mv portal.digest.tmp portal.digest
+  restart || say "x402-portal@$env didn't start on $good" >&2
+else
+  # Nothing to go back to. Without `portal.digest` the unit's condition skips it, so a reboot
+  # doesn't start the image that just failed.
+  systemctl stop "x402-portal@$env" || true
+  rm -f portal.digest
+fi
+exit 1

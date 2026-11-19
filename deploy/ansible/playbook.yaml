@@ -3,7 +3,8 @@
 # rotation of OpenBao's audit log, and CI's deploy user with its forced command and one sudo rule.
 # Since 0027: the CloudWatch agent and its Roles Anywhere signing helper, the files the units and
 # the host probe write under /var/log/x402, and their rotation. Since 0026's backups: Borg and
-# OpenBao's daily snapshot to the Storage Box, with its pinned host key.
+# OpenBao's daily snapshot to the Storage Box, with its pinned host key. Since 0106: the portal
+# backend's compose file, its units and its own deploy key, held to deploy-portal.sh.
 # Never the server's base setup (firewall, Docker's daemon.json, sshd, the admins), which the
 # explorer's playbook owns. An admin runs it from a commit on `deploy/production`, which takes only
 # an approved pull request, never from `develop`, which takes pushes without one; CI never runs it
@@ -28,6 +29,9 @@
     # The public half of the environment's deploy key, whose private half is the GitHub
     # environment's secret (runbook).
     deploy_key: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/files/deploy-' ~ x402_environment ~ '.pub') }}"
+    # The portal's deploy key, committed once it is made (runbook, The portal's backend). Until
+    # then nothing can start the portal's deploy over SSH.
+    portal_deploy_key_file: "{{ playbook_dir }}/files/deploy-portal-{{ x402_environment }}.pub"
     aws_region: eu-central-1
     # The CloudWatch agent, a build AWS signed: its signature was checked with AWS's key when this
     # pin was chosen (runbook, The CloudWatch agent). An upgrade changes both lines by pull request.
@@ -52,6 +56,8 @@
       - "/var/log/x402/{{ x402_environment }}/postgres-testnet.log"
       - "/var/log/x402/{{ x402_environment }}/cloudflared.log"
       - "/var/log/x402/{{ x402_environment }}/deploy.log"
+      - "/var/log/x402/{{ x402_environment }}/portal.log"
+      - "/var/log/x402/{{ x402_environment }}/portal-deploy.log"
       - /var/log/x402/openbao/openbao.log
       - /var/log/x402/host/metrics.log
 
@@ -303,7 +309,8 @@
         group: root
         mode: "0644"
 
-    - name: The compose file and deploy.sh
+    # The portal's two beside the facilitator's (0106): its own project and forced command.
+    - name: The compose files and the deploy keys' forced commands
       ansible.builtin.copy:
         src: "{{ repo_deploy }}/{{ x402_environment }}/{{ item.name }}"
         dest: "/srv/x402/{{ x402_environment }}/{{ item.name }}"
@@ -313,6 +320,8 @@
       loop:
         - { name: compose.yaml, mode: "0644" }
         - { name: deploy.sh, mode: "0755" }
+        - { name: portal.compose.yaml, mode: "0644" }
+        - { name: deploy-portal.sh, mode: "0755" }
 
     # OpenBao's own project, one for every environment on the server (ADR 0013).
     - name: OpenBao's compose file and config
@@ -337,16 +346,19 @@
         group: root
         mode: "0644"
 
-    # The only file the deploy user writes; the deploy unit reads it as root.
-    - name: digest.next
+    # The only files the deploy user writes; each deploy unit reads its own as root.
+    - name: digest.next and portal.digest.next
       ansible.builtin.file:
-        path: "/srv/x402/{{ x402_environment }}/digest.next"
+        path: "/srv/x402/{{ x402_environment }}/{{ item }}"
         state: touch
         owner: x402-deploy
         group: x402-deploy
         mode: "0644"
         modification_time: preserve
         access_time: preserve
+      loop:
+        - digest.next
+        - portal.digest.next
 
     - name: The units' scripts
       ansible.builtin.copy:
@@ -366,18 +378,27 @@
       register: units
       notify: Reload systemd
 
-    - name: The deploy user's one sudo rule
+    # One per deploy unit, and nothing else.
+    - name: The deploy user's sudo rules
       ansible.builtin.copy:
-        content: "x402-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl start x402-deploy@{{ x402_environment }}\n"
+        content: |
+          x402-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl start x402-deploy@{{ x402_environment }}
+          x402-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl start x402-portal-deploy@{{ x402_environment }}
         dest: /etc/sudoers.d/x402-deploy
         owner: root
         group: root
         mode: "0440"
         validate: visudo -cf %s
 
-    - name: The deploy key, held to deploy.sh
+    # Each key starts its own deploy and no other: the forced command ignores what the client
+    # asks to run and reads only a digest.
+    - name: The deploy keys, each held to its script
       ansible.builtin.copy:
-        content: "command=\"/srv/x402/{{ x402_environment }}/deploy.sh\",restrict {{ deploy_key }}\n"
+        content: |
+          command="/srv/x402/{{ x402_environment }}/deploy.sh",restrict {{ deploy_key }}
+          {% if portal_deploy_key_file is file %}
+          command="/srv/x402/{{ x402_environment }}/deploy-portal.sh",restrict {{ lookup('ansible.builtin.file', portal_deploy_key_file) }}
+          {% endif %}
         dest: /var/lib/x402-deploy/.ssh/authorized_keys
         owner: x402-deploy
         group: x402-deploy
@@ -437,6 +458,14 @@
         - x402-db-testnet
         - x402-tunnel
         - x402
+
+    # Enabled before its first deploy: the unit's condition skips it until `portal.digest`
+    # exists. Not under --check while this run would add the unit.
+    - name: The portal's unit, enabled at boot
+      ansible.builtin.systemd_service:
+        name: "x402-portal@{{ x402_environment }}.service"
+        enabled: true
+      when: not (ansible_check_mode and units is changed)
 
     # Not under --check: the copy above doesn't run there, and the module fails on a unit it
     # can't find.

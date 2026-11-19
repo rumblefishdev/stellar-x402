@@ -8,7 +8,7 @@
   (task 0032: a pool for listings; task 0064: no memory store, tests run on PostgreSQL) and
   2026-10-27 (task 0067: online migrations) and 2026-10-29 (task 0077: one facilitator for both
   networks, still with a database per network) and 2026-11-16 (task 0105: a pool for the API key
-  registry's reads)
+  registry's reads) and 2026-11-18 (task 0106: the portal's sealed key copies and its role)
 
 ## Context
 
@@ -52,7 +52,15 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     database, and backups, restores and migrations stay per network.
     - The API key registry (`api_keys`, task 0105) carries no network either: a key is for the
       callers of the network whose database holds it. Only pubnet requires one, so only pubnet's
-      registry is read; testnet's stays empty.
+      registry is read; testnet's holds only the keys the portal issues for testing until pubnet
+      has a database (0106 decision 19).
+    - Beside it, `api_key_copies` (task 0106, migration `0014`) holds a sealed copy of each key
+      the portal issues, so the API hub can show it again: AES-256-GCM under the portal's
+      `KEY_ENCRYPTION_KEY`, which the database never holds, bound to the key's owner and hash,
+      and deleted when the portal revokes the key. The portal's backend connects as a role of its
+      own, `x402_portal`, which reads and writes these two tables and nothing else. The
+      facilitator connects as the database's owner and never reads the copies, so they are
+      closed to it by the encryption, not by grants.
     - Each network's spend budgets count only its own fees, paid from its own fee account.
     - Still open, decided with the code in 0126: which database holds the catalog, since
       `/discovery/resources` without a `network` filter lists both networks with an exact
@@ -68,11 +76,12 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     and `verify`, runs on testnet before mainnet.
   - The volume isn't encrypted at rest, and nothing here relies on disk encryption. The database
     holds mostly what the chain already shows (transaction hashes, payer addresses, amounts)
-    plus budgets and limits, never keys; the secrets are encrypted on their own (systemd
-    credentials, OpenBao's seal, pgBackRest's repository); and only root on the server reaches
-    the volume, who reaches everything else anyway. LUKS, if the disks have it, is an extra
-    layer, not a requirement. The 14 days of backups off the server stand in for RDS's deletion
-    protection.
+    plus budgets, limits and API keys' hashes; the only keys in it are the portal's sealed
+    copies, which open only with a key it never holds; the secrets are encrypted on their own
+    (systemd credentials, OpenBao's seal, pgBackRest's repository); and only root on the server
+    reaches the volume, who reaches everything else anyway. LUKS, if the disks have it, is an
+    extra layer, not a requirement. The 14 days of backups off the server stand in for RDS's
+    deletion protection.
   - Minor upgrades are a digest bump in a planned window; a major upgrade is planned on its own.
 - **Access.**
   - The `pg` driver and small fixed pools per process: 10 connections, plus 3 for

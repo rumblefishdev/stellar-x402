@@ -46,6 +46,16 @@
             "log_stream_name": "deploy"
           },
           {
+            "file_path": "/var/log/x402/production/portal.log",
+            "log_group_name": "/x402/production/app",
+            "log_stream_name": "portal"
+          },
+          {
+            "file_path": "/var/log/x402/production/portal-deploy.log",
+            "log_group_name": "/x402/production/app",
+            "log_stream_name": "portal-deploy"
+          },
+          {
             "file_path": "/var/log/x402/openbao/openbao.log",
             "log_group_name": "/x402/production/app",
             "log_stream_name": "openbao"
