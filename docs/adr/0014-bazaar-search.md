@@ -63,10 +63,16 @@ The measurements are in
     current model.
   - Search compares the query's vector with every listing's that passes the filters (an exact
     scan, no index).
-- **The PostgreSQL image.** One Dockerfile on the official `postgres:18`, pinned by digest, adds
-  `postgresql-18-pgvector` pinned to one package version, so building it never moves PostgreSQL's
-  own version. Production, CI, local compose and restores use that one image. The extension is
-  created once, in the `public` schema, so the tests' per-file schemas all see the type.
+  - A listing whose cosine similarity to the query is below 0.60 is not a match, so a query
+    with nothing related in the catalog finds nothing by meaning. On the 0134 set this floor keeps
+    98% of the relevant listings. The testnet catalog's one weather listing scores 0.79–0.80 for
+    weather queries and 0.47–0.53 for unrelated ones. The floor belongs to the model: a new model
+    sets its own from the same kind of measurement.
+- **The PostgreSQL image.** The pgvector project's own image, `pgvector/pgvector:0.8.7-pg18-trixie`,
+  pinned by digest: the official `postgres:18-trixie` with pgvector built from its source tag. We
+  build no image of our own. Production, CI, local compose and restores use that one image, and a
+  PostgreSQL upgrade waits for pgvector's matching image. The extension is created once, in the
+  `public` schema, so the tests' per-file schemas all see the type.
 - **Where the model runs.**
   - In a container of its own, with its own memory limit, reached by the facilitator over the
     environment's internal network. The model file is in the image, pinned by its revision, so
@@ -170,7 +176,7 @@ The measurements are in
 
 ## Consequences
 
-- Production needs our own PostgreSQL image with `pgvector`, built and pinned as above, and one
+- Production, CI and local compose switch to the pgvector image pinned as above, and one
   more container whose memory limit is set from a measurement on the server. ADR 0011's totals
   don't count it yet.
 - Adding the stored generated column rewrites the catalog table. On today's catalog that is one
