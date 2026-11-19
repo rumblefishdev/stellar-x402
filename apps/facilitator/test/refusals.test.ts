@@ -199,11 +199,55 @@ describe("verifyWithRefusals (0086)", () => {
     expect(lines.join("")).toContain("settlement_refused_reopen");
   });
 
+  it("records the payer's expiration ledger, so the pruner keeps the record until it closed", async () => {
+    const { verify, store } = setup();
+    await verify(payload(), requirements);
+    expect(await store.pruneRefusals(1e12, { network, latest: EXPIRATION - 1 }, 10)).toBe(0);
+    expect(await store.pruneRefusals(1e12, { network, latest: EXPIRATION }, 10)).toBe(1);
+  });
+
+  it("says a settlement is under way when one of the same payment holds the key (#205)", async () => {
+    const { verify, store } = setup();
+    const p = payload();
+    const { fingerprintOf } = await import("../src/settlement/settle.js");
+    await store.claim({
+      key,
+      network,
+      payer,
+      nonce: "7",
+      fingerprint: fingerprintOf(p, requirements),
+      paymentPayload: p,
+      paymentRequirements: requirements,
+      createdAt: 1_000,
+    });
+    expect(await verify(p, requirements)).toEqual({
+      ...feeRefusal,
+      invalidMessage:
+        "a settlement of this payment is under way: send this payment to /settle for its " +
+        "outcome before signing a new one; too high",
+    });
+    expect(await store.get(key)).toMatchObject({ state: "claimed" });
+  });
+
   it.each([
-    ["get", { get: () => Promise.reject(new Error("down")) }],
-    ["refuse", { refuse: () => Promise.reject(new Error("down")) }],
-    ["get, too slow", { get: () => new Promise<never>(() => {}) }],
-  ])("throws StoreUnavailableError when the store's %s doesn't answer", async (_, broken) => {
+    ["fails", { get: () => Promise.reject(new Error("down")) }],
+    ["is too slow", { get: () => new Promise<never>(() => {}) }],
+  ])("runs the checks when the store's lookup %s, as before 0086 (#205)", async (_, broken) => {
+    const real = db.stores().settlements;
+    const { inner, verify } = setup(Object.assign(Object.create(real) as typeof real, broken));
+    inner.mockResolvedValueOnce({ isValid: true, payer });
+    lines.length = 0;
+    expect(await verify(payload(), requirements)).toEqual({ isValid: true, payer });
+    expect(lines.join("")).toContain("verify_store_lookup_failed");
+    // A refusal is still recorded.
+    expect((await verify(payload(), requirements)).invalidMessage).toBe(`${advice}; too high`);
+    expect(await real.get(key)).toMatchObject({ state: "refused" });
+  });
+
+  it.each([
+    ["fails", { refuse: () => Promise.reject(new Error("down")) }],
+    ["is too slow", { refuse: () => new Promise<never>(() => {}) }],
+  ])("throws StoreUnavailableError when recording the refusal %s", async (_, broken) => {
     const real = db.stores().settlements;
     const { verify } = setup(Object.assign(Object.create(real) as typeof real, broken));
     await expect(verify(payload(), requirements)).rejects.toBeInstanceOf(StoreUnavailableError);
