@@ -182,9 +182,47 @@ code,
   color: #000;
   border: 0;
 }
-.btn-ghost {
-  border: 1px solid rgba(245, 245, 245, 0.35);
+/* "Get API Key" and "View documentation", drawn as the Prices API portal draws its own two
+   (akot, 2026-11-19): 44px tall, the words and then an arrow in a 24px disc, 16px from the
+   button's end. Its measures, read off its page; this page's own type. */
+.btn-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 6px 16px 6px 20px;
+  line-height: 24px;
+  letter-spacing: -0.02em;
+}
+/* The dark one: the portal's grey button, its border inside the same 44px. */
+.btn-dark,
+.btn-dark:hover {
+  background: #272727;
   color: var(--text);
+  border: 1px solid var(--line);
+}
+.btn-dark:hover {
+  border-color: rgb(83, 83, 83);
+}
+.btn-dark.btn-arrow {
+  padding: 5px 15px 5px 19px;
+}
+.arrow-badge {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.btn-primary .arrow-badge {
+  background: #000;
+}
+.btn-dark .arrow-badge {
+  border: 1.5px solid var(--accent);
 }
 .btn-row {
   display: flex;

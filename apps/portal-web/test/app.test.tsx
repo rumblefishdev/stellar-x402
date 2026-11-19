@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { App } from "../src/App";
 import { HUB_SIGN_IN } from "../src/hub";
@@ -53,6 +53,35 @@ it("sends every Get API Key to the hub's sign-in, in the same tab", () => {
     expect(link.getAttribute("target")).toBeNull();
   }
   expect(screen.queryByRole("button", { name: "Get API Key" })).toBeNull();
+});
+
+// The top bar's button says what it does (akot, 2026-11-19): it opens the hub's sign-in, where the
+// key is one press further on. The page's own "Get API Key" buttons keep their words.
+it("offers Log in in the top bar, to the hub's sign-in", () => {
+  at();
+  const bar = within(screen.getByRole("navigation", { name: "Main" }));
+  const logIn = bar.getByRole("link", { name: "Log in" });
+  expect(logIn.getAttribute("href")).toBe(HUB_SIGN_IN);
+  expect(logIn.getAttribute("target")).toBeNull();
+  expect(logIn.className).toBe("btn btn-primary");
+  expect(bar.queryByRole("link", { name: "Get API Key" })).toBeNull();
+});
+
+// As the Prices API portal draws its own two (akot, 2026-11-19): the arrow in a disc after the
+// words, which a screen reader doesn't read.
+it("draws Get API Key and View documentation with the arrow of the Prices API portal's", () => {
+  at();
+  const calls = [
+    ...screen.getAllByRole("link", { name: "Get API Key" }),
+    ...screen.getAllByRole("link", { name: "View documentation" }),
+  ];
+  expect(screen.getAllByRole("link", { name: "View documentation" }).length).toBeGreaterThan(0);
+  for (const call of calls) {
+    const badge = call.querySelector(".arrow-badge");
+    expect(badge?.getAttribute("aria-hidden")).toBe("true");
+    expect(badge?.querySelector("svg")).not.toBeNull();
+    expect(call.classList.contains("btn-arrow")).toBe(true);
+  }
 });
 
 it("names no route of this page in the key card", () => {
