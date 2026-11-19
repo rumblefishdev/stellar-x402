@@ -295,7 +295,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["hook"],
-    fieldValues: { hook: ["beforeSubmit", "onFinal", "onSuccess", "other"] },
+    fieldValues: { hook: ["beforeSubmit", "onFinal", "extensionResponses", "onSuccess", "other"] },
     emit: "eager-first",
   },
   {

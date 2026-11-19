@@ -3,9 +3,10 @@
 // (0139 AC3); until then nothing wires it in `main()`.
 //
 // - A series' labels are the union of its catalog sets' dims, plus `network` for a network-scoped
-//   metric, plus its `fieldValues` fields (below). A set's `when` on a dim only limited what CloudWatch billed, so every label is always
-//   written and a rule filters on it. A `when` on a label that is no dim still decides whether the
-//   line counts (`spend_budget_nearing_total`'s `budget`, as `seriesDims` says).
+//   metric, plus its `fieldValues` fields (below). A set's `when` on a dim only limited what
+//   CloudWatch billed, so every label is always written and a rule filters on it. A `when` on a
+//   label that is no dim still decides whether the line counts (`spend_budget_nearing_total`'s
+//   `budget`, as `seriesDims` says).
 // - A field with closed values in the catalog's `fieldValues` is a label too, after the dims; any
 //   other field stays in the app line (0139 step 4). `rpc` is written as its `RPC_URLS` index.
 // - Every counter starts at 0 for every closed label value, so a missing series is a fault.
@@ -74,7 +75,8 @@ const RPC_INDEX = /^RPC_URLS\[(\d+)\]#/;
  * A `when` on a dim never filters here (the label is written instead), and a set without one holds.
  */
 function counts(def: MetricDef, labels: Labels): boolean {
-  const dims = new Set(labelKeys(def));
+  // The sets' dims only: a `when` on a field keeps filtering even once the field is a label.
+  const dims = new Set(effectiveSets(def).flatMap((set) => set.dims));
   return effectiveSets(def).some((set) =>
     whenHolds(
       { when: Object.fromEntries(Object.entries(set.when ?? {}).filter(([k]) => !dims.has(k))) },
@@ -124,7 +126,8 @@ export function prometheusMetrics(opts: {
     string,
     { name: string; labels: Record<string, string>; value: number }
   >();
-  const gauges: { name: string; read: GaugeRead }[] = [];
+  /** `stamp`: the key of the series the registration last read, whose stamp it moves. */
+  const gauges: { name: string; read: GaugeRead; stamp?: string }[] = [];
   /** A gauge series' last successful read, in seconds, kept when a later read fails. */
   const lastRead = new Map<string, { name: string; labels: Record<string, string>; at: number }>();
   let startedAt: number | undefined;
@@ -200,7 +203,8 @@ export function prometheusMetrics(opts: {
   /** Reads every gauge once: the samples of this scrape, and the last-read stamps updated. */
   function readGauges() {
     const samples: { name: string; labels: Record<string, string>; value: number }[] = [];
-    for (const { name, read } of gauges) {
+    for (const gauge of gauges) {
+      const { name, read } = gauge;
       const def = byName(name);
       if (!def) {
         report({ kind: "unknown-metric", name });
@@ -222,7 +226,12 @@ export function prometheusMetrics(opts: {
       }
       const labels = written(def, r.labels ?? {});
       samples.push({ name, labels, value });
-      lastRead.set(keyOf(name, labels), { name, labels, at: now() / 1000 });
+      // One registration reads one series. A stamp under labels it no longer reads (`rpc` before a
+      // failover) would stop moving and fire its age rule while the gauge reads fine, so it goes.
+      const key = keyOf(name, labels);
+      if (gauge.stamp !== undefined && gauge.stamp !== key) lastRead.delete(gauge.stamp);
+      gauge.stamp = key;
+      lastRead.set(key, { name, labels, at: now() / 1000 });
     }
     return samples;
   }
