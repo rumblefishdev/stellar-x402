@@ -1,0 +1,39 @@
+[package]
+name = "stellar-x402"
+version = "0.0.0"
+description = "Charge for an HTTP route with x402 payments on Stellar"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/rumblefishdev/stellar-x402"
+# The oldest Rust the crate builds with; CI checks it (job `sdk-rust`).
+rust-version = "1.81"
+readme = "README.md"
+keywords = ["x402", "stellar", "payments", "http"]
+categories = ["web-programming"]
+# Not published before part 2 decides the release (task 0140).
+publish = false
+
+[features]
+default = ["axum"]
+# The tower layer for axum routes: `stellar_x402::axum`. On unless a seller on another framework
+# turns the default features off.
+axum = ["dep:axum", "dep:tower-layer", "dep:tower-service"]
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["original-uri"], optional = true }
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+stellar-strkey = "0.0.16"
+thiserror = "2"
+tower-layer = { version = "0.3", optional = true }
+tower-service = { version = "0.3", optional = true }
+
+[dev-dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
+
+[[example]]
+name = "weather"
+required-features = ["axum"]

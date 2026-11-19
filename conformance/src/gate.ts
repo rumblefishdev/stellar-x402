@@ -21,7 +21,7 @@ import { parseEnv } from "node:util";
 import { Keypair, rpc } from "@stellar/stellar-sdk";
 import { checkSettlement, readSettlement, type Settlement } from "./onchain.js";
 import { UPSTREAM_COMMIT, UPSTREAM_REPO, assertClean, prepare } from "./upstream.js";
-import { judge, type SuiteRun } from "./verdict.js";
+import { judge, resultsFolder, type SuiteRun } from "./verdict.js";
 
 const conformance = fileURLToPath(new URL("..", import.meta.url));
 const root = join(conformance, "..");
@@ -128,8 +128,6 @@ suite = undefined;
 const run = existsSync(suiteJson)
   ? (JSON.parse(readFileSync(suiteJson, "utf8")) as SuiteRun)
   : undefined;
-const problems = judge(run, suiteExitCode);
-if (!facilitatorCommit) problems.push("the facilitator names no commit on /health");
 // A run of record says which gate judged it, so that code must be the commit it names.
 const gateCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: conformance,
@@ -139,7 +137,7 @@ const gateChanges = execFileSync("git", ["status", "--porcelain", "--", "src", "
   cwd: conformance,
   encoding: "utf8",
 }).trim();
-if (gateChanges) problems.push(`the gate has uncommitted changes:\n${gateChanges}`);
+const problems = judge(run, suiteExitCode, { facilitatorCommit, gateChanges });
 
 // The suite reports a hash; the chain says what it paid. Every Stellar route costs $0.001, 10000
 // units of testnet USDC (7 decimals), at the pinned commit (e2e/config/mechanisms_stellar.json,
@@ -183,8 +181,7 @@ console.log(`Read ${settlements.length} transactions on chain`);
 // and its hash so the two are read as one run. A local facilitator's folder stays out of git.
 if (run) {
   const date = new Date().toISOString();
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(facilitatorUrl).hostname);
-  const folder = join(conformance, "results", local ? "testnet-local" : "testnet-hosted");
+  const folder = join(conformance, "results", resultsFolder(facilitatorUrl));
   rmSync(folder, { recursive: true, force: true });
   mkdirSync(folder, { recursive: true });
   copyFileSync(suiteJson, join(folder, "suite.json"));

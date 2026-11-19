@@ -8,6 +8,7 @@ import * as ssm from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
 import { addAvailabilityAlarms } from "../alarms/availability.js";
 import { addCostSilenceAlarms } from "../alarms/cost-silence.js";
+import { addUpstreamAlarms } from "../alarms/upstream.js";
 import { AlarmFactory } from "../alarms/factory.js";
 import { addHostAlarms } from "../alarms/host.js";
 import { addMoneyAlarms } from "../alarms/money.js";
@@ -73,6 +74,7 @@ export class AlarmsStack extends cdk.Stack {
     addSettlementAlarms(this.alarms, config);
     addHostAlarms(this.alarms, config);
     addCostSilenceAlarms(this.alarms, config);
+    addUpstreamAlarms(this.alarms);
 
     new cdk.CfnOutput(this, "AlarmTopicArn", { value: topic.topicArn });
   }

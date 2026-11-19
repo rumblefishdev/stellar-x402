@@ -19,6 +19,10 @@ requirementsSource: >
 
 # stellar-x402 Milestone 1 (Tranche 1) - Epic Breakdown
 
+> **Changed since this plan:** the in-memory fakes it names for the four ports were replaced by
+> PostgreSQL in tests and local runs ([ADR 0012](../adr/0012-facilitator-state-store.md), task
+> 0064). The ports and their contract tests stay.
+
 ## Overview
 
 This document breaks Milestone 1 (Tranche 1) of stellar-x402 into epics and stories. The
@@ -77,8 +81,8 @@ guide, the two example integrations, the security review report, uptime targets,
 - **FR11:** Only one process at a time settles through a network's channel set (a lease), and
   shutdown waits until in-flight settlements are final or recorded as pending.
 - **FR12:** Rate limiting has separate budgets for `/verify`, `/settle` and `/discovery/*`, keyed
-  by client IP (from the configured client IP header; the API key is task 0060), and returns HTTP 429 when a
-  budget is exceeded. Caller authentication and rate limiting are documented.
+  by client IP (from the configured client IP header; an API key is ignored on testnet and is
+  pubnet's in M2, task 0105), and returns HTTP 429 when a budget is exceeded. Caller authentication and rate limiting are documented.
 - **FR13:** Spend budgets (global, per payer, per `payTo`, per asset) and circuit breakers (per
   asset, per `payTo`) stop fee drain. Over budget, `/settle` returns `success: false` and submits
   nothing.
@@ -502,9 +506,9 @@ So that one caller can't exhaust the channel pool or the service.
 **When** the limiter keys it  
 **Then** the client IP comes only from the configured client IP header
 
-**Given** a request with an API key  
+**Given** a testnet request with an API key  
 **When** the limiter keys it  
-**Then** the key is used instead of the IP (task 0060)  
+**Then** the key is ignored and the client IP is used: the key is pubnet's (task 0105), and clients behind one address share a budget on testnet (task 0060)  
 **And** requests without a key still work, so the gate proxy can call keyless
 
 **Given** the HTTP layer  

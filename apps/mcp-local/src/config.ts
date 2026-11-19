@@ -1,4 +1,4 @@
-import type { ServerConfig } from "@stellar-x402/mcp";
+import type { ServerConfig } from "./server.js";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { createEd25519Signer, USDC_TESTNET_ADDRESS } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";

@@ -6,7 +6,7 @@ import { Keypair } from "@stellar/stellar-sdk";
 import type { PaymentRequired } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { testDatabase } from "../../../facilitator/test/database.js";
-import { type FakeCatalog, startFakeCatalog } from "../../../../packages/mcp/test/fake-catalog.js";
+import { type FakeCatalog, startFakeCatalog } from "../../test/fake-catalog.js";
 import { running, startServer } from "../src/cli.js";
 import { startFacilitator } from "../src/facilitator.js";
 import type { FakeSeller } from "../src/fakes.js";

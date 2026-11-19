@@ -15,7 +15,7 @@ fn proxy_as_payer_cannot_drain_its_balance() {
         ..s.p.clone()
     };
     s.env.mock_auths(&[MockAuth {
-        address: &p.facilitator,
+        address: &p.receiver_authorizer,
         invoke: &MockAuthInvoke {
             contract: &s.proxy,
             fn_name: "settle_upto",
@@ -41,7 +41,7 @@ fn leftover_allowance_needs_a_new_client_signature() {
         ..s.p.clone()
     };
     s.env.mock_auths(&[MockAuth {
-        address: &p.facilitator,
+        address: &p.receiver_authorizer,
         invoke: &MockAuthInvoke {
             contract: &s.proxy,
             fn_name: "settle_upto",
@@ -75,16 +75,16 @@ enum ReentryKey {
 
 #[contractimpl]
 impl ReentrantToken {
-    pub fn arm(env: Env, target: Address, token: Address, to: Address, facilitator: Address) {
+    pub fn arm(env: Env, target: Address, token: Address, to: Address, authorizer: Address) {
         env.storage()
             .instance()
-            .set(&ReentryKey::Armed, &(target, token, to, facilitator));
+            .set(&ReentryKey::Armed, &(target, token, to, authorizer));
     }
 
     pub fn approve(env: Env, from: Address, _spender: Address, amount: i128, expiration: u32) {
         let armed: Option<(Address, Address, Address, Address)> =
             env.storage().instance().get(&ReentryKey::Armed);
-        let Some((target, token, to, facilitator)) = armed else {
+        let Some((target, token, to, authorizer)) = armed else {
             return;
         };
         env.storage().instance().remove(&ReentryKey::Armed);
@@ -92,7 +92,7 @@ impl ReentrantToken {
             &token,
             &from,
             &to,
-            &facilitator,
+            &authorizer,
             &amount,
             &0,
             &BytesN::from_array(&env, &[1; 32]),
@@ -168,16 +168,15 @@ fn a_noop_token_settles_without_moving_value() {
     };
     assert_eq!(settle(&s, &p, 10), Ok(Ok(())));
     assert_eq!(s.env.events().all().events().len(), 1);
-    assert!(nonce_used(&s, &p));
 }
 
-/// The facilitator can't also be the payer: the same address would authorize twice in one call,
-/// which the host refuses. Paying the facilitator itself is fine.
+/// The receiver authorizer can't also be the payer: the same address would authorize twice in one
+/// call, which the host refuses. Paying the receiver authorizer itself is fine.
 #[test]
-fn the_facilitator_cannot_be_the_payer() {
+fn the_receiver_authorizer_cannot_be_the_payer() {
     let s = setup(TokenKind::Sac);
     let p = Payment {
-        facilitator: s.p.from.clone(),
+        receiver_authorizer: s.p.from.clone(),
         ..s.p.clone()
     };
     s.env.mock_all_auths();
@@ -185,35 +184,13 @@ fn the_facilitator_cannot_be_the_payer() {
 
     let s = setup(TokenKind::Sac);
     let p = Payment {
-        to: s.p.facilitator.clone(),
+        to: s.p.receiver_authorizer.clone(),
         ..s.p.clone()
     };
     assert_eq!(settle(&s, &p, 10), Ok(Ok(())));
 }
 
-/// A nonce is unique only while its entry lives (I4). Once the entry has expired, the same nonce
-/// settles again under a new signature with a later expiry; the old signed tree can't, because
-/// its `allowance_expiration_ledger` is in the past.
-#[test]
-fn a_nonce_is_reusable_only_after_its_entry_expired() {
-    let s = setup(TokenKind::Sac);
-    let first = Payment {
-        exp_ledger: SEQ + 20,
-        ..s.p.clone()
-    };
-    settle(&s, &first, 10).unwrap().unwrap();
-    s.env.ledger().set_sequence_number(SEQ + 40);
-    assert!(!nonce_used(&s, &first));
-
-    assert_contract_error(settle(&s, &first, 10), UptoError::Expired);
-    let renewed = Payment {
-        exp_ledger: SEQ + 60,
-        ..first
-    };
-    assert_eq!(settle(&s, &renewed, 10), Ok(Ok(())));
-}
-
-/// The facilitator pays temporary rent on the nonce and the allowance until
+/// The facilitator pays temporary rent on the allowance until
 /// `allowance_expiration_ledger`, which the payer picks. The contract caps it at
 /// `MAX_ALLOWANCE_LEDGERS` past the current ledger, so the furthest expiry the network allows is
 /// refused and the costliest accepted one pays a bounded rent (threat model, "Fee inflation by
@@ -242,7 +219,7 @@ fn a_far_allowance_expiration_is_capped() {
     let (short, short_rent) = rent(|_| SEQ + 12);
     let (capped, capped_rent) = rent(|_| SEQ + MAX_ALLOWANCE_LEDGERS);
     assert_eq!((short, capped), (Ok(Ok(())), Ok(Ok(()))));
-    // Mocked auth adds its own nonces to both runs; the difference is the two entries' rent for
+    // Mocked auth adds its own nonces to both runs; the difference is the allowance's rent for
     // the cap, a fraction of what the far expiry would cost (about 14 million here).
     std::println!("temporary rent: {short_rent} at SEQ + 12, {capped_rent} at the cap");
     assert!(capped_rent > short_rent && capped_rent - short_rent < 1_000_000);

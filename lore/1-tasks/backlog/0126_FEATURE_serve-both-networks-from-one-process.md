@@ -48,6 +48,23 @@ its own channel pool, signer, RPC endpoints and store, before mainnet joins.
 - `/supported` lists an `exact` kind per network and each network's facilitator key.
 - Spend budgets per network, in that network's store, counting only its own fee account's fees
   (0077 decision 11, AD-18).
+- From 0105: `/verify` and `/settle` already read the body before they count a request and
+  require an API key by `paymentRequirements.network` (`http/admit.ts`), so nothing there changes
+  with two networks, but the registry (`stores.apiKeys`) and the counters it uses must become the
+  request's network's. The key rule holds only while a settlement's network comes from that field
+  (threat model, "Naming another network to skip the key"). Today the field is read twice: by
+  `namedNetwork` from the raw body for the key rule, and from the parsed requirements by the
+  checks, which refuse any network but the process's own. Once the handler picks a store and a
+  signer by network, read it once and hand the same value to the key rule and the handler, so the
+  two can't come apart (from the review of #185, 2026-11-13). Pubnet's compose services need one
+  for the key script (`node dist/keys.js`), as `migrate-testnet` is for migrations.
+- From 0105, before pubnet opens: a flood of made-up keys is unthrottled (threat model, "Requests
+  without a valid key, in bulk"), and each one of the right form reads the registry. Since #185
+  that read has a pool of its own (3 connections), so the flood no longer holds up the counters
+  or a request without a key; keep that when each network gets its own store and pools. What is
+  left: a request with a real key waits behind the flood's reads. Decide whether the edge stops
+  it (0038) or a guard on refusals does, with the faults the threat model lists (from Stanisław's
+  review of #185, 2026-11-13).
 
 ## Open Questions
 
@@ -58,6 +75,9 @@ From 0077 (ADR 0012 lists them):
   both networks, with an exact `total` and an `offset` up to 1 000 000, but each network's entries
   are in its own database. Merging two queries costs `offset + limit` rows from each; one database
   for the catalog keeps a testnet reset from wiping testnet's listings.
+  `/discovery/search` (0134) takes the same rule as `/discovery/resources`: with entries in two
+  databases, a search without a `network` filter ranks two candidate lists into one, and testnet
+  listings would sit among mainnet's.
 - **Which database holds the IP rate limiter's counters.** They are counted before the request's
   network is known, and `/supported` and `/discovery/*` may carry none.
 

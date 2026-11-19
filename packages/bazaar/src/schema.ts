@@ -38,19 +38,25 @@ function isPrefix(prefix: string[], path: string[]): boolean {
   return prefix.length <= path.length && prefix.every((segment, i) => segment === path[i]);
 }
 
+/** `schema` is the one given when nothing was dropped, else a copy. */
+export type LimitedSchema = { ok: true; schema: unknown } | { ok: false };
+
 /**
- * Whether a seller-supplied JSON Schema fits our caps. The schema is treated as data: it is
- * walked with an explicit stack (so a deeply nested payload can't overflow ours) and never
- * compiled. Fails on depth over 32, more than 1,000 nodes, a `$ref`/`$id` that isn't a local
- * pointer, a `$ref` that points at one of its own ancestors, or a `pattern` over 256 characters.
+ * A seller-supplied JSON Schema within our caps. The schema is treated as data: it is walked with
+ * an explicit stack (so a deeply nested payload can't overflow ours) and never compiled. Fails on
+ * depth over 32, more than 1,000 nodes, a `$ref`/`$id` that isn't a local pointer, or a `$ref`
+ * that points at one of its own ancestors. A `pattern` over 256 characters is dropped from a copy
+ * and the rest is kept (0063): the facilitator never runs it, and a buyer still reads the listing.
  * Keyword rules apply to keywords only: not to property names, nor inside `enum`, `default` etc.
  */
-export function isSchemaWithinLimits(schema: unknown): boolean {
+export function limitSchema(schema: unknown): LimitedSchema {
   const stack: Frame[] = [{ value: schema, depth: 0, path: [], keywords: true }];
+  /** The objects that hold a long `pattern`, by their path from the root. */
+  const longPatterns: string[][] = [];
   let nodes = 1;
   while (stack.length > 0) {
     const { value, depth, path, keywords } = stack.pop()!;
-    if (depth > LIMITS.schemaDepth) return false;
+    if (depth > LIMITS.schemaDepth) return { ok: false };
     if (value === null || typeof value !== "object") continue;
     const isArray = Array.isArray(value);
     const entries: [string, unknown][] = isArray
@@ -60,22 +66,33 @@ export function isSchemaWithinLimits(schema: unknown): boolean {
       const keyword = keywords && !isArray;
       if (keyword) {
         if (DATA_KEYWORDS.has(key)) continue;
-        if (key === "$id" && !(typeof child === "string" && child.startsWith("#"))) return false;
+        if (key === "$id" && !(typeof child === "string" && child.startsWith("#")))
+          return { ok: false };
         if (key === "$ref") {
           const target = typeof child === "string" ? decodePointer(child) : undefined;
-          if (!target || isPrefix(target, path)) return false;
+          if (!target || isPrefix(target, path)) return { ok: false };
         }
         if (
           key === "pattern" &&
           typeof child === "string" &&
           child.length > LIMITS.schemaPatternChars
-        )
-          return false;
+        ) {
+          longPatterns.push(path);
+          continue;
+        }
       }
-      if (++nodes > LIMITS.schemaNodes) return false;
+      if (++nodes > LIMITS.schemaNodes) return { ok: false };
       const childKeywords = !(keyword && SCHEMA_MAPS.has(key));
       stack.push({ value: child, depth: depth + 1, path: [...path, key], keywords: childKeywords });
     }
   }
-  return true;
+  if (longPatterns.length === 0) return { ok: true, schema };
+  // The depth is within 32 by now, so the copy can't overflow.
+  const copy = structuredClone(schema);
+  for (const path of longPatterns) {
+    let holder = copy as Record<string, unknown>;
+    for (const segment of path) holder = holder[segment] as Record<string, unknown>;
+    delete holder.pattern;
+  }
+  return { ok: true, schema: copy };
 }

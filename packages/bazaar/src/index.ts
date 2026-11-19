@@ -5,7 +5,7 @@ export {
   isRejectReason,
   type BazaarRejectReason,
 } from "./limits.js";
-export { isSchemaWithinLimits } from "./schema.js";
+export { PaymentPayloadV2Schema, PaymentRequiredV2Schema } from "./service-metadata.js";
 export { canonicalizeUrl, sanitizeIconUrl, type CatalogKey, type ResourceType } from "./url.js";
 export {
   toExtensionResponses,

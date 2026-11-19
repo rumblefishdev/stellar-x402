@@ -1,0 +1,40 @@
+%%{init: {"themeVariables": {"fontSize": "20px"}, "flowchart": {"nodeSpacing": 40, "rankSpacing": 50}}}%%
+flowchart TB
+  buyer["Buyer / agent<br/>(x402 client)"]
+  seller["Seller<br/>(resource server)"]
+  host["Cloudflare tunnel<br/>x402-facilitator<br/>.sorobanscan.com"]
+
+  buyer -- "402 → signed auth entry" --> seller
+  seller -- "verify / settle" --> host
+  host -- "tunnel" --> fac
+
+  subgraph Server["Hetzner server (Docker Compose)"]
+    fac["facilitator<br/>/verify /settle /supported<br/>/discovery/resources"]
+    pg[("Postgres<br/>records, lease,<br/>budgets, catalog")]
+    pool["channel-account<br/>pool"]
+    bao["OpenBao Transit<br/>facilitator key"]
+    agent["CloudWatch<br/>agent"]
+    fac --> pg
+    fac --> pool
+    pool -- "sign" --> bao
+  end
+
+  subgraph Stellar["stellar:testnet"]
+    rpc["Stellar RPC"]
+    upto["UptoProxy contract<br/>(prototype)"]
+  end
+
+  subgraph AWS["AWS eu-central-1"]
+    cw["CloudWatch<br/>logs, metrics, alarms"]
+    watch["off-server check<br/>(Lambda)"]
+    slack["Slack alarm channel"]
+    watch -- "balance, protocol" --> cw
+    cw --> slack
+  end
+
+  pool -- "fee-bumped transaction" --> rpc
+  agent -- "logs, metrics" --> cw
+
+  %% Invisible links: Stellar and AWS sit under the server, so the diagram is tall, not wide.
+  bao ~~~ rpc
+  bao ~~~ watch

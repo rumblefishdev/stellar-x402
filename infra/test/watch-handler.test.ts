@@ -73,10 +73,58 @@ describe("createHandler", () => {
       rpcFor: () => rpc,
       publish: async () => {},
       log: () => {},
+      now: () => NOW,
     });
     const result = await handler({});
     expect(result).toBeUndefined();
     expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
+  test("runs the upstream section once a day, at 08:00 UTC, and the balance section every run", async () => {
+    const rpc = new FakeRpc({ [FEE]: 1n });
+    rpc.balances.set(FEE, 1_010_000_000n);
+    const fetched: string[] = [];
+    const published: string[] = [];
+    const handler = createHandler({
+      env,
+      rpcFor: () => rpc,
+      publish: async (input) => {
+        published.push(input.MetricData[0]!.MetricName);
+      },
+      log: () => {},
+      fetchText: async (url) => {
+        fetched.push(url);
+        return url.endsWith("upstream.ts") ? `"${"a".repeat(40)}"` : "same";
+      },
+    });
+    await handler({ scheduledTime: "2026-11-06T10:00:00Z" });
+    expect(fetched).toEqual([]);
+    await handler({ scheduledTime: "2026-11-06T08:00:00Z" });
+    expect(fetched).toHaveLength(9);
+    expect(published.sort()).toEqual([
+      "spendable_stroops",
+      "spendable_stroops",
+      "upstream_files_changed",
+    ]);
+  });
+
+  test("publishes the balance when the upstream section fails, then fails the run", async () => {
+    const rpc = new FakeRpc({ [FEE]: 1n });
+    rpc.balances.set(FEE, 1_010_000_000n);
+    const published: string[] = [];
+    const handler = createHandler({
+      env,
+      rpcFor: () => rpc,
+      publish: async (input) => {
+        published.push(input.MetricData[0]!.MetricName);
+      },
+      log: () => {},
+      fetchText: async () => {
+        throw new Error("github down");
+      },
+    });
+    await expect(handler({ scheduledTime: "2026-11-06T08:00:00Z" })).rejects.toThrow(/github down/);
+    expect(published).toEqual(["spendable_stroops"]);
   });
 
   test("runs the protocol section beside the balance, and one failing doesn't stop the other", async () => {

@@ -6,20 +6,23 @@ package. Status: skeleton, nothing implemented yet.
 
 ## Layout
 
-| Path                    | Contents                                                                 |
-| ----------------------- | ------------------------------------------------------------------------ |
-| `apps/facilitator`      | HTTP service: `/verify`, `/settle`, `/supported`, `/discovery/*`, `/mcp` |
-| `apps/mcp-local`        | stdio MCP server for paid calls with locally held keys                   |
-| `packages/bazaar`       | catalog validation, storage, ranking and search                          |
-| `packages/signer-pool`  | channel accounts: funding, sequence tracking, retry, fee bump            |
-| `packages/mcp`          | MCP tools (search, paid call) and error codes                            |
-| `packages/seller-fetch` | requests to seller URLs: public addresses only, no redirects, limits     |
-| `packages/config`       | shared network config and types                                          |
-| `contracts/upto-proxy`  | Soroban contract for the `upto` scheme                                   |
-| `examples/`             | a test seller (`http-api`) and a placeholder for a second example        |
-| `conformance/`          | wire-level conformance runs and report                                   |
-| `deploy/`               | per-network config and operational scripts                               |
-| `docs/`                 | ADRs, runbook, monitoring, threat model, security reviews                |
+| Path                    | Contents                                                                    |
+| ----------------------- | --------------------------------------------------------------------------- |
+| `apps/facilitator`      | HTTP service: `/verify`, `/settle`, `/supported`, `/health`, `/discovery/*` |
+| `apps/mcp-local`        | stdio MCP server: its tools (search, paid call), error codes and CLI        |
+| `apps/portal`           | the backend the API hub calls: a seller's pubnet API key                    |
+| `apps/portal-web`       | the page at `sorobanscan.com/api/x402-facilitator/` (in progress)           |
+| `packages/api-keys`     | the API key registry: a key's form and hash, owners, PostgreSQL store       |
+| `packages/bazaar`       | catalog validation, storage, ranking and search                             |
+| `packages/signer-pool`  | channel accounts: funding, sequence tracking, retry, fee bump               |
+| `packages/seller-fetch` | requests to seller URLs: public addresses only, no redirects, limits        |
+| `packages/config`       | shared network config and types                                             |
+| `packages/sdk/rust`     | Rust crate `stellar-x402`: a seller charges for a route (axum layer)        |
+| `contracts/upto-proxy`  | Soroban contract for the `upto` scheme                                      |
+| `examples/`             | a test seller (`http-api`) and a placeholder for a second example           |
+| `conformance/`          | wire-level conformance runs and report                                      |
+| `deploy/`               | per-network config and operational scripts                                  |
+| `docs/`                 | ADRs, runbook, monitoring, threat model, security reviews                   |
 
 ## Requirements
 

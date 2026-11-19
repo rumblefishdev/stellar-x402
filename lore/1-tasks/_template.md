@@ -3,6 +3,8 @@ id: "NNNN"
 title: "[Title]"
 type: FEATURE  # BUG | FEATURE | RESEARCH | REFACTOR | DOCS
 status: active  # active | blocked | completed | backlog
+# owner: a key of lore/0-session/team.yaml, set when the task is activated (lore/1-tasks/CLAUDE.md)
+owner:
 related_adr: []
 related_tasks: []
 tags: []

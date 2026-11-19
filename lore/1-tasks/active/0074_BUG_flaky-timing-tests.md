@@ -3,6 +3,7 @@ id: "0074"
 title: "Make the timing-sensitive CI tests pass on a slow runner"
 type: BUG
 status: active
+owner: karolkow
 related_adr: ["0011"]
 related_tasks: []
 tags: [ci, tests, priority-medium, effort-small]
@@ -34,9 +35,38 @@ Two test groups depend on wall-clock deadlines and fail on a slow CI runner for 
 to what they check. Each gets the cause measured and fixed in the test, not by longer timeouts in
 production code.
 
+## Premise
+
+A fresh review attacked the premise on 2026-11-10, given only the goal, the measured failures and
+the agreed constraints. Verdict: it holds with changes.
+
+- The flakiness is real and current. Over every CI run from 2026-11-02 to 2026-11-10 (495 runs),
+  49 failed; 36 of them on tests (40 failures, 17 distinct tests). About 3 in 4 are settlement
+  tests on the real PostgreSQL database with a real budget of 100–300 ms or a store grace of
+  20–200 ms, asserting one exact answer that holds only if the timer loses the race.
+- The fake clock is flaky itself: two failures on 2026-11-10 ran inside `onFakeClock`
+  (`settle.test.ts:635`, `:1550`). `vi.useFakeTimers` also fakes the database client's own timers.
+- The clock is half injected already: `now` and `sleep` are deps, but `bounded` and `within` use
+  the global `setTimeout` (`settle.ts:1230`, `:1246`). `src/timers.ts` has a `Scheduler` meant for
+  tests. Passing it to the settler, with today's timers as the default, would leave the database on
+  real time, drop `storeIdle`/`elapse`/`onFakeClock`, and change no behaviour. That reverses
+  decision 9 for one structure-only change.
+- The store grace is a second timer the budget rule does not cover: `markSuccessAnswered` is
+  bounded by it even with seconds of budget left (`settle.ts:578`).
+- Test budgets sit below what production allows (`SETTLE_BUDGET_MS` 1–80 s, `config.ts:227`).
+- Decisions 5–7 and 11 are coverage and design work beyond the goal "CI green without hiding
+  bugs".
+- To simplify first: fold what `review-2-answers.test.ts` and `review-2-twice.test.ts` cover that
+  `settle.test.ts` lacks, then delete both; warm ESLint in a `beforeAll` in
+  `testing-imports.test.ts`.
+
+Open for the owner: whether the settler takes a `Scheduler` before the test rewrite, whether test
+timers come from the test's clock instead of short real values, and whether decisions 5–7 and 11
+move to their own tasks.
+
 ## Context
 
-- `packages/mcp/test/pay.test.ts`, "does not send a payment whose signing outlasted the deadline":
+- `apps/mcp-local/test/pay.test.ts`, "does not send a payment whose signing outlasted the deadline":
   the check that the amount came back ran under the same 300 ms deadline as the late call, too
   short for a whole paid call on a slow runner (CI run 40497106902). Fix: PR #74.
 - `apps/facilitator/test/settle.test.ts`, block "settle budget (ADR 0011)": four different tests
@@ -81,7 +111,7 @@ production code.
   - `postgres.test.ts`: "rejects a hash another record's insert commits…" attached `.rejects`
     after `COMMIT`; "makes a takeover wait…" compared the arrival order of two connections, which
     says nothing about the database's. The check before `COMMIT` proves the wait.
-  - `packages/mcp/test/pay.test.ts`, "gives the whole call one deadline…": 150 ms of slack missed
+  - `apps/mcp-local/test/pay.test.ts`, "gives the whole call one deadline…": 150 ms of slack missed
     by 54 ms, and an uncut call took only 1.2 s. Scaled up: a 2 s deadline, 1.2 s answers, 300 ms
     of slack, still below the 2.4 s of an uncut call.
   - Not reproduced or explained: "waits on close() for a settlement answered pending…" (once in 5
@@ -149,6 +179,11 @@ production code.
   claim…" once (it answered `success`), "answers the checks' refusal of a reopen…" once,
   `review-2-answers.test.ts` A3 twice, and `testing-imports.test.ts` three times, each a 5 s test
   timeout.
+- CI on `develop`, the 23 runs from 2026-11-09 13:31 UTC to 2026-11-10 10:16 UTC: one failed
+  (run 42784591712), a test not in the list above: `settle.test.ts` "never lets a waiting repeat
+  end a claim reopened since it read the earlier one (0073 decision 19)". On a real 100 ms budget
+  it answered `settle_exact_stellar_timeout` where it expects `settlement_pending`, so it is the
+  same kind as the rest.
 
 - Trial 2026-11-09 of one writer per claim (decision 11), local branch `lore-0074-one-writer-trial`,
   `settle.ts` +151/−87: after the claim only the claim's own submission writes; `/settle` and
@@ -184,6 +219,7 @@ production code.
 | 9 | This task changes test files only; the settlement code stays as it is | grilling | matches ("fixed in the test") | not checked upstream | — | — |
 | 10 | A test helper refuses a real budget under 5 s unless the test sets the moment it ends; 5 s is an assumption, above the longest store delay measured under load (under 3 s) | grilling | beyond it | none found upstream | — | — |
 | 11 | After the tests, a one-day trial on its own branch of one writer for the settlement record after it is created; its measured cost decides whether the rebuild goes on | grilling | beyond it | not checked upstream | — | — |
+| 12 | When the budget ends while the store writes a hash, the hash the budget answer named is sent; any other, such as a rebuild's, is still refused. Found by the one-writer trial; fixed in its own PR (decision 7), amending 0009 decision 35 | grilling | beyond it | the hash is stored before the send and nothing cancels it once stored (checked in an open-source Stellar facilitator) | `settle.ts` `onSigned`, `outOfBudget` (#175) | `settle.test.ts`: sends the hash the budget answer named; refuses a rebuild's hash; store-outage send |
 
 ## Not yet decided
 

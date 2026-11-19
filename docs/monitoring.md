@@ -6,9 +6,9 @@ channel `#stellar-x402-bot`. Every alarm's description ends with `Runbook: docs/
 <alarm>`, which points at a section below.
 
 - The metrics, with their names, units and dimensions: [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts),
-  explained in task 0027's [G-metrics](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md).
+  explained in task 0027's [G-metrics](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md).
 - Every alarm, with its shape and missing-data rule:
-  [the alarm list](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md).
+  [the alarm list](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md).
 - The stacks and the alarm groups: [infra/README.md](../infra/README.md).
 
 This page has every alarm: a section for each one that is on, and the [alarms that are off](#the-alarms-that-are-off)
@@ -84,6 +84,8 @@ once, by the task that turns it on.
 | `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
 | `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
 | `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
+| `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
+| `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
 | `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
 | `wal-stale`          | `backups`       | 0026, as above                                                                         |
 
@@ -183,15 +185,20 @@ probe now and then, a lease that moves, or a tunnel that drops.
 ## The off-server check
 
 The Watch stack's Lambda, `x402-production-watch`, runs every 5 minutes in AWS, so it works while
-the server is down (ADR 0013). It has two sections, run at once:
+the server is down (ADR 0013). It has three sections, run at once:
 
 - **balance:** each served network's fee account through RPC with `checkFacilitatorBalance`,
   published as `spendable_stroops`;
 - **protocol:** Horizon's root for each network in `watch.protocol` (testnet and mainnet), served
-  or not, published as `protocol_version` and `protocol_supported_version`.
+  or not, published as `protocol_version` and `protocol_supported_version`;
+- **upstream:** once a day, the run at 08:00 UTC: the conformance gate's pin from this repo's
+  `develop`, and four upstream x402 files at that pin and on upstream `main` (the x402 spec, the
+  Stellar `exact` scheme, the suite's Stellar routes and the discovery spec, task 0029),
+  published as `upstream_files_changed`, the count that differ.
 
 A network a section can't read publishes nothing, so its alarms keep their state and
-`watch-errors` fires instead; the other section still publishes.
+`watch-errors` fires instead; the other sections still publish. The upstream section fails at most
+once a day, which `watch-errors` can't count on its own: `upstream-silent` covers it.
 
 Its log, and a run by hand:
 
@@ -201,8 +208,13 @@ aws lambda invoke --function-name x402-production-watch --payload '{}' \
   --cli-binary-format raw-in-base64-out --profile stellar --region eu-central-1 /dev/stdout
 ```
 
+A run by hand with `--payload '{"scheduledTime":"<today>T08:00:00Z"}'`, after 08:00 UTC, runs the
+upstream section too. Use today's date: every point is stamped with that time, and CloudWatch
+refuses a point more than 2 hours ahead, so a later date fails all three sections.
+
 Each run logs `watch_balance` with the spendable balance in stroops and `watch_protocol` with
-both versions, or `watch_section_failed` with the section, the network and the error.
+both versions, the 08:00 run `watch_upstream` with the pin and the files that differ, or
+`watch_section_failed` with the section, the network and the error.
 
 ### balance-low
 
@@ -252,6 +264,32 @@ The check hasn't run for 15 minutes, so the balance and protocol alarms see noth
 3. If the Watch stack was deleted or never deployed, deploy it (`make deploy-production-watch` in
    `infra/`). On a fresh account, deploy Watch before Alarms ([infra/README.md](../infra/README.md)).
 
+### upstream-changed
+
+Upstream x402 `main` changed, since the gate's pin, a file the gate's suite rests on or the
+discovery spec. Nothing breaks for us: the gate still runs the pinned suite. It means a seller or
+buyer on the newest x402 libraries may no longer match what we tested.
+
+1. Read the 08:00 run's `watch_upstream` line: `changed` lists the files.
+2. Read the change upstream: `https://github.com/x402-foundation/x402/commits/main/<file>`.
+3. If it changes what a payment or a listing looks like, bump `UPSTREAM_COMMIT` in
+   `conformance/src/upstream.ts` and rerun the gate (`conformance/README.md`); the next 08:00 run
+   publishes 0 and the alarm goes back to OK. If not, say in the channel why the pin stays.
+
+While it stays in ALARM, a later upstream change sends no new message: read the daily
+`watch_upstream` line until the pin moves.
+
+### upstream-silent
+
+The upstream section published nothing for two days, so `upstream-changed` sees nothing.
+
+1. Read the 08:00 runs for `watch_section_failed` with `section: upstream`: the error names the
+   file.
+2. `answered 404`: upstream moved or deleted a file, a change to read like `upstream-changed`;
+   update `FILES` in `infra/src/watch/upstream.ts` and deploy the Watch stack.
+3. `answered 429` or `5xx`, or a timeout: GitHub refused or was slow; it usually passes by itself.
+4. `expected one commit`: `conformance/src/upstream.ts` no longer holds exactly one commit hash.
+
 ## The facilitator
 
 The facilitator writes its metrics as EMF lines (#112) in the stream `facilitator` of
@@ -295,11 +333,26 @@ the `channelHeld` group is on.
 ### http-500
 
 The facilitator answered status 500 on some route: an error it doesn't classify, so it counts it
-as ours. A burst sends one message. A lease or drain 503 isn't counted.
+as ours. A burst sends one message. A 503 isn't counted: `verify-rpc-unavailable` covers
+`/verify`'s, and a lease or drain 503 on `/settle` is routine.
 
 1. In Logs Insights on `/x402/production/app`, the `level = "error"` lines around that time:
    `fields @timestamp, event, @message | filter level = "error" | sort @timestamp desc | limit 50`.
 2. Fix the cause, or classify the error so it gets its own answer.
+
+### verify-rpc-unavailable
+
+`/verify` answered 503 `rpc_unavailable`: no RPC URL gave upstream's verify a verdict, each one
+hung for 10 s or answered upstream's own `unexpected_verify_error`, or the facilitator's ledger read
+failed on every URL. Sellers can't check payments, so buyers
+are refused. A burst sends one message.
+
+1. In Logs Insights on `/x402/production/app`, the `verify_rpc_unavailable` and `rpc_exhausted`
+   lines around that time: `rpc_exhausted` names each `RPC_URLS[i]#fingerprint` and why it failed.
+2. If every URL timed out and `rpc-stalled` stays quiet, the ledger still moves: check Horizon
+   (`horizon.stellar.org` or `horizon-testnet.stellar.org`). Upstream's verify reads it on every
+   payment, with no timeout of its own, so a hung Horizon times out every RPC URL.
+3. Otherwise fix the endpoint, or reorder `RPC_URLS` ([runbook, Credentials](runbook.md#credentials)).
 
 ### rpc-stalled
 
@@ -432,8 +485,8 @@ final settlement, so budgets and breakers count low.
 
 ### queue-waiting
 
-Settle has waited for a free channel for 3 minutes, every sample: every channel is busy or out of
-the pool.
+Settle has waited for a free channel for 3 minutes, every sample: every channel is busy, out of
+the pool, or held back after a deploy (0090).
 
 1. Check [channel-quarantined](#channel-quarantined) and the traffic.
 2. If load holds them rather than faults, add channels ([runbook, OpenBao](runbook.md#openbao)).
@@ -659,79 +712,81 @@ of them run it. Mainnet was in this state on 2026-11-06 (29, Core supporting 30)
 
 Every metric in [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts), then
 the AWS metrics the alarms read. What each one measures and where it comes from is in
-[G-metrics](../lore/1-tasks/active/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
+[G-metrics](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
 set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Logs Insights or in
 the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
 lacks.
 
-| Metric                                  | Namespace          | Kind, unit     | Dimensions                                               | Alarms                                                                                                        |
-| --------------------------------------- | ------------------ | -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `settlement_outcomes_total`             | `x402-facilitator` | counter, Count | `network`, `result`                                      | none                                                                                                          |
-| `settlement_refused_after_verify_total` | `x402-facilitator` | counter, Count | `network`, `stage` (stage pool only)                     | [refused-after-verify](#refused-after-verify)                                                                 |
-| `settlement_record_failures_total`      | `x402-facilitator` | counter, Count | `network`                                                | [store-outage](#store-outage)                                                                                 |
-| `settlement_history_gone_total`         | `x402-facilitator` | counter, Count | `network`                                                | [history-gone](#history-gone)                                                                                 |
-| `settlement_landed_after_expired_total` | `x402-facilitator` | counter, Count | `network`                                                | [landed-after-expired](#landed-after-expired)                                                                 |
-| `settlement_rewrapped_total`            | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `signer_failures_total`                 | `x402-facilitator` | counter, Count | `network`                                                | [signer-failures](#signer-failures)                                                                           |
-| `pool_events_total`                     | `x402-facilitator` | counter, Count | `network`; `network`, `type` (type sequence-resync only) | [pool-health](#pool-health)                                                                                   |
-| `settlement_uncertain_total`            | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `settlement_submit_failures_total`      | `x402-facilitator` | counter, Count | `network`                                                | [submit-failed](#submit-failed)                                                                               |
-| `settlement_budget_exhausted_total`     | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `settlement_reconciled_total`           | `x402-facilitator` | counter, Count | `network`; `network`, `state` (state expired only)       | [settlement-expired](#settlement-expired)                                                                     |
-| `settlement_reopened_total`             | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `settlement_lease_fenced_total`         | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `settlement_hook_failures_total`        | `x402-facilitator` | counter, Count | `network`                                                | [hook-failures](#hook-failures)                                                                               |
-| `settlement_already_settled_total`      | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `settlement_nonce_reuse_total`          | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `lease_changes_total`                   | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `store_prune_failures_total`            | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
-| `catalog_internal_errors_total`         | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
-| `catalog_attempts_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
-| `catalog_upsert_failures_total`         | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
-| `catalog_attempt_write_failures_total`  | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
-| `catalog_route_template_ignored_total`  | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
-| `discovery_unknown_params_total`        | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
-| `spend_breaker_opened_total`            | `x402-facilitator` | counter, Count | `network`, `breaker`                                     | [breaker-opened](#breaker-opened)                                                                             |
-| `spend_budget_nearing_total`            | `x402-facilitator` | counter, Count | `network` (budget asset/other/global only)               | [budget-nearing](#budget-nearing)                                                                             |
-| `spend_failure_attributed_total`        | `x402-facilitator` | counter, Count | `network`, `fault` (fault ours only)                     | [failure-ours](#failure-ours)                                                                                 |
-| `spend_commit_unmatched_total`          | `x402-facilitator` | counter, Count | `network`                                                | [commit-unmatched](#commit-unmatched)                                                                         |
-| `spend_store_failures_total`            | `x402-facilitator` | counter, Count | `network`                                                | [store-outage](#store-outage)                                                                                 |
-| `spend_refused_total`                   | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `balance_read_failures_total`           | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
-| `http_requests_total`                   | `x402-facilitator` | counter, Count | `route`; `status` (status 500 only)                      | [http-500](#http-500)                                                                                         |
-| `settlement_sweeps_total`               | `x402-facilitator` | counter, Count | `network`, `outcome`                                     | [facilitator-silent](#facilitator-silent), [gauges-silent](#gauges-silent), [sweeps-stopped](#sweeps-stopped) |
-| `settlement_oldest_open_seconds`        | `x402-facilitator` | gauge, Seconds | `network`                                                | [gauges-silent](#gauges-silent), [pending](#pending)                                                          |
-| `pool_queued`                           | `x402-facilitator` | gauge, Count   | `network`                                                | [gauges-silent](#gauges-silent), [queue-waiting](#queue-waiting)                                              |
-| `pool_quarantined`                      | `x402-facilitator` | gauge, Count   | `network`                                                | [channel-quarantined](#channel-quarantined), [gauges-silent](#gauges-silent)                                  |
-| `rpc_on_fallback`                       | `x402-facilitator` | gauge, None    | `network`                                                | [gauges-silent](#gauges-silent), [rpc-on-fallback](#rpc-on-fallback)                                          |
-| `rpc_stalled_seconds`                   | `x402-facilitator` | gauge, Seconds | `network`                                                | [gauges-silent](#gauges-silent), [rpc-stalled](#rpc-stalled)                                                  |
-| `balance_reading_age_seconds`           | `x402-facilitator` | gauge, Seconds | `network`                                                | [balance-stale](#balance-stale), [gauges-silent](#gauges-silent)                                              |
-| `fee_charged_stroops`                   | `x402-facilitator` | counter, None  | `network`                                                | none                                                                                                          |
-| `channel_longest_hold_seconds`          | `x402-facilitator` | gauge, Seconds | `network`                                                | `channel-held` (off), [gauges-silent](#gauges-silent)                                                         |
-| `openbao_up`                            | `x402-host`        | gauge, None    | none                                                     | [openbao-down](#openbao-down)                                                                                 |
-| `wal_failing`                           | `x402-host`        | gauge, None    | none                                                     | `wal-failing` (off)                                                                                           |
-| `wal_last_archived_age_seconds`         | `x402-host`        | gauge, Seconds | none                                                     | `wal-stale` (off)                                                                                             |
-| `backup_age_seconds`                    | `x402-host`        | gauge, Seconds | none                                                     | `backup-age` (off)                                                                                            |
-| `snapshot_age_seconds`                  | `x402-host`        | gauge, Seconds | none                                                     | `snapshot-age` (off)                                                                                          |
-| `certificate_days_left`                 | `x402-host`        | gauge, None    | none                                                     | [certificate](#certificate)                                                                                   |
-| `host_probe_heartbeat`                  | `x402-host`        | gauge, None    | none                                                     | [probe-silent](#probe-silent)                                                                                 |
-| `credentials_age_seconds`               | `x402-host`        | gauge, Seconds | none                                                     | [credentials-stale](#credentials-stale)                                                                       |
-| `watchdog_restarts_total`               | `x402-host`        | counter, Count | none                                                     | [watchdog-restart](#watchdog-restart)                                                                         |
-| `facilitator_failures_total`            | `x402-host`        | counter, Count | none                                                     | [facilitator-failed](#facilitator-failed)                                                                     |
-| `mem_used_percent`                      | `x402-host`        | gauge, Percent | none                                                     | [memory](#memory), [telemetry-silent](#telemetry-silent)                                                      |
-| `disk_used_percent`                     | `x402-host`        | gauge, Percent | `path`                                                   | [audit-disk](#audit-disk), [disk](#disk), [telemetry-silent](#telemetry-silent)                               |
-| `ready`                                 | `x402-watch`       | gauge, None    | none                                                     | [uptime](#uptime), [uptime-flapping](#uptime-flapping)                                                        |
-| `spendable_stroops`                     | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
-| `protocol_version`                      | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
-| `protocol_supported_version`            | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |
-| `account_state_mismatches`              | `x402-watch`       | gauge, Count   | `network`                                                | `account-state` (off)                                                                                         |
-| `account_effects_unexpected`            | `x402-watch`       | counter, Count | `network`                                                | `account-effects` (off)                                                                                       |
-| `backup_secret_reads`                   | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |
-| `Errors`                                | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-errors](#watch-errors)                                                                                 |
-| `Invocations`                           | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-no-invocations](#watch-no-invocations)                                                                 |
-| `EMFParsingErrors`                      | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-parsing](#emf-parsing)                                                                                   |
-| `EMFValidationErrors`                   | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-validation](#emf-validation)                                                                             |
-| `IncomingBytes`                         | `AWS/Logs`         | AWS's own      | `LogGroupName`, each of our log groups                   | [log-volume](#log-volume)                                                                                     |
+| Metric                                      | Namespace          | Kind, unit     | Dimensions                                               | Alarms                                                                                                        |
+| ------------------------------------------- | ------------------ | -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `settlement_outcomes_total`                 | `x402-facilitator` | counter, Count | `network`, `result`                                      | none                                                                                                          |
+| `settlement_refused_after_verify_total`     | `x402-facilitator` | counter, Count | `network`, `stage` (stage pool only)                     | [refused-after-verify](#refused-after-verify)                                                                 |
+| `settlement_record_failures_total`          | `x402-facilitator` | counter, Count | `network`                                                | [store-outage](#store-outage)                                                                                 |
+| `settlement_history_gone_total`             | `x402-facilitator` | counter, Count | `network`                                                | [history-gone](#history-gone)                                                                                 |
+| `settlement_landed_after_expired_total`     | `x402-facilitator` | counter, Count | `network`                                                | [landed-after-expired](#landed-after-expired)                                                                 |
+| `settlement_rewrapped_total`                | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_nonce_consumed_elsewhere_total` | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `signer_failures_total`                     | `x402-facilitator` | counter, Count | `network`                                                | [signer-failures](#signer-failures)                                                                           |
+| `pool_events_total`                         | `x402-facilitator` | counter, Count | `network`; `network`, `type` (type sequence-resync only) | [pool-health](#pool-health)                                                                                   |
+| `settlement_uncertain_total`                | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_submit_failures_total`          | `x402-facilitator` | counter, Count | `network`                                                | [submit-failed](#submit-failed)                                                                               |
+| `settlement_budget_exhausted_total`         | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_reconciled_total`               | `x402-facilitator` | counter, Count | `network`; `network`, `state` (state expired only)       | [settlement-expired](#settlement-expired)                                                                     |
+| `settlement_reopened_total`                 | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_lease_fenced_total`             | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_hook_failures_total`            | `x402-facilitator` | counter, Count | `network`                                                | [hook-failures](#hook-failures)                                                                               |
+| `settlement_already_settled_total`          | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `settlement_nonce_reuse_total`              | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `lease_changes_total`                       | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `store_prune_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_internal_errors_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_attempts_total`                    | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_upsert_failures_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_attempt_write_failures_total`      | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `catalog_route_template_ignored_total`      | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `discovery_unknown_params_total`            | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `spend_breaker_opened_total`                | `x402-facilitator` | counter, Count | `network`, `breaker`                                     | [breaker-opened](#breaker-opened)                                                                             |
+| `spend_budget_nearing_total`                | `x402-facilitator` | counter, Count | `network` (budget asset/other/global only)               | [budget-nearing](#budget-nearing)                                                                             |
+| `spend_failure_attributed_total`            | `x402-facilitator` | counter, Count | `network`, `fault` (fault ours only)                     | [failure-ours](#failure-ours)                                                                                 |
+| `spend_commit_unmatched_total`              | `x402-facilitator` | counter, Count | `network`                                                | [commit-unmatched](#commit-unmatched)                                                                         |
+| `spend_store_failures_total`                | `x402-facilitator` | counter, Count | `network`                                                | [store-outage](#store-outage)                                                                                 |
+| `spend_refused_total`                       | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `balance_read_failures_total`               | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
+| `http_requests_total`                       | `x402-facilitator` | counter, Count | `route`; `status` (status 500 only)                      | [http-500](#http-500)                                                                                         |
+| `settlement_sweeps_total`                   | `x402-facilitator` | counter, Count | `network`, `outcome`                                     | [facilitator-silent](#facilitator-silent), [gauges-silent](#gauges-silent), [sweeps-stopped](#sweeps-stopped) |
+| `settlement_oldest_open_seconds`            | `x402-facilitator` | gauge, Seconds | `network`                                                | [gauges-silent](#gauges-silent), [pending](#pending)                                                          |
+| `pool_queued`                               | `x402-facilitator` | gauge, Count   | `network`                                                | [gauges-silent](#gauges-silent), [queue-waiting](#queue-waiting)                                              |
+| `pool_quarantined`                          | `x402-facilitator` | gauge, Count   | `network`                                                | [channel-quarantined](#channel-quarantined), [gauges-silent](#gauges-silent)                                  |
+| `rpc_on_fallback`                           | `x402-facilitator` | gauge, None    | `network`                                                | [gauges-silent](#gauges-silent), [rpc-on-fallback](#rpc-on-fallback)                                          |
+| `rpc_stalled_seconds`                       | `x402-facilitator` | gauge, Seconds | `network`                                                | [gauges-silent](#gauges-silent), [rpc-stalled](#rpc-stalled)                                                  |
+| `balance_reading_age_seconds`               | `x402-facilitator` | gauge, Seconds | `network`                                                | [balance-stale](#balance-stale), [gauges-silent](#gauges-silent)                                              |
+| `fee_charged_stroops`                       | `x402-facilitator` | counter, None  | `network`                                                | none                                                                                                          |
+| `channel_longest_hold_seconds`              | `x402-facilitator` | gauge, Seconds | `network`                                                | `channel-held` (off), [gauges-silent](#gauges-silent)                                                         |
+| `openbao_up`                                | `x402-host`        | gauge, None    | none                                                     | [openbao-down](#openbao-down)                                                                                 |
+| `wal_failing`                               | `x402-host`        | gauge, None    | none                                                     | `wal-failing` (off)                                                                                           |
+| `wal_last_archived_age_seconds`             | `x402-host`        | gauge, Seconds | none                                                     | `wal-stale` (off)                                                                                             |
+| `backup_age_seconds`                        | `x402-host`        | gauge, Seconds | none                                                     | `backup-age` (off)                                                                                            |
+| `snapshot_age_seconds`                      | `x402-host`        | gauge, Seconds | none                                                     | `snapshot-age` (off)                                                                                          |
+| `certificate_days_left`                     | `x402-host`        | gauge, None    | none                                                     | [certificate](#certificate)                                                                                   |
+| `host_probe_heartbeat`                      | `x402-host`        | gauge, None    | none                                                     | [probe-silent](#probe-silent)                                                                                 |
+| `credentials_age_seconds`                   | `x402-host`        | gauge, Seconds | none                                                     | [credentials-stale](#credentials-stale)                                                                       |
+| `watchdog_restarts_total`                   | `x402-host`        | counter, Count | none                                                     | [watchdog-restart](#watchdog-restart)                                                                         |
+| `facilitator_failures_total`                | `x402-host`        | counter, Count | none                                                     | [facilitator-failed](#facilitator-failed)                                                                     |
+| `mem_used_percent`                          | `x402-host`        | gauge, Percent | none                                                     | [memory](#memory), [telemetry-silent](#telemetry-silent)                                                      |
+| `disk_used_percent`                         | `x402-host`        | gauge, Percent | `path`                                                   | [audit-disk](#audit-disk), [disk](#disk), [telemetry-silent](#telemetry-silent)                               |
+| `ready`                                     | `x402-watch`       | gauge, None    | none                                                     | [uptime](#uptime), [uptime-flapping](#uptime-flapping)                                                        |
+| `spendable_stroops`                         | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
+| `protocol_version`                          | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
+| `protocol_supported_version`                | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |
+| `upstream_files_changed`                    | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed), [upstream-silent](#upstream-silent) (off)                              |
+| `account_state_mismatches`                  | `x402-watch`       | gauge, Count   | `network`                                                | `account-state` (off)                                                                                         |
+| `account_effects_unexpected`                | `x402-watch`       | counter, Count | `network`                                                | `account-effects` (off)                                                                                       |
+| `backup_secret_reads`                       | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |
+| `Errors`                                    | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-errors](#watch-errors)                                                                                 |
+| `Invocations`                               | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-no-invocations](#watch-no-invocations)                                                                 |
+| `EMFParsingErrors`                          | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-parsing](#emf-parsing)                                                                                   |
+| `EMFValidationErrors`                       | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-validation](#emf-validation)                                                                             |
+| `IncomingBytes`                             | `AWS/Logs`         | AWS's own      | `LogGroupName`, each of our log groups                   | [log-volume](#log-volume)                                                                                     |
 
 ## Drills
 

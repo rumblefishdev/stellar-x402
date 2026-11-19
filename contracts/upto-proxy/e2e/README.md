@@ -7,9 +7,10 @@ the x402 facilitator will use:
   auth entry. It never builds, signs or pays for a transaction.
 - **Facilitator:** checks the client's auth tree against the payment terms, swaps in the actual
   amount and submits through `SettlementSubmitter` from `packages/signer-pool`. The transaction
-  has a channel account as the transaction source, and the facilitator as the operation source
-  and fee-bump payer. The pool has refused this suite's source-account entry since `d85b041` and
-  sets no operation source since 0093, so the suite can't settle until 0015.
+  has a channel account as the transaction source and the facilitator as the fee-bump payer. The
+  receiver authorizer (here the facilitator's key) signs its own address-credential entry for the
+  call, actual amount included, as a resource server does in self-managed mode: the pool refuses
+  source-account entries (since `d85b041`) and sets no operation source (since 0093).
 - **Seller:** the recipient.
 
 ## Run
@@ -54,11 +55,12 @@ Stellar testnet) and rerun.
 For each token (Circle testnet USDC, a self-issued asset through its SAC, and the in-repo non-SAC
 SEP-41 `test-token`):
 
-- **Settles:** below the ceiling, at the ceiling and zero. Each one checks the balance deltas, the
-  `upto_settled` event, the used nonce, the leftover allowance and the transaction's fee payer
-  and sources.
-- **Rejected:** an amount over the ceiling, a replayed auth entry, a reused nonce with a new
-  signature, before `valid_after`, after the deadline, an allowance expiry past the contract's
+- **Settles:** below the ceiling, at the ceiling and zero; a reused payment ID under a new
+  signature; and a self-managed payment, where the seller's own account is the receiver authorizer
+  and the other facilitator relays it. Each one checks the balance deltas, the `upto_settled`
+  event, the leftover allowance and the transaction's fee payer and sources.
+- **Rejected:** an amount over the ceiling, a replayed auth entry, before `valid_after`, after the
+  deadline, an allowance expiry past the contract's
   17,280-ledger cap, and a different facilitator.
 - **Tampering:** changing the recipient, token, ceiling or nonce breaks the client's signature, and
   so does another facilitator rewriting the `facilitator` argument to itself.

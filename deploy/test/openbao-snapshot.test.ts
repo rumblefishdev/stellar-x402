@@ -2,7 +2,7 @@
 // the stamp 0027's snapshot-age alarm reads is touched only after a whole snapshot is archived,
 // pruned and compacted, and every failure leaves none (task 0026, ADR 0013). The decrypt through
 // x402-creds is the server's: X402_CREDS_DIR stands in for it with plain files.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -91,7 +91,11 @@ interface Run {
   calls: string[];
   borg: string[];
 }
-async function snapshot(env: Record<string, string> = {}, args: string[] = []): Promise<Run> {
+async function snapshot(
+  env: Record<string, string> = {},
+  args: string[] = [],
+  started: (pid: number) => void = () => {},
+): Promise<Run> {
   const child = spawn("bash", [SCRIPT, ...args], {
     env: {
       PATH: `${fakes}:${process.env["PATH"]}`,
@@ -105,6 +109,7 @@ async function snapshot(env: Record<string, string> = {}, args: string[] = []): 
       ...env,
     },
   });
+  started(child.pid!);
   let stderr = "";
   child.stderr.on("data", (b) => (stderr += b));
   const status = await new Promise<number | null>((ok) => child.on("close", ok));
@@ -114,7 +119,7 @@ async function snapshot(env: Record<string, string> = {}, args: string[] = []): 
 const verbs = (r: Run) => r.borg.map((c) => c.split(" ")[1]);
 
 describe("x402-openbao-snapshot", () => {
-  test("archives a whole snapshot, prunes to 14 days, compacts, then touches the stamp", async () => {
+  test("archives a whole snapshot, keeps 14 daily archives, compacts, then touches the stamp", async () => {
     const r = await snapshot();
     expect(r.status, r.stderr).toBe(0);
     expect(verbs(r)).toEqual(["create", "prune", "compact"]);
@@ -208,17 +213,59 @@ describe("x402-openbao-snapshot", () => {
     expect(existsSync(stamp)).toBe(false);
   });
 
-  test("waits for another run's lock, and gives up when it isn't freed", async () => {
+  /** Another run holding the lock: resolves once it has it, however slow the machine is. */
+  async function holdLock() {
     const holder = spawn("flock", [lock, "-c", "read _"], { stdio: ["pipe", "ignore", "ignore"] });
-    await new Promise((ok) => setTimeout(ok, 200));
+    const closed = new Promise((ok) => holder.on("close", ok));
+    // flock -n exits 1 when the lock is held; any other end (no flock at all) isn't "held".
+    const taken = () => spawnSync("flock", ["-n", lock, "true"]).status === 1;
+    for (let waited = 0; !taken() && waited < 5000; waited += 25)
+      await new Promise((ok) => setTimeout(ok, 25));
+    const release = async () => {
+      holder.stdin.end();
+      await closed;
+    };
+    if (!taken()) {
+      await release();
+      throw new Error("the holder never took the lock");
+    }
+    return { release };
+  }
+
+  test("gives up at once when another run holds the lock", async () => {
+    const holder = await holdLock();
     try {
       const r = await snapshot({ X402_LOCK_WAIT: "0" });
       expect(r.status).not.toBe(0);
       expect(r.stderr).toContain("another snapshot run holds");
       expect(r.calls).toEqual([]);
     } finally {
-      holder.stdin.end();
-      await new Promise((ok) => holder.on("close", ok));
+      await holder.release();
     }
+  });
+
+  test("waits for another run's lock, and runs once it is freed", async () => {
+    const holder = await holdLock();
+    let script = 0;
+    const run = snapshot({ X402_LOCK_WAIT: "30" }, [], (pid) => (script = pid));
+    // The lock is freed only once the script is seen waiting for it, in its own `flock`: a
+    // release on a timer would let a slow script find the lock free and pass without a wait.
+    const waiting = () => spawnSync("pgrep", ["-P", String(script), "-x", "flock"]).status === 0;
+    const sawItWait = await (async () => {
+      try {
+        for (let waited = 0; waited < 5000; waited += 25) {
+          if (waiting()) return true;
+          await new Promise((ok) => setTimeout(ok, 25));
+        }
+        return waiting();
+      } finally {
+        await holder.release();
+      }
+    })();
+    const r = await run;
+    expect(sawItWait).toBe(true);
+    expect(r.stderr).not.toContain("another snapshot run holds");
+    expect(r.status).toBe(0);
+    expect(existsSync(stamp)).toBe(true);
   });
 });

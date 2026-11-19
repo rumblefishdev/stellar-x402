@@ -1,4 +1,4 @@
-import type { FallbackRpc } from "@stellar-x402/signer-pool";
+import { RpcUnavailableError, type FallbackRpc } from "@stellar-x402/signer-pool";
 import type { VerifyResponse } from "@x402/core/types";
 import { UNEXPECTED_VERIFY_ERROR, withTimeout, type UpstreamVerifier } from "./verify.js";
 
@@ -29,8 +29,8 @@ export interface UpstreamFailoverOptions {
  * shared active endpoint, and the same call is tried on the next ones when it throws, takes longer
  * than `timeoutMs`, or answers `unexpected_verify_error` (upstream's answer to its own exceptions,
  * such as a failed RPC call). The first endpoint with any other answer, valid or not, answers.
- * If every endpoint fails, the first failure is the result: the error is thrown, or the
- * `unexpected_verify_error` answer returned, for `createVerifier`'s 500.
+ * If every endpoint fails, none judged the payment, whatever failed: the call throws
+ * `RpcUnavailableError`, which `/verify` answers 503, with the first failure as its `cause`.
  *
  * Only a throw or a timeout is reported to the shared state, and moves every caller: a hang is the
  * outage that costs each caller its own timeout. `unexpected_verify_error` moves nothing, since one
@@ -95,10 +95,10 @@ export function failoverUpstream(
         return answer;
       }
       notify(() => opts.onExhausted?.(tried));
-      const first = tried[0]!;
-      if ("error" in first.failure) throw first.failure.error;
-      if (trace) trace.rpc = first.name;
-      return first.failure.answer;
+      const first = tried[0]!.failure;
+      throw new RpcUnavailableError("upstream verify got no verdict from any RPC URL", {
+        cause: "error" in first ? first.error : first.answer,
+      });
     },
   };
 }

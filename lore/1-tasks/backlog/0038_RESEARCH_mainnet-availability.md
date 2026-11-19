@@ -65,7 +65,10 @@ remove, and how deploys stay safe once every one of them reaches mainnet.
   - a second server running the second channel set.
 - **Edge rate limiting:** the in-app limits (AD-11, AD-18) only act once a request has reached
   the server. Cloudflare can stop a flood earlier, but the Free plan has one rate-limit rule for
-  the whole `sorobanscan.com` zone, shared with sorobanscan and the Prices API.
+  the whole `sorobanscan.com` zone, shared with sorobanscan and the Prices API. From 0105: the
+  flood of pubnet requests without a valid key is left to this rule (threat model, "Requests
+  without a valid key, in bulk"), since the app counts a refused request nowhere. Decide whether
+  that one rule can be the facilitator's, or whether pubnet needs a plan with more.
 - **Cloudflare's plan:** the Free plan has no uptime SLA. Business (about $200 a month, for the
   whole zone) has one. Decide whether mainnet needs it, weighed against the one server, which
   is the larger risk.

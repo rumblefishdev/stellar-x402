@@ -1,7 +1,9 @@
 import { STATUS_CODES } from "node:http";
-import { PaymentPayloadV2Schema, PaymentRequirementsV2Schema } from "@x402/core/schemas";
-import type { SupportedResponse, VerifyRequest } from "@x402/core/types";
+import { PaymentRequirementsV2Schema } from "@x402/core/schemas";
+import type { SupportedResponse, VerifyRequest, VerifyResponse } from "@x402/core/types";
+import { PaymentPayloadV2Schema } from "@stellar-x402/bazaar";
 import { byName } from "@stellar-x402/metrics-catalog";
+import { RpcUnavailableError } from "@stellar-x402/signer-pool";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import type { SignerState } from "../adapters/openbao-signer.js";
 import type { Config } from "../config.js";
@@ -13,11 +15,17 @@ import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
 import type { Settle } from "../settlement/settle.js";
 import { TRUSTLINE_REASONS } from "../settlement/trustline.js";
-import { FEE_EXCEEDS_MAXIMUM, type Verify, type VerifyTrace } from "../settlement/verify.js";
+import {
+  FEE_EXCEEDS_MAXIMUM,
+  UpstreamTimeoutError,
+  type Verify,
+  type VerifyTrace,
+} from "../settlement/verify.js";
 import type { BalanceReader } from "../spend/balance-floor.js";
+import { admit, callerOf } from "./admit.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
-import { rateLimit } from "./rate-limit.js";
+import { rateLimit, rateLimiter, type RateLimit } from "./rate-limit.js";
 
 /** What the composition root hands to the HTTP adapter. Lanes add their services here. */
 export interface AppDeps {
@@ -56,6 +64,13 @@ export interface AppDeps {
 
 /** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
 export const NO_LEASE_RETRY_AFTER_S = 5;
+
+/**
+ * How long a seller should wait before it sends the same `/verify` again after the RPC gave no
+ * answer: one ledger. No measurement of how fast an RPC recovers sets it; it only asks a seller not
+ * to retry at once.
+ */
+export const RPC_UNAVAILABLE_RETRY_AFTER_S = 5;
 
 /**
  * The refusals whose message the `verified` and `settled` logs carry: it names the account and the
@@ -105,11 +120,13 @@ function refusedBody(value: unknown, max: number): boolean {
 }
 
 /**
- * An x402 v2 verify or settle request (AD-13), checked with `@x402/core`'s schemas. The objects
- * pass on as the client sent them; `undefined` means a 400.
+ * An x402 v2 verify or settle request (AD-13), checked with x402's schemas (the payment's through
+ * `@stellar-x402/bazaar`, lore 0130). The objects pass on as the client sent them; `undefined`
+ * means a 400.
  *
  * The schema takes any non-empty `amount`, and upstream's `BigInt(amount)` throws on anything but
- * an integer, which it reports as `unexpected_verify_error`: our 500. So `amount` must be digits.
+ * an integer, which it reports as `unexpected_verify_error`: no verdict, a 503 that a repeat can't
+ * change. So `amount` must be digits.
  * A body nested deeper than {@link MAX_BODY_DEPTH} is a 400 too, before anything recurses on it,
  * and so is a NUL or a lone surrogate anywhere in it.
  */
@@ -172,8 +189,10 @@ function countRequests(metrics: ProcessMetrics): RequestHandler {
 
 /**
  * The inbound HTTP adapter (AD-13). There is a body size limit and no CORS anywhere (spine "HTTP
- * hardening"). `/verify`, `/settle` and `/discovery/*` each have a rate limit (AD-11), applied
- * before the body is read, so a malformed or oversized request counts too; `/supported` has none.
+ * hardening"). `/verify`, `/settle` and `/discovery/*` each have a rate limit (AD-11), and a
+ * malformed or oversized request counts too; `/supported` has none. `/verify` and `/settle` read
+ * the body first, since it names the network, and the network decides whether the request needs
+ * an API key and what it is counted under (`admit`, 0105).
  */
 export function createApp({
   config,
@@ -193,16 +212,22 @@ export function createApp({
   app.disable("x-powered-by");
   // Before everything else, so every answer is counted (process-scoped: no `network`).
   app.use(countRequests(metrics));
-  const limit = (route: string, budget: number) =>
-    rateLimit({
-      route,
-      limit: budget,
-      windowMs: config.http.rateLimit.windowMs,
-      clientIp: config.http.clientIp,
-      store: stores.rateLimits,
-      logger,
-    });
+  const budget = (route: string, limit: number): RateLimit => ({
+    route,
+    limit,
+    windowMs: config.http.rateLimit.windowMs,
+    clientIp: config.http.clientIp,
+    store: stores.rateLimits,
+    logger,
+  });
   const json = express.json({ limit: config.http.bodyLimitBytes });
+  /** A payment route's way in: its body, its API key where the network requires one, its budget. */
+  const admitted = (route: "verify" | "settle") =>
+    admit({
+      json,
+      limiter: rateLimiter(budget(route, config.http.rateLimit[route])),
+      apiKeys: stores.apiKeys,
+    });
   // First on `/settle`, so a process that is stopping or doesn't hold the lease answers at once,
   // with no store call and without reading the body (0025 decisions 1, 4, 8).
   const leased: RequestHandler = (_req, res, next) => {
@@ -215,17 +240,36 @@ export function createApp({
     next();
   };
 
-  // A verify outcome, valid or not, is a 200 with an x402 body; a thrown error is a 500.
-  app.post("/verify", limit("verify", config.http.rateLimit.verify), json, async (req, res) => {
+  // A verify outcome, valid or not, is a 200 with an x402 body. No verdict from any RPC URL, hung or
+  // upstream's own `unexpected_verify_error`, is a 503: the payment wasn't judged, so the same
+  // request may come again. Any other thrown error is a 500.
+  app.post("/verify", admitted("verify"), async (req, res) => {
     const request = parsePaymentRequest(req.body);
     if (!request) {
       res.status(400).json({ error: code(400) });
       return;
     }
     const trace: VerifyTrace = {};
-    const response = await verify(request.paymentPayload, request.paymentRequirements, trace);
+    let response: VerifyResponse;
+    try {
+      response = await verify(request.paymentPayload, request.paymentRequirements, trace);
+    } catch (error) {
+      // `FallbackRpc` turns its own timeouts into `RpcUnavailableError` once every URL failed.
+      const noAnswer =
+        error instanceof UpstreamTimeoutError || error instanceof RpcUnavailableError;
+      if (!noAnswer) throw error;
+      logger.warn("verify_rpc_unavailable", {
+        network: request.paymentRequirements.network,
+        error,
+      });
+      res.setHeader("Retry-After", `${RPC_UNAVAILABLE_RETRY_AFTER_S}`);
+      res.status(503).json({ error: "rpc_unavailable" });
+      return;
+    }
     logger.info("verified", {
       network: request.paymentRequirements.network,
+      // The API key's owner, where the network requires a key (0105).
+      caller: callerOf(res)?.owner,
       isValid: response.isValid,
       invalidReason: response.invalidReason,
       // Our own code next to upstream's, e.g. for a channel account.
@@ -238,57 +282,52 @@ export function createApp({
     res.json(response);
   });
   // Like `/verify`: any settle outcome is a 200 with an x402 body (AD-6), an RPC that gave the checks
-  // no answer included. A thrown error, such as upstream's `unexpected_verify_error` or the store
-  // down before the claim, is a 500.
-  app.post(
-    "/settle",
-    leased,
-    limit("settle", config.http.rateLimit.settle),
-    json,
-    async (req, res) => {
-      const request = parsePaymentRequest(req.body);
-      if (!request) {
-        res.status(400).json({ error: code(400) });
-        return;
+  // no verdict included. A thrown error, such as the store down before the claim, is a 500.
+  app.post("/settle", leased, admitted("settle"), async (req, res) => {
+    const request = parsePaymentRequest(req.body);
+    if (!request) {
+      res.status(400).json({ error: code(400) });
+      return;
+    }
+    // A client that left before the answer: a repeat stops waiting, and no success is used up.
+    const left = new AbortController();
+    res.once("close", () => {
+      if (!res.writableEnded) left.abort();
+    });
+    const { response, record, afterResponse, key, replay } = await settle(
+      request.paymentPayload,
+      request.paymentRequirements,
+      left.signal,
+      callerOf(res),
+    );
+    // Every `success` answer carries the header (a success is answered once, AD-6); it never
+    // changes the body.
+    if (response.success && record) {
+      try {
+        const header = extensionResponses(record);
+        if (header) res.setHeader(EXTENSION_RESPONSES_HEADER, encodeExtensionResponses(header));
+      } catch (error) {
+        logger.error("extension_responses_failed", { settlementKey: record.key, error });
       }
-      // A client that left before the answer: a repeat stops waiting, and no success is used up.
-      const left = new AbortController();
-      res.once("close", () => {
-        if (!res.writableEnded) left.abort();
-      });
-      const { response, record, afterResponse, key, replay } = await settle(
-        request.paymentPayload,
-        request.paymentRequirements,
-        left.signal,
-      );
-      // Every `success` answer carries the header (a success is answered once, AD-6); it never
-      // changes the body.
-      if (response.success && record) {
-        try {
-          const header = extensionResponses(record);
-          if (header) res.setHeader(EXTENSION_RESPONSES_HEADER, encodeExtensionResponses(header));
-        } catch (error) {
-          logger.error("extension_responses_failed", { settlementKey: record.key, error });
-        }
-      }
-      logger.info("settled", {
-        network: response.network,
-        settlementKey: key,
-        replay: replay ?? false,
-        success: response.success,
-        errorReason: response.errorReason,
-        message: LOGGED_MESSAGES.has(response.errorReason) ? response.errorMessage : undefined,
-        payer: response.payer,
-        transaction: response.transaction || undefined,
-      });
-      res.json(response);
-      // `onSuccess` after the response; a client that already left has closed it (0031).
-      if (afterResponse) {
-        if (res.closed) afterResponse();
-        else res.once("close", afterResponse);
-      }
-    },
-  );
+    }
+    logger.info("settled", {
+      network: response.network,
+      caller: callerOf(res)?.owner,
+      settlementKey: key,
+      replay: replay ?? false,
+      success: response.success,
+      errorReason: response.errorReason,
+      message: LOGGED_MESSAGES.has(response.errorReason) ? response.errorMessage : undefined,
+      payer: response.payer,
+      transaction: response.transaction || undefined,
+    });
+    res.json(response);
+    // `onSuccess` after the response; a client that already left has closed it (0031).
+    if (afterResponse) {
+      if (res.closed) afterResponse();
+      else res.once("close", afterResponse);
+    }
+  });
   app.get("/supported", (_req, res) => {
     res.json(supported);
   });
@@ -307,7 +346,7 @@ export function createApp({
       commit: config.gitCommit,
     });
   });
-  app.use("/discovery", limit("discovery", config.http.rateLimit.discovery));
+  app.use("/discovery", rateLimit(budget("discovery", config.http.rateLimit.discovery)));
   app.get(
     "/discovery/resources",
     discoveryResources(stores.catalog, logger, metrics, config.network),

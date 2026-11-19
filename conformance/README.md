@@ -4,6 +4,9 @@ The Tranche 1 gate ([ADR 0009](../docs/adr/0009-conformance-gate-harness.md)): t
 x402 end-to-end suite from `x402-foundation/x402`, at a pinned commit, runs every Stellar `exact`
 scenario against a facilitator, and the run is saved with the transaction hashes.
 
+The latest run against our deployed facilitator, with what it shows and what it doesn't:
+[REPORT.md](REPORT.md).
+
 ## Run
 
 ```sh
@@ -66,8 +69,10 @@ the fees.
 ## Results
 
 One folder per kind of facilitator, overwritten by each run, so its history is in git:
-`results/testnet-hosted/` for a deployed one, `results/testnet-local/` (ignored by git) for one on
-this machine. Each holds two files:
+`results/testnet-hosted/` for our deployed facilitator, `results/testnet-local/` (ignored by git)
+for any other: this machine, a dry run against x402.org, a mistyped URL. Only the hosts in
+`HOSTED_FACILITATORS` (`src/verdict.ts`) count as deployed, since a run there replaces the run of
+record. Each holds two files:
 
 - `suite.json`: the suite's own `--output-json` file, copied byte for byte. It is what the
   unmodified x402 tests say: one row per scenario with its transaction hash.

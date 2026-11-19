@@ -187,7 +187,11 @@ describe("the units' output", () => {
     "x402-tunnel@.service": "cloudflared",
     "x402-openbao.service": "openbao",
     "x402-deploy@.service": "deploy",
+    "x402-portal@.service": "portal",
+    "x402-portal-deploy@.service": "portal-deploy",
   };
+  /** The oneshots that start no container of their own. */
+  const deploys = ["x402-deploy@.service", "x402-portal-deploy@.service"];
 
   test("every file a unit appends to is a row, and every unit's row has its unit", () => {
     const rows = new Set(FILES.map(absolute));
@@ -211,7 +215,7 @@ describe("the units' output", () => {
   });
 
   test("every docker compose up writes raw lines", () => {
-    for (const file of Object.keys(writers).filter((f) => f !== "x402-deploy@.service")) {
+    for (const file of Object.keys(writers).filter((f) => !deploys.includes(f))) {
       const ups = settings(unit(file), "ExecStart").filter((e) => / up /.test(e));
       expect(ups, file).toHaveLength(1);
       expect(ups[0], file).toMatch(/ up --no-log-prefix --no-color /);
@@ -263,12 +267,15 @@ describe("the units' output", () => {
   });
 
   // Under set -e, a failed echo into a full disk ended the deploy before its rollback.
-  test("the deploy prints only through say, which ignores a failed write", () => {
-    const script = read("libexec/x402-deploy");
-    expect(script).toContain(`say() { printf '%s\\n' "$*" || :; }`);
-    expect(script).not.toMatch(/^\s*(echo|printf '%s\\n' "\$\w+" >&2)\b/m);
-    expect(script.match(/\becho\b/g)).toBeNull();
-  });
+  test.each(["x402-deploy", "x402-portal-deploy"])(
+    "%s prints only through say, which ignores a failed write",
+    (name) => {
+      const script = read(`libexec/${name}`);
+      expect(script).toContain(`say() { printf '%s\\n' "$*" || :; }`);
+      expect(script).not.toMatch(/^\s*(echo|printf '%s\\n' "\$\w+" >&2)\b/m);
+      expect(script.match(/\becho\b/g)).toBeNull();
+    },
+  );
 });
 
 // OpenBao's snapshot job against the probe, the playbook and ADR 0013 (task 0026).
@@ -300,6 +307,39 @@ describe("the snapshot job", () => {
     const service = unit("x402-openbao-snapshot.service");
     expect(settings(service, "Restart")).toEqual(["on-failure"]);
     expect(settings(service, "RestartSec")).toEqual(["20min"]);
+  });
+
+  // Without the limit a failure that lasts retried every 20 minutes all day, each try a login to
+  // OpenBao and an SSH session to the shared box (0123, D2).
+  test("stops after the run and two retries, until the next night's timer", () => {
+    const service = unit("x402-openbao-snapshot.service");
+    const inUnit = service.slice(service.indexOf("[Unit]"), service.indexOf("[Service]"));
+    expect(settings(inUnit, "StartLimitIntervalSec")).toEqual(["3h"]);
+    expect(settings(inUnit, "StartLimitBurst")).toEqual(["3"]);
+    // The limit counts starts inside the window, from a burst's first. A window shorter than
+    // three whole tries lets the first start leave it before the fourth, and the retries never
+    // stop; one of a day or more refuses every next night's run after a failed one.
+    const minutes = (key: string, unset?: number) => {
+      const value = settings(service, key)[0];
+      if (value === undefined && unset !== undefined) return unset;
+      const [, n, unitOfTime] = /^(\d+)(h|min|s)$/.exec(value ?? "") ?? [];
+      expect(unitOfTime, key).toBeDefined();
+      return Number(n) * ({ h: 60, min: 1, s: 1 / 60 }[unitOfTime as "h" | "min" | "s"] ?? 0);
+    };
+    const tries = Number(settings(inUnit, "StartLimitBurst")[0]);
+    // A try that reaches its timeout is stopped, which takes up to TimeoutStopSec (systemd's 90 s
+    // when the unit sets none), before the wait for the next one starts.
+    const wholeTry =
+      minutes("TimeoutStartSec") + minutes("TimeoutStopSec", 1.5) + minutes("RestartSec");
+    expect(minutes("StartLimitIntervalSec")).toBeGreaterThan(tries * wholeTry);
+    expect(minutes("StartLimitIntervalSec")).toBeLessThan(24 * 60);
+  });
+
+  // x402-creds decrypts into a dot file and renames it: a decrypt that stops between the two
+  // leaves the dot file, which the script's own test can't reach (it runs on plain files).
+  test("cleans up a half-decrypted credential too", () => {
+    expect(read("libexec/x402-creds")).toContain('mv -f "$dst/.$name" "$dst/$name"');
+    expect(script).toContain('rm -f "$run/$c" "$run/.$c"');
   });
 
   test("fails on any step, and keeps both AppRole IDs off the command line", () => {

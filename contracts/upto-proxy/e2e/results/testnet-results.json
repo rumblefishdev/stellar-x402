@@ -1,19 +1,19 @@
 {
-  "runAt": "2026-10-09T13:03:30.050Z",
+  "runAt": "2026-11-12T20:58:06.282Z",
   "network": "stellar:testnet",
   "rpc": "https://soroban-testnet.stellar.org",
   "proxy": {
-    "contractId": "CAL7SBTOECJ6HXXO3ST43LM2HJJFSZ3ZDEEZBIWHJPB7DRF5MXS5V2VC",
-    "wasmHash": "00a06b1683557a60d2822bbab4e1fee9012e9b521d52b22a8ab22fd47cd4b79c"
+    "contractId": "CDPHI4JYNSWNAQFXUAZAWTBUBYLZZRWFU6F6EJIHLSTAL6MJWXOVEA2X",
+    "wasmHash": "a3d7bd0a4d8f24002b2a07162b32c36abe4620bc60d3550262da05b4ef52f666"
   },
   "testToken": {
-    "contractId": "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
-    "wasmHash": "937c707945189efa62e880973214a793208d1b83e88d1c10e25186ddfdcb5973"
+    "contractId": "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+    "wasmHash": "d3108f813b0d5f0cb6c400626d7f4d0cf02bacd267afa8b6f9ba7b7f7aa83d31"
   },
   "tokens": {
     "usdc": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
     "sac": "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
-    "sep41": "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO"
+    "sep41": "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53"
   },
   "tokensRun": [
     "usdc",
@@ -33,7 +33,7 @@
       "GBIGZKHVFZY4XCJPVKP6GFX6QJ2GNQOBVSIKPSKPLVGKBZVBQQ6SMKL6"
     ]
   },
-  "passed": 58,
+  "passed": 61,
   "failed": 0,
   "scenarios": [
     {
@@ -44,18 +44,17 @@
       "pass": true,
       "transactions": [
         {
-          "hash": "056bf5bbba2370c487b1af37696c7111a9108bef1a02baa9e17bbaee491a1afc",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/056bf5bbba2370c487b1af37696c7111a9108bef1a02baa9e17bbaee491a1afc",
-          "ledger": 5105444,
-          "feeChargedStroops": "43982",
-          "resourceFeeStroops": "55205",
-          "instructions": 1576277,
-          "diskReadBytes": 376,
-          "writeBytes": 776,
-          "envelopeBytes": 2500,
+          "hash": "342aefdebb78faec800df0b83ee01538ce946bc98da6fd498dc5ef0d954e6a86",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/342aefdebb78faec800df0b83ee01538ce946bc98da6fd498dc5ef0d954e6a86",
+          "ledger": 5698651,
+          "feeChargedStroops": "23027",
+          "resourceFeeStroops": "28556",
+          "instructions": 2737579,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
@@ -66,45 +65,45 @@
               ],
               "data": {
                 "actual_amount": "250000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    5,
-                    14,
-                    196,
-                    206,
-                    197,
-                    179,
-                    62,
-                    217,
-                    142,
-                    186,
-                    31,
-                    61,
-                    201,
-                    147,
-                    4,
-                    184,
-                    94,
-                    50,
-                    74,
-                    108,
-                    110,
-                    89,
-                    93,
-                    177,
-                    241,
-                    98,
+                    140,
+                    42,
+                    224,
+                    231,
+                    79,
+                    52,
+                    120,
+                    72,
                     85,
-                    65,
-                    115,
-                    57,
-                    2,
-                    156
+                    121,
+                    158,
+                    121,
+                    95,
+                    212,
+                    32,
+                    161,
+                    239,
+                    169,
+                    165,
+                    155,
+                    183,
+                    129,
+                    236,
+                    90,
+                    48,
+                    237,
+                    154,
+                    193,
+                    161,
+                    204,
+                    220,
+                    34
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -120,18 +119,17 @@
       "pass": true,
       "transactions": [
         {
-          "hash": "d1cf109499ec20ccdff6f23f5528a643e891eb59f3a281b88dba859dc70800b5",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/d1cf109499ec20ccdff6f23f5528a643e891eb59f3a281b88dba859dc70800b5",
-          "ledger": 5105445,
-          "feeChargedStroops": "40944",
-          "resourceFeeStroops": "51708",
-          "instructions": 1606530,
-          "diskReadBytes": 376,
-          "writeBytes": 776,
-          "envelopeBytes": 2500,
+          "hash": "5c2a8e282520e24516fa303196056b009378562eafd838e1a08de78f9431fdfa",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/5c2a8e282520e24516fa303196056b009378562eafd838e1a08de78f9431fdfa",
+          "ledger": 5698652,
+          "feeChargedStroops": "23015",
+          "resourceFeeStroops": "28542",
+          "instructions": 2737579,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
@@ -142,45 +140,45 @@
               ],
               "data": {
                 "actual_amount": "1000000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    26,
-                    235,
-                    150,
-                    179,
-                    146,
-                    252,
-                    210,
-                    136,
-                    249,
-                    84,
-                    202,
-                    129,
-                    68,
-                    247,
-                    241,
-                    123,
-                    197,
-                    140,
-                    53,
-                    92,
+                    63,
+                    78,
+                    184,
+                    78,
+                    49,
+                    103,
+                    19,
+                    144,
+                    176,
+                    72,
+                    182,
+                    94,
+                    135,
                     2,
+                    200,
+                    37,
+                    24,
+                    135,
+                    83,
+                    100,
+                    221,
+                    109,
+                    88,
                     99,
-                    162,
-                    79,
-                    234,
-                    16,
-                    120,
-                    57,
-                    203,
-                    39,
-                    84,
-                    107
+                    98,
+                    221,
+                    91,
+                    122,
+                    53,
+                    124,
+                    239,
+                    231
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -191,23 +189,22 @@
     {
       "token": "usdc",
       "scenario": "settles zero",
-      "expected": "success, no transfer, event and nonce recorded",
+      "expected": "success, no transfer, event emitted",
       "outcome": "success",
       "pass": true,
       "transactions": [
         {
-          "hash": "fd6dd16e477feea8e2872fad6b843e7eecf2a0662222973f556782d0cce6d2b8",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/fd6dd16e477feea8e2872fad6b843e7eecf2a0662222973f556782d0cce6d2b8",
-          "ledger": 5105446,
-          "feeChargedStroops": "30426",
-          "resourceFeeStroops": "41008",
-          "instructions": 1395837,
-          "diskReadBytes": 144,
-          "writeBytes": 544,
-          "envelopeBytes": 2332,
+          "hash": "cfeb0645bb7f7790fc3502f53b626257949144df7132b35dcac2f5fefb095152",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/cfeb0645bb7f7790fc3502f53b626257949144df7132b35dcac2f5fefb095152",
+          "ledger": 5698653,
+          "feeChargedStroops": "17770",
+          "resourceFeeStroops": "23206",
+          "instructions": 2531721,
+          "diskReadBytes": 288,
+          "writeBytes": 448,
+          "envelopeBytes": 2468,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
@@ -218,45 +215,45 @@
               ],
               "data": {
                 "actual_amount": "0",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    161,
-                    103,
-                    208,
-                    149,
-                    87,
-                    190,
-                    152,
+                    227,
+                    76,
                     22,
-                    48,
-                    118,
-                    226,
-                    242,
-                    96,
-                    114,
-                    119,
-                    213,
-                    254,
-                    57,
-                    16,
-                    186,
-                    219,
-                    124,
-                    20,
+                    13,
+                    148,
                     201,
-                    69,
-                    200,
-                    251,
-                    252,
-                    179,
                     50,
-                    254,
-                    78
+                    210,
+                    128,
+                    157,
+                    185,
+                    184,
+                    117,
+                    85,
+                    207,
+                    163,
+                    169,
+                    23,
+                    53,
+                    83,
+                    20,
+                    156,
+                    170,
+                    228,
+                    52,
+                    29,
+                    125,
+                    121,
+                    64,
+                    33,
+                    126,
+                    209
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -284,12 +281,153 @@
     },
     {
       "token": "usdc",
-      "scenario": "rejects a reused nonce with a new signature",
-      "expected": "NonceUsed (#7)",
-      "outcome": "rejected in simulation",
+      "scenario": "settles a reused payment ID under a new signature",
+      "expected": "success",
+      "outcome": "success",
       "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Contract, #7)"
+      "transactions": [
+        {
+          "hash": "66f00305c5c945ece5069aa1e99791aca2005ac497ec8a22de892bb12689c08e",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/66f00305c5c945ece5069aa1e99791aca2005ac497ec8a22de892bb12689c08e",
+          "ledger": 5698655,
+          "feeChargedStroops": "23015",
+          "resourceFeeStroops": "28542",
+          "instructions": 2737579,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    63,
+                    78,
+                    184,
+                    78,
+                    49,
+                    103,
+                    19,
+                    144,
+                    176,
+                    72,
+                    182,
+                    94,
+                    135,
+                    2,
+                    200,
+                    37,
+                    24,
+                    135,
+                    83,
+                    100,
+                    221,
+                    109,
+                    88,
+                    99,
+                    98,
+                    221,
+                    91,
+                    122,
+                    53,
+                    124,
+                    239,
+                    231
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "999999"
+    },
+    {
+      "token": "usdc",
+      "scenario": "settles a self-managed payment relayed by another facilitator",
+      "expected": "success, the seller's key authorizes, the other facilitator pays",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "cfed07708a76f1a01f348ecd3f064c1273b12a9a750b2328fc31461ce4297ad9",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/cfed07708a76f1a01f348ecd3f064c1273b12a9a750b2328fc31461ce4297ad9",
+          "ledger": 5698656,
+          "feeChargedStroops": "23015",
+          "resourceFeeStroops": "28542",
+          "instructions": 2737579,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
+          "feeSource": "GDVTHE3G2JEOLWVJZA2FIGG2C3X75WK6NIEVVT2VJT23VV55A6EKB7VV",
+          "txSource": "GBIGZKHVFZY4XCJPVKP6GFX6QJ2GNQOBVSIKPSKPLVGKBZVBQQ6SMKL6",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "250000",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    125,
+                    150,
+                    11,
+                    11,
+                    199,
+                    44,
+                    172,
+                    158,
+                    73,
+                    84,
+                    5,
+                    50,
+                    234,
+                    101,
+                    74,
+                    104,
+                    140,
+                    151,
+                    109,
+                    246,
+                    198,
+                    72,
+                    13,
+                    202,
+                    3,
+                    106,
+                    237,
+                    242,
+                    237,
+                    36,
+                    142,
+                    125
+                  ]
+                },
+                "receiver_authorizer": "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "750000"
     },
     {
       "token": "usdc",
@@ -376,22 +514,21 @@
       "token": "usdc",
       "scenario": "settles two authorizations one after the other",
       "expected": "both success",
-      "outcome": "success in ledgers 5105449 and 5105450",
+      "outcome": "success in ledgers 5698659 and 5698660",
       "pass": true,
       "transactions": [
         {
-          "hash": "1aa3f1b68276ba6d74fa87b6bd0fba9970fffc2d7adbd83ad4470dca26e5bcf5",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/1aa3f1b68276ba6d74fa87b6bd0fba9970fffc2d7adbd83ad4470dca26e5bcf5",
-          "ledger": 5105449,
-          "feeChargedStroops": "40944",
-          "resourceFeeStroops": "51708",
-          "instructions": 1606530,
-          "diskReadBytes": 376,
-          "writeBytes": 776,
-          "envelopeBytes": 2500,
+          "hash": "ce6307b83ce29d8962b836225ef1304e217de089fa14a66c9b0465bbea40c513",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/ce6307b83ce29d8962b836225ef1304e217de089fa14a66c9b0465bbea40c513",
+          "ledger": 5698659,
+          "feeChargedStroops": "23015",
+          "resourceFeeStroops": "28542",
+          "instructions": 2737579,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
@@ -402,62 +539,61 @@
               ],
               "data": {
                 "actual_amount": "1000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    13,
-                    126,
-                    172,
+                    36,
+                    228,
+                    89,
+                    202,
+                    128,
+                    92,
+                    99,
+                    58,
+                    157,
+                    58,
                     133,
-                    120,
-                    136,
-                    86,
-                    76,
-                    131,
-                    231,
-                    131,
-                    47,
-                    183,
-                    115,
-                    124,
-                    196,
-                    248,
-                    19,
-                    182,
-                    215,
-                    7,
-                    218,
-                    63,
-                    29,
-                    230,
-                    246,
-                    209,
+                    44,
+                    4,
+                    27,
+                    26,
+                    198,
+                    101,
+                    206,
+                    25,
                     178,
-                    167,
-                    195,
-                    248,
-                    170
+                    119,
+                    131,
+                    235,
+                    99,
+                    245,
+                    49,
+                    244,
+                    37,
+                    35,
+                    57,
+                    202,
+                    92
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
         },
         {
-          "hash": "49b50c61ba79ea1b7faadfeaaf2475867d59b387303159bad2f84db91ebac5c2",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/49b50c61ba79ea1b7faadfeaaf2475867d59b387303159bad2f84db91ebac5c2",
-          "ledger": 5105450,
-          "feeChargedStroops": "40938",
-          "resourceFeeStroops": "51702",
-          "instructions": 1597743,
-          "diskReadBytes": 376,
-          "writeBytes": 776,
-          "envelopeBytes": 2500,
+          "hash": "3f79717822c08fb8e25d21261fa999939c6e68afb9ffdb33afd0ada3c7667699",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/3f79717822c08fb8e25d21261fa999939c6e68afb9ffdb33afd0ada3c7667699",
+          "ledger": 5698660,
+          "feeChargedStroops": "21740",
+          "resourceFeeStroops": "27077",
+          "instructions": 2727679,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
@@ -468,45 +604,45 @@
               ],
               "data": {
                 "actual_amount": "2000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    140,
-                    163,
-                    255,
-                    236,
-                    209,
-                    211,
-                    5,
-                    19,
-                    50,
-                    19,
-                    116,
-                    45,
-                    34,
-                    55,
-                    20,
-                    181,
-                    51,
-                    22,
-                    164,
-                    232,
-                    145,
-                    150,
-                    141,
-                    143,
-                    67,
-                    103,
-                    11,
-                    244,
-                    151,
+                    177,
+                    250,
+                    46,
+                    199,
+                    210,
+                    114,
+                    183,
+                    219,
                     194,
+                    21,
+                    140,
+                    121,
+                    103,
+                    79,
+                    142,
+                    197,
+                    239,
+                    66,
+                    179,
+                    252,
+                    93,
+                    137,
+                    46,
+                    232,
+                    121,
+                    144,
+                    109,
                     182,
-                    149
+                    47,
+                    63,
+                    126,
+                    102
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -518,22 +654,21 @@
       "token": "usdc",
       "scenario": "settles two authorizations in the same ledger",
       "expected": "both success, one ledger",
-      "outcome": "success, both in ledger 5105452 (attempt 1)",
+      "outcome": "success, both in ledger 5698662 (attempt 1)",
       "pass": true,
       "transactions": [
         {
-          "hash": "59872b9aabd37b2488a3e038f78c6fb4524324f629078e2b1ba9af8e1d68407c",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/59872b9aabd37b2488a3e038f78c6fb4524324f629078e2b1ba9af8e1d68407c",
-          "ledger": 5105452,
-          "feeChargedStroops": "40944",
-          "resourceFeeStroops": "51708",
-          "instructions": 1606530,
-          "diskReadBytes": 376,
-          "writeBytes": 776,
-          "envelopeBytes": 2500,
+          "hash": "3e5ad0d707e304cb90e2f78e2931b3c844dfc92381858861f7341c6dd8261a21",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/3e5ad0d707e304cb90e2f78e2931b3c844dfc92381858861f7341c6dd8261a21",
+          "ledger": 5698662,
+          "feeChargedStroops": "21743",
+          "resourceFeeStroops": "28542",
+          "instructions": 2737579,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
@@ -544,62 +679,61 @@
               ],
               "data": {
                 "actual_amount": "3000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    72,
-                    51,
-                    31,
-                    182,
-                    121,
-                    172,
-                    81,
-                    156,
-                    55,
-                    108,
-                    38,
-                    128,
-                    236,
-                    248,
-                    223,
-                    76,
-                    191,
+                    226,
+                    86,
+                    58,
+                    85,
+                    20,
                     181,
-                    101,
-                    82,
-                    131,
-                    6,
-                    105,
-                    194,
-                    41,
-                    100,
-                    203,
-                    112,
+                    29,
+                    55,
+                    69,
+                    137,
+                    132,
+                    205,
                     15,
+                    214,
+                    90,
+                    24,
+                    193,
+                    78,
+                    20,
+                    144,
+                    153,
+                    225,
+                    17,
+                    238,
                     89,
-                    164,
+                    206,
+                    155,
+                    21,
+                    214,
+                    98,
+                    96,
                     221
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
         },
         {
-          "hash": "830ae683d6de0754ebae0ef94ef8f705563aa622267b1fb7e2fecf21d2bcc4e5",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/830ae683d6de0754ebae0ef94ef8f705563aa622267b1fb7e2fecf21d2bcc4e5",
-          "ledger": 5105452,
-          "feeChargedStroops": "40944",
-          "resourceFeeStroops": "51708",
-          "instructions": 1606530,
-          "diskReadBytes": 376,
-          "writeBytes": 776,
-          "envelopeBytes": 2500,
+          "hash": "cfdc33d84461d67991675e02688499cdfddff1c59f15c5b6bbaa1e9149f7fbd5",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/cfdc33d84461d67991675e02688499cdfddff1c59f15c5b6bbaa1e9149f7fbd5",
+          "ledger": 5698662,
+          "feeChargedStroops": "23015",
+          "resourceFeeStroops": "28542",
+          "instructions": 2737579,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
@@ -610,665 +744,45 @@
               ],
               "data": {
                 "actual_amount": "4000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    49,
-                    160,
-                    111,
-                    83,
-                    41,
-                    236,
-                    15,
-                    6,
-                    82,
-                    252,
-                    35,
-                    18,
-                    228,
-                    237,
-                    180,
-                    201,
-                    129,
-                    133,
-                    252,
-                    98,
-                    248,
-                    244,
-                    109,
-                    178,
-                    71,
-                    99,
-                    30,
-                    77,
+                    29,
                     227,
-                    79,
-                    158,
-                    155
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      ],
-      "leftoverAllowance": "997000"
-    },
-    {
-      "token": "sac",
-      "scenario": "settles below the ceiling",
-      "expected": "success",
-      "outcome": "success",
-      "pass": true,
-      "transactions": [
-        {
-          "hash": "26facdf315982ae72b45cbe0aebd9027c5f49650d957e5b05031ca852c04fc47",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/26facdf315982ae72b45cbe0aebd9027c5f49650d957e5b05031ca852c04fc47",
-          "ledger": 5105454,
-          "feeChargedStroops": "44074",
-          "resourceFeeStroops": "55297",
-          "instructions": 1581077,
-          "diskReadBytes": 392,
-          "writeBytes": 792,
-          "envelopeBytes": 2516,
-          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "events": [
-            {
-              "topics": [
-                "upto_settled",
-                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
-                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
-                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
-              ],
-              "data": {
-                "actual_amount": "250000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-                "max_amount": "1000000",
-                "nonce": {
-                  "type": "Buffer",
-                  "data": [
-                    26,
-                    74,
-                    187,
-                    214,
-                    96,
-                    92,
-                    151,
-                    83,
-                    186,
-                    89,
-                    107,
-                    27,
-                    87,
-                    172,
-                    140,
-                    179,
-                    144,
-                    9,
-                    137,
-                    131,
-                    143,
-                    94,
-                    175,
-                    203,
-                    169,
-                    117,
-                    5,
-                    21,
-                    112,
-                    234,
-                    220,
-                    50
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      ],
-      "leftoverAllowance": "750000"
-    },
-    {
-      "token": "sac",
-      "scenario": "settles at the ceiling",
-      "expected": "success",
-      "outcome": "success",
-      "pass": true,
-      "transactions": [
-        {
-          "hash": "5f4fea5a34ab849fadb452d10356d74db28291bfd41b996029b2eae8cc552914",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/5f4fea5a34ab849fadb452d10356d74db28291bfd41b996029b2eae8cc552914",
-          "ledger": 5105456,
-          "feeChargedStroops": "41036",
-          "resourceFeeStroops": "51800",
-          "instructions": 1611331,
-          "diskReadBytes": 392,
-          "writeBytes": 792,
-          "envelopeBytes": 2516,
-          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "events": [
-            {
-              "topics": [
-                "upto_settled",
-                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
-                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
-                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
-              ],
-              "data": {
-                "actual_amount": "1000000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-                "max_amount": "1000000",
-                "nonce": {
-                  "type": "Buffer",
-                  "data": [
-                    178,
-                    233,
-                    236,
-                    65,
-                    38,
-                    254,
-                    238,
-                    250,
-                    138,
-                    129,
-                    74,
-                    142,
-                    150,
-                    240,
-                    111,
-                    120,
-                    213,
-                    155,
-                    77,
-                    181,
-                    119,
-                    67,
-                    199,
-                    72,
-                    92,
-                    55,
-                    6,
-                    63,
-                    217,
-                    172,
-                    93,
-                    19
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      ],
-      "leftoverAllowance": "0"
-    },
-    {
-      "token": "sac",
-      "scenario": "settles zero",
-      "expected": "success, no transfer, event and nonce recorded",
-      "outcome": "success",
-      "pass": true,
-      "transactions": [
-        {
-          "hash": "154fe449963aa70444c3def6c14e57d6efbbb1074cf1c7df75a828a9662b106b",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/154fe449963aa70444c3def6c14e57d6efbbb1074cf1c7df75a828a9662b106b",
-          "ledger": 5105458,
-          "feeChargedStroops": "30427",
-          "resourceFeeStroops": "41009",
-          "instructions": 1397198,
-          "diskReadBytes": 144,
-          "writeBytes": 544,
-          "envelopeBytes": 2332,
-          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "events": [
-            {
-              "topics": [
-                "upto_settled",
-                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
-                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
-                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
-              ],
-              "data": {
-                "actual_amount": "0",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-                "max_amount": "1000000",
-                "nonce": {
-                  "type": "Buffer",
-                  "data": [
-                    87,
-                    15,
-                    39,
-                    76,
-                    255,
-                    38,
-                    64,
-                    194,
-                    111,
-                    111,
-                    189,
-                    216,
-                    14,
-                    150,
-                    203,
-                    99,
-                    62,
-                    82,
-                    86,
-                    180,
-                    236,
-                    176,
-                    79,
-                    57,
-                    252,
-                    81,
-                    42,
-                    111,
-                    201,
-                    119,
-                    55,
-                    196
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      ],
-      "leftoverAllowance": "1000000"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects an amount over the ceiling",
-      "expected": "AmountExceedsMax (#2)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Contract, #2)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a replayed auth entry",
-      "expected": "Error(Auth, ExistingValue)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Auth, ExistingValue)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a reused nonce with a new signature",
-      "expected": "NonceUsed (#7)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Contract, #7)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a settlement before valid_after",
-      "expected": "NotYetValid (#4)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Contract, #4)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a settlement after the deadline",
-      "expected": "Expired (#5)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Contract, #5)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects an allowance expiry beyond the contract's cap",
-      "expected": "InvalidAllowanceExpiration (#6)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Contract, #6)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a different facilitator",
-      "expected": "Error(Auth, InvalidAction)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Auth, InvalidAction)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a changed recipient",
-      "expected": "Error(Auth, InvalidAction)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Auth, InvalidAction)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a changed token",
-      "expected": "Error(Auth, InvalidAction)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Auth, InvalidAction)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a changed ceiling",
-      "expected": "Error(Auth, InvalidAction)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Auth, InvalidAction)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a changed nonce",
-      "expected": "Error(Auth, InvalidAction)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Auth, InvalidAction)"
-    },
-    {
-      "token": "sac",
-      "scenario": "rejects a changed facilitator",
-      "expected": "Error(Auth, InvalidAction)",
-      "outcome": "rejected in simulation",
-      "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Auth, InvalidAction)"
-    },
-    {
-      "token": "sac",
-      "scenario": "settles two authorizations one after the other",
-      "expected": "both success",
-      "outcome": "success in ledgers 5105462 and 5105463",
-      "pass": true,
-      "transactions": [
-        {
-          "hash": "307f8d265259014a3d8d4478b01031a1877c717f20ee29dc832c998185b54030",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/307f8d265259014a3d8d4478b01031a1877c717f20ee29dc832c998185b54030",
-          "ledger": 5105462,
-          "feeChargedStroops": "41036",
-          "resourceFeeStroops": "51800",
-          "instructions": 1611331,
-          "diskReadBytes": 392,
-          "writeBytes": 792,
-          "envelopeBytes": 2516,
-          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "events": [
-            {
-              "topics": [
-                "upto_settled",
-                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
-                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
-                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
-              ],
-              "data": {
-                "actual_amount": "1000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-                "max_amount": "1000000",
-                "nonce": {
-                  "type": "Buffer",
-                  "data": [
-                    102,
-                    44,
-                    14,
-                    193,
-                    210,
-                    105,
-                    221,
-                    188,
-                    112,
-                    216,
-                    241,
-                    47,
-                    141,
-                    121,
-                    69,
-                    169,
-                    110,
-                    118,
-                    68,
-                    224,
-                    182,
-                    207,
-                    81,
-                    246,
-                    218,
-                    68,
-                    113,
-                    167,
-                    34,
-                    79,
                     202,
-                    217
-                  ]
-                }
-              }
-            }
-          ]
-        },
-        {
-          "hash": "a2c75875d4ad05ae0f29f231d21b026375e81429cce41dbeea14ac63df6e9748",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/a2c75875d4ad05ae0f29f231d21b026375e81429cce41dbeea14ac63df6e9748",
-          "ledger": 5105463,
-          "feeChargedStroops": "41030",
-          "resourceFeeStroops": "51794",
-          "instructions": 1602544,
-          "diskReadBytes": 392,
-          "writeBytes": 792,
-          "envelopeBytes": 2516,
-          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "events": [
-            {
-              "topics": [
-                "upto_settled",
-                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
-                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
-                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
-              ],
-              "data": {
-                "actual_amount": "2000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-                "max_amount": "1000000",
-                "nonce": {
-                  "type": "Buffer",
-                  "data": [
-                    84,
-                    128,
-                    130,
-                    111,
-                    105,
-                    27,
-                    208,
-                    131,
-                    64,
-                    115,
-                    88,
-                    252,
-                    16,
-                    113,
-                    57,
-                    146,
-                    227,
-                    127,
-                    119,
-                    161,
-                    53,
-                    215,
-                    116,
-                    100,
-                    150,
-                    242,
-                    214,
-                    222,
-                    77,
-                    26,
-                    100,
-                    201
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      ],
-      "leftoverAllowance": "998000"
-    },
-    {
-      "token": "sac",
-      "scenario": "settles two authorizations in the same ledger",
-      "expected": "both success, one ledger",
-      "outcome": "success, both in ledger 5105465 (attempt 1)",
-      "pass": true,
-      "transactions": [
-        {
-          "hash": "5c9caadb53767f1092834960228f5524609cb3235b9bfb667d50e1de23064b3d",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/5c9caadb53767f1092834960228f5524609cb3235b9bfb667d50e1de23064b3d",
-          "ledger": 5105465,
-          "feeChargedStroops": "41036",
-          "resourceFeeStroops": "51800",
-          "instructions": 1611331,
-          "diskReadBytes": 392,
-          "writeBytes": 792,
-          "envelopeBytes": 2516,
-          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "events": [
-            {
-              "topics": [
-                "upto_settled",
-                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
-                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
-                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
-              ],
-              "data": {
-                "actual_amount": "3000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-                "max_amount": "1000000",
-                "nonce": {
-                  "type": "Buffer",
-                  "data": [
-                    199,
-                    245,
-                    137,
-                    169,
-                    47,
-                    231,
-                    93,
-                    214,
-                    67,
-                    60,
-                    94,
-                    78,
-                    88,
-                    75,
-                    247,
-                    26,
-                    243,
-                    210,
-                    195,
-                    203,
-                    94,
-                    31,
-                    237,
-                    73,
-                    187,
-                    17,
-                    164,
-                    151,
-                    240,
-                    109,
-                    208,
-                    249
-                  ]
-                }
-              }
-            }
-          ]
-        },
-        {
-          "hash": "ca76e47e3851454b84ee7c9991d258d8537f0c13024e4f79d86429a3a4775825",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/ca76e47e3851454b84ee7c9991d258d8537f0c13024e4f79d86429a3a4775825",
-          "ledger": 5105465,
-          "feeChargedStroops": "41036",
-          "resourceFeeStroops": "51800",
-          "instructions": 1611331,
-          "diskReadBytes": 392,
-          "writeBytes": 792,
-          "envelopeBytes": 2516,
-          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "events": [
-            {
-              "topics": [
-                "upto_settled",
-                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
-                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
-                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
-              ],
-              "data": {
-                "actual_amount": "4000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-                "max_amount": "1000000",
-                "nonce": {
-                  "type": "Buffer",
-                  "data": [
-                    142,
-                    227,
-                    126,
-                    50,
-                    203,
-                    251,
-                    95,
-                    187,
+                    211,
                     181,
-                    182,
-                    41,
-                    108,
-                    123,
-                    233,
-                    208,
-                    101,
-                    251,
-                    120,
-                    250,
-                    142,
-                    165,
+                    129,
+                    193,
                     186,
-                    171,
-                    46,
-                    21,
-                    10,
-                    73,
-                    99,
+                    68,
+                    87,
+                    204,
+                    210,
+                    24,
+                    19,
+                    211,
+                    169,
+                    161,
+                    63,
+                    219,
+                    101,
+                    57,
+                    165,
+                    6,
+                    45,
+                    116,
+                    18,
+                    225,
+                    17,
+                    14,
                     150,
-                    36,
-                    64,
-                    116
+                    137,
+                    70
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -1277,74 +791,73 @@
       "leftoverAllowance": "997000"
     },
     {
-      "token": "sep41",
+      "token": "sac",
       "scenario": "settles below the ceiling",
       "expected": "success",
       "outcome": "success",
       "pass": true,
       "transactions": [
         {
-          "hash": "906ad60ea31c6a427b6a05fec3f6e96fbd4f64d7d1b8b33f07b2b776025c0379",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/906ad60ea31c6a427b6a05fec3f6e96fbd4f64d7d1b8b33f07b2b776025c0379",
-          "ledger": 5105467,
-          "feeChargedStroops": "38933",
-          "resourceFeeStroops": "49768",
-          "instructions": 2243088,
-          "diskReadBytes": 144,
-          "writeBytes": 800,
-          "envelopeBytes": 2560,
+          "hash": "c1499f15d95d4609daae3962a409f2e90dc22cdddd86947d0e93b14e989cf56e",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/c1499f15d95d4609daae3962a409f2e90dc22cdddd86947d0e93b14e989cf56e",
+          "ledger": 5698663,
+          "feeChargedStroops": "23074",
+          "resourceFeeStroops": "28602",
+          "instructions": 2742380,
+          "diskReadBytes": 536,
+          "writeBytes": 696,
+          "envelopeBytes": 2652,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
                 "upto_settled",
-                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
                 "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
                 "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
               ],
               "data": {
                 "actual_amount": "250000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    208,
-                    121,
-                    204,
-                    224,
+                    12,
+                    83,
+                    50,
+                    152,
+                    5,
+                    238,
+                    82,
+                    116,
+                    10,
+                    177,
+                    63,
+                    242,
                     24,
-                    208,
-                    233,
-                    221,
-                    65,
-                    237,
-                    193,
-                    92,
-                    138,
-                    51,
-                    216,
-                    28,
-                    147,
-                    210,
-                    206,
-                    112,
-                    196,
-                    136,
-                    47,
-                    135,
-                    39,
-                    119,
-                    157,
-                    236,
-                    47,
-                    126,
-                    179,
-                    116
+                    20,
+                    76,
+                    170,
+                    24,
+                    144,
+                    95,
+                    192,
+                    246,
+                    158,
+                    207,
+                    190,
+                    63,
+                    171,
+                    38,
+                    84,
+                    94,
+                    166,
+                    199,
+                    6
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -1353,150 +866,902 @@
       "leftoverAllowance": "750000"
     },
     {
-      "token": "sep41",
+      "token": "sac",
       "scenario": "settles at the ceiling",
       "expected": "success",
       "outcome": "success",
       "pass": true,
       "transactions": [
         {
-          "hash": "a64792172ef79cf30512db7189ca9b7defa6a58e9f270a2db68c33ace02a1d72",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/a64792172ef79cf30512db7189ca9b7defa6a58e9f270a2db68c33ace02a1d72",
-          "ledger": 5105469,
-          "feeChargedStroops": "35955",
-          "resourceFeeStroops": "46342",
-          "instructions": 2259801,
-          "diskReadBytes": 144,
-          "writeBytes": 800,
-          "envelopeBytes": 2560,
+          "hash": "419ced31853ae94fb6dcd412d53cb9913121fa276935254feaf850c4630b9e8a",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/419ced31853ae94fb6dcd412d53cb9913121fa276935254feaf850c4630b9e8a",
+          "ledger": 5698664,
+          "feeChargedStroops": "23061",
+          "resourceFeeStroops": "28587",
+          "instructions": 2742380,
+          "diskReadBytes": 536,
+          "writeBytes": 696,
+          "envelopeBytes": 2652,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
                 "upto_settled",
-                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
                 "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
                 "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
               ],
               "data": {
                 "actual_amount": "1000000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    168,
-                    175,
-                    209,
-                    9,
-                    179,
-                    45,
-                    109,
-                    218,
-                    153,
-                    192,
-                    36,
-                    128,
+                    108,
                     224,
-                    135,
-                    156,
-                    115,
-                    30,
-                    215,
-                    116,
-                    82,
-                    187,
-                    235,
-                    73,
-                    52,
-                    166,
+                    92,
+                    164,
+                    41,
+                    41,
+                    226,
+                    17,
                     1,
-                    122,
-                    181,
-                    124,
-                    228,
-                    234,
-                    133
-                  ]
-                }
-              }
-            }
-          ]
-        }
-      ],
-      "leftoverAllowance": "0"
-    },
-    {
-      "token": "sep41",
-      "scenario": "settles zero",
-      "expected": "success, no transfer, event and nonce recorded",
-      "outcome": "success",
-      "pass": true,
-      "transactions": [
-        {
-          "hash": "c21ca861c49e6dd83a72ebd1663e9c41d47e29707ddbc6a36a804b2a4bac359a",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/c21ca861c49e6dd83a72ebd1663e9c41d47e29707ddbc6a36a804b2a4bac359a",
-          "ledger": 5105471,
-          "feeChargedStroops": "29265",
-          "resourceFeeStroops": "39653",
-          "instructions": 1651532,
-          "diskReadBytes": 144,
-          "writeBytes": 504,
-          "envelopeBytes": 2328,
-          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "events": [
-            {
-              "topics": [
-                "upto_settled",
-                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
-                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
-                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
-              ],
-              "data": {
-                "actual_amount": "0",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-                "max_amount": "1000000",
-                "nonce": {
-                  "type": "Buffer",
-                  "data": [
-                    160,
-                    147,
-                    138,
-                    252,
-                    165,
-                    37,
-                    233,
-                    253,
-                    26,
-                    97,
-                    162,
-                    244,
                     247,
-                    104,
-                    172,
-                    7,
-                    229,
-                    36,
-                    18,
+                    196,
+                    106,
+                    189,
+                    206,
                     155,
-                    118,
-                    140,
-                    47,
-                    104,
-                    190,
-                    232,
-                    253,
-                    184,
-                    114,
-                    97,
-                    107,
+                    91,
+                    155,
+                    147,
+                    192,
+                    168,
+                    4,
+                    250,
+                    175,
+                    74,
+                    236,
+                    13,
+                    55,
+                    238,
+                    21,
+                    233,
+                    199,
                     87
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "0"
+    },
+    {
+      "token": "sac",
+      "scenario": "settles zero",
+      "expected": "success, no transfer, event emitted",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "7f60e83070cf839e22077c105b129137634052a14760286e582a58d1430062dc",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/7f60e83070cf839e22077c105b129137634052a14760286e582a58d1430062dc",
+          "ledger": 5698665,
+          "feeChargedStroops": "17770",
+          "resourceFeeStroops": "23206",
+          "instructions": 2533083,
+          "diskReadBytes": 288,
+          "writeBytes": 448,
+          "envelopeBytes": 2468,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "0",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    229,
+                    126,
+                    11,
+                    220,
+                    142,
+                    112,
+                    242,
+                    65,
+                    34,
+                    178,
+                    243,
+                    211,
+                    91,
+                    176,
+                    234,
+                    228,
+                    109,
+                    114,
+                    141,
+                    165,
+                    105,
+                    248,
+                    109,
+                    38,
+                    125,
+                    202,
+                    144,
+                    0,
+                    29,
+                    214,
+                    234,
+                    239
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "1000000"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects an amount over the ceiling",
+      "expected": "AmountExceedsMax (#2)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #2)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a replayed auth entry",
+      "expected": "Error(Auth, ExistingValue)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, ExistingValue)"
+    },
+    {
+      "token": "sac",
+      "scenario": "settles a reused payment ID under a new signature",
+      "expected": "success",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "93db0ee8cc932926af87d5d02e22cb519d772f19248260b5cd3a8fbe911c429d",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/93db0ee8cc932926af87d5d02e22cb519d772f19248260b5cd3a8fbe911c429d",
+          "ledger": 5698667,
+          "feeChargedStroops": "23061",
+          "resourceFeeStroops": "28587",
+          "instructions": 2742380,
+          "diskReadBytes": 536,
+          "writeBytes": 696,
+          "envelopeBytes": 2652,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    108,
+                    224,
+                    92,
+                    164,
+                    41,
+                    41,
+                    226,
+                    17,
+                    1,
+                    247,
+                    196,
+                    106,
+                    189,
+                    206,
+                    155,
+                    91,
+                    155,
+                    147,
+                    192,
+                    168,
+                    4,
+                    250,
+                    175,
+                    74,
+                    236,
+                    13,
+                    55,
+                    238,
+                    21,
+                    233,
+                    199,
+                    87
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "999999"
+    },
+    {
+      "token": "sac",
+      "scenario": "settles a self-managed payment relayed by another facilitator",
+      "expected": "success, the seller's key authorizes, the other facilitator pays",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "ca1ec7534e60765deddd691dc60447264780e5ad6a3a21bf43b83a568e947ce8",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/ca1ec7534e60765deddd691dc60447264780e5ad6a3a21bf43b83a568e947ce8",
+          "ledger": 5698668,
+          "feeChargedStroops": "23061",
+          "resourceFeeStroops": "28587",
+          "instructions": 2742380,
+          "diskReadBytes": 536,
+          "writeBytes": 696,
+          "envelopeBytes": 2652,
+          "feeSource": "GDVTHE3G2JEOLWVJZA2FIGG2C3X75WK6NIEVVT2VJT23VV55A6EKB7VV",
+          "txSource": "GBIGZKHVFZY4XCJPVKP6GFX6QJ2GNQOBVSIKPSKPLVGKBZVBQQ6SMKL6",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "250000",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    56,
+                    121,
+                    123,
+                    84,
+                    255,
+                    202,
+                    31,
+                    130,
+                    15,
+                    46,
+                    26,
+                    249,
+                    24,
+                    241,
+                    179,
+                    179,
+                    149,
+                    119,
+                    52,
+                    244,
+                    239,
+                    41,
+                    39,
+                    161,
+                    229,
+                    176,
+                    9,
+                    163,
+                    251,
+                    49,
+                    240,
+                    201
+                  ]
+                },
+                "receiver_authorizer": "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "750000"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a settlement before valid_after",
+      "expected": "NotYetValid (#4)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #4)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a settlement after the deadline",
+      "expected": "Expired (#5)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #5)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects an allowance expiry beyond the contract's cap",
+      "expected": "InvalidAllowanceExpiration (#6)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Contract, #6)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a different facilitator",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a changed recipient",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a changed token",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a changed ceiling",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a changed nonce",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "rejects a changed facilitator",
+      "expected": "Error(Auth, InvalidAction)",
+      "outcome": "rejected in simulation",
+      "pass": true,
+      "transactions": [],
+      "error": "HostError: Error(Auth, InvalidAction)"
+    },
+    {
+      "token": "sac",
+      "scenario": "settles two authorizations one after the other",
+      "expected": "both success",
+      "outcome": "success in ledgers 5698670 and 5698671",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "05ff1351a766b21df914543334f43ad0cd3ad980fe1f466b91eb76280e46ead8",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/05ff1351a766b21df914543334f43ad0cd3ad980fe1f466b91eb76280e46ead8",
+          "ledger": 5698670,
+          "feeChargedStroops": "23061",
+          "resourceFeeStroops": "28587",
+          "instructions": 2742380,
+          "diskReadBytes": 536,
+          "writeBytes": 696,
+          "envelopeBytes": 2652,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1000",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    150,
+                    188,
+                    219,
+                    210,
+                    89,
+                    50,
+                    126,
+                    67,
+                    53,
+                    116,
+                    116,
+                    230,
+                    250,
+                    87,
+                    82,
+                    148,
+                    220,
+                    104,
+                    96,
+                    92,
+                    178,
+                    255,
+                    69,
+                    153,
+                    141,
+                    232,
+                    71,
+                    218,
+                    140,
+                    226,
+                    172,
+                    36
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        },
+        {
+          "hash": "9f5022c88bec8abc96bb00f024dd091e4d6260a54270ee46d764d7f3985be837",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/9f5022c88bec8abc96bb00f024dd091e4d6260a54270ee46d764d7f3985be837",
+          "ledger": 5698671,
+          "feeChargedStroops": "21786",
+          "resourceFeeStroops": "27122",
+          "instructions": 2732480,
+          "diskReadBytes": 536,
+          "writeBytes": 696,
+          "envelopeBytes": 2652,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "2000",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    152,
+                    17,
+                    61,
+                    236,
+                    187,
+                    216,
+                    46,
+                    112,
+                    59,
+                    151,
+                    69,
+                    91,
+                    61,
+                    68,
+                    101,
+                    91,
+                    83,
+                    111,
+                    240,
+                    216,
+                    131,
+                    162,
+                    37,
+                    61,
+                    203,
+                    164,
+                    174,
+                    14,
+                    206,
+                    181,
+                    81,
+                    5
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "998000"
+    },
+    {
+      "token": "sac",
+      "scenario": "settles two authorizations in the same ledger",
+      "expected": "both success, one ledger",
+      "outcome": "success, both in ledger 5698673 (attempt 1)",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "3b296d3ee480356fc99f52d6cbd29085c6a7e9ba691ddaf67f1fc73c7d676b8e",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/3b296d3ee480356fc99f52d6cbd29085c6a7e9ba691ddaf67f1fc73c7d676b8e",
+          "ledger": 5698673,
+          "feeChargedStroops": "21789",
+          "resourceFeeStroops": "28587",
+          "instructions": 2742380,
+          "diskReadBytes": 536,
+          "writeBytes": 696,
+          "envelopeBytes": 2652,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "3000",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    142,
+                    141,
+                    160,
+                    38,
+                    100,
+                    130,
+                    253,
+                    251,
+                    107,
+                    210,
+                    198,
+                    166,
+                    184,
+                    180,
+                    79,
+                    89,
+                    72,
+                    155,
+                    3,
+                    195,
+                    74,
+                    128,
+                    133,
+                    35,
+                    91,
+                    241,
+                    60,
+                    76,
+                    54,
+                    134,
+                    67,
+                    139
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        },
+        {
+          "hash": "fc5c208ba032d8fada7bfc978cd97b439e4e00c08b4d9ff92b1fcaabec1a0319",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/fc5c208ba032d8fada7bfc978cd97b439e4e00c08b4d9ff92b1fcaabec1a0319",
+          "ledger": 5698673,
+          "feeChargedStroops": "23061",
+          "resourceFeeStroops": "28587",
+          "instructions": 2742380,
+          "diskReadBytes": 536,
+          "writeBytes": 696,
+          "envelopeBytes": 2652,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CCEAOQFKZWE2UXIU3CHKLCABAWP2QTK5IA46FMNTPTLFPWE27ZQG7DM5",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "4000",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    71,
+                    31,
+                    132,
+                    64,
+                    255,
+                    160,
+                    228,
+                    187,
+                    48,
+                    1,
+                    49,
+                    111,
+                    49,
+                    229,
+                    214,
+                    89,
+                    105,
+                    172,
+                    75,
+                    162,
+                    77,
+                    44,
+                    23,
+                    87,
+                    249,
+                    159,
+                    14,
+                    219,
+                    79,
+                    208,
+                    240,
+                    135
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "997000"
+    },
+    {
+      "token": "sep41",
+      "scenario": "settles below the ceiling",
+      "expected": "success",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "a994f12f553900b2f81f15960afc2a535ec9d0c93036337c5ccb5f15ff0ca81d",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/a994f12f553900b2f81f15960afc2a535ec9d0c93036337c5ccb5f15ff0ca81d",
+          "ledger": 5698674,
+          "feeChargedStroops": "21410",
+          "resourceFeeStroops": "26885",
+          "instructions": 3426888,
+          "diskReadBytes": 288,
+          "writeBytes": 704,
+          "envelopeBytes": 2696,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "250000",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    79,
+                    127,
+                    176,
+                    122,
+                    240,
+                    99,
+                    65,
+                    94,
+                    208,
+                    174,
+                    168,
+                    203,
+                    251,
+                    241,
+                    213,
+                    82,
+                    20,
+                    234,
+                    179,
+                    227,
+                    186,
+                    86,
+                    46,
+                    42,
+                    227,
+                    101,
+                    17,
+                    95,
+                    133,
+                    21,
+                    69,
+                    221
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "750000"
+    },
+    {
+      "token": "sep41",
+      "scenario": "settles at the ceiling",
+      "expected": "success",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "742795000ab9f6725ab4247a1156bc7e082fe6154fe660f81c4a4f58541459c7",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/742795000ab9f6725ab4247a1156bc7e082fe6154fe660f81c4a4f58541459c7",
+          "ledger": 5698675,
+          "feeChargedStroops": "21399",
+          "resourceFeeStroops": "26873",
+          "instructions": 3426888,
+          "diskReadBytes": 288,
+          "writeBytes": 704,
+          "envelopeBytes": 2696,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1000000",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    201,
+                    211,
+                    234,
+                    156,
+                    14,
+                    75,
+                    63,
+                    75,
+                    95,
+                    111,
+                    73,
+                    240,
+                    80,
+                    67,
+                    76,
+                    31,
+                    150,
+                    12,
+                    14,
+                    175,
+                    239,
+                    174,
+                    115,
+                    13,
+                    65,
+                    73,
+                    150,
+                    99,
+                    233,
+                    255,
+                    42,
+                    89
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "0"
+    },
+    {
+      "token": "sep41",
+      "scenario": "settles zero",
+      "expected": "success, no transfer, event emitted",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "3231687a1316f57abf94dc4da0a66c834e2d593ce8cb80f95656f7a2de1cc274",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/3231687a1316f57abf94dc4da0a66c834e2d593ce8cb80f95656f7a2de1cc274",
+          "ledger": 5698676,
+          "feeChargedStroops": "17653",
+          "resourceFeeStroops": "23062",
+          "instructions": 2812733,
+          "diskReadBytes": 288,
+          "writeBytes": 408,
+          "envelopeBytes": 2464,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "0",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    135,
+                    98,
+                    91,
+                    180,
+                    18,
+                    253,
+                    72,
+                    179,
+                    206,
+                    253,
+                    177,
+                    119,
+                    81,
+                    101,
+                    168,
+                    130,
+                    113,
+                    196,
+                    214,
+                    18,
+                    22,
+                    107,
+                    1,
+                    136,
+                    213,
+                    107,
+                    71,
+                    106,
+                    188,
+                    108,
+                    137,
+                    224
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -1524,12 +1789,153 @@
     },
     {
       "token": "sep41",
-      "scenario": "rejects a reused nonce with a new signature",
-      "expected": "NonceUsed (#7)",
-      "outcome": "rejected in simulation",
+      "scenario": "settles a reused payment ID under a new signature",
+      "expected": "success",
+      "outcome": "success",
       "pass": true,
-      "transactions": [],
-      "error": "HostError: Error(Contract, #7)"
+      "transactions": [
+        {
+          "hash": "d9bc5839db22a6db5cb75452ff7d27555cf64de3a4a220da140a9d0b2eb2026d",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/d9bc5839db22a6db5cb75452ff7d27555cf64de3a4a220da140a9d0b2eb2026d",
+          "ledger": 5698677,
+          "feeChargedStroops": "21399",
+          "resourceFeeStroops": "26873",
+          "instructions": 3426888,
+          "diskReadBytes": 288,
+          "writeBytes": 704,
+          "envelopeBytes": 2696,
+          "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "1",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    201,
+                    211,
+                    234,
+                    156,
+                    14,
+                    75,
+                    63,
+                    75,
+                    95,
+                    111,
+                    73,
+                    240,
+                    80,
+                    67,
+                    76,
+                    31,
+                    150,
+                    12,
+                    14,
+                    175,
+                    239,
+                    174,
+                    115,
+                    13,
+                    65,
+                    73,
+                    150,
+                    99,
+                    233,
+                    255,
+                    42,
+                    89
+                  ]
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "999999"
+    },
+    {
+      "token": "sep41",
+      "scenario": "settles a self-managed payment relayed by another facilitator",
+      "expected": "success, the seller's key authorizes, the other facilitator pays",
+      "outcome": "success",
+      "pass": true,
+      "transactions": [
+        {
+          "hash": "5ed0e7affab323ab9b2e4ea54bc027d33b2ca8491dce2e0ad4622a159117975f",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/5ed0e7affab323ab9b2e4ea54bc027d33b2ca8491dce2e0ad4622a159117975f",
+          "ledger": 5698679,
+          "feeChargedStroops": "21399",
+          "resourceFeeStroops": "26873",
+          "instructions": 3426888,
+          "diskReadBytes": 288,
+          "writeBytes": 704,
+          "envelopeBytes": 2696,
+          "feeSource": "GDVTHE3G2JEOLWVJZA2FIGG2C3X75WK6NIEVVT2VJT23VV55A6EKB7VV",
+          "txSource": "GBIGZKHVFZY4XCJPVKP6GFX6QJ2GNQOBVSIKPSKPLVGKBZVBQQ6SMKL6",
+          "events": [
+            {
+              "topics": [
+                "upto_settled",
+                "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
+                "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
+                "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              ],
+              "data": {
+                "actual_amount": "250000",
+                "max_amount": "1000000",
+                "nonce": {
+                  "type": "Buffer",
+                  "data": [
+                    244,
+                    174,
+                    228,
+                    18,
+                    93,
+                    105,
+                    154,
+                    73,
+                    235,
+                    106,
+                    210,
+                    241,
+                    7,
+                    135,
+                    202,
+                    225,
+                    203,
+                    92,
+                    80,
+                    247,
+                    127,
+                    214,
+                    1,
+                    46,
+                    204,
+                    177,
+                    127,
+                    179,
+                    240,
+                    139,
+                    35,
+                    225
+                  ]
+                },
+                "receiver_authorizer": "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
+              }
+            }
+          ]
+        }
+      ],
+      "leftoverAllowance": "750000"
     },
     {
       "token": "sep41",
@@ -1616,137 +2022,135 @@
       "token": "sep41",
       "scenario": "settles two authorizations one after the other",
       "expected": "both success",
-      "outcome": "success in ledgers 5105475 and 5105477",
+      "outcome": "success in ledgers 5698682 and 5698683",
       "pass": true,
       "transactions": [
         {
-          "hash": "f4b42a49b78a27b20c1ae91b6086b228ea8914b35ca9b16e9e287bc88607b146",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/f4b42a49b78a27b20c1ae91b6086b228ea8914b35ca9b16e9e287bc88607b146",
-          "ledger": 5105475,
-          "feeChargedStroops": "35955",
-          "resourceFeeStroops": "46342",
-          "instructions": 2259801,
-          "diskReadBytes": 144,
-          "writeBytes": 800,
-          "envelopeBytes": 2560,
+          "hash": "e781bf2835aa11af35ea92bb20b51985cd77bac38f299daa70324b77e3367fc2",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/e781bf2835aa11af35ea92bb20b51985cd77bac38f299daa70324b77e3367fc2",
+          "ledger": 5698682,
+          "feeChargedStroops": "21399",
+          "resourceFeeStroops": "26873",
+          "instructions": 3426888,
+          "diskReadBytes": 288,
+          "writeBytes": 704,
+          "envelopeBytes": 2696,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
                 "upto_settled",
-                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
                 "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
                 "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
               ],
               "data": {
                 "actual_amount": "1000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    235,
-                    176,
-                    23,
-                    126,
-                    31,
-                    160,
-                    63,
-                    117,
-                    3,
-                    169,
+                    137,
                     24,
-                    23,
-                    225,
-                    208,
-                    133,
-                    233,
-                    93,
-                    145,
-                    233,
-                    161,
-                    148,
-                    53,
-                    194,
-                    90,
-                    88,
-                    240,
-                    190,
-                    114,
-                    231,
-                    125,
-                    240,
-                    224
+                    209,
+                    43,
+                    253,
+                    35,
+                    245,
+                    134,
+                    22,
+                    140,
+                    49,
+                    116,
+                    196,
+                    243,
+                    203,
+                    163,
+                    34,
+                    173,
+                    29,
+                    68,
+                    200,
+                    210,
+                    254,
+                    124,
+                    246,
+                    224,
+                    212,
+                    73,
+                    33,
+                    168,
+                    113,
+                    211
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
         },
         {
-          "hash": "5bf43202566e778ff104073415ffbf9ff3a3ea306d522b09a6554074737f5edd",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/5bf43202566e778ff104073415ffbf9ff3a3ea306d522b09a6554074737f5edd",
-          "ledger": 5105477,
-          "feeChargedStroops": "35955",
-          "resourceFeeStroops": "46342",
-          "instructions": 2259801,
-          "diskReadBytes": 144,
-          "writeBytes": 800,
-          "envelopeBytes": 2560,
+          "hash": "0a27a3abd35e6bca29ec031c12b063746c02b4ef3af5123ee392e416fddc801a",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/0a27a3abd35e6bca29ec031c12b063746c02b4ef3af5123ee392e416fddc801a",
+          "ledger": 5698683,
+          "feeChargedStroops": "20126",
+          "resourceFeeStroops": "25409",
+          "instructions": 3425288,
+          "diskReadBytes": 288,
+          "writeBytes": 704,
+          "envelopeBytes": 2696,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
                 "upto_settled",
-                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
                 "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
                 "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
               ],
               "data": {
                 "actual_amount": "2000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    15,
-                    23,
-                    222,
-                    184,
-                    86,
-                    208,
-                    239,
-                    91,
-                    224,
-                    213,
-                    248,
-                    51,
-                    63,
-                    36,
-                    155,
-                    50,
-                    11,
-                    218,
-                    209,
-                    247,
-                    212,
-                    244,
-                    62,
-                    14,
-                    75,
+                    206,
+                    89,
+                    64,
+                    115,
+                    129,
+                    172,
+                    129,
+                    119,
+                    77,
+                    249,
+                    18,
+                    177,
+                    250,
                     101,
-                    164,
-                    117,
+                    157,
+                    35,
+                    161,
                     72,
+                    239,
+                    118,
+                    60,
+                    255,
+                    31,
+                    154,
+                    11,
+                    13,
+                    201,
+                    110,
                     15,
-                    51,
-                    36
+                    165,
+                    238,
+                    132
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -1758,137 +2162,135 @@
       "token": "sep41",
       "scenario": "settles two authorizations in the same ledger",
       "expected": "both success, one ledger",
-      "outcome": "success, both in ledger 5105479 (attempt 1)",
+      "outcome": "success, both in ledger 5698684 (attempt 1)",
       "pass": true,
       "transactions": [
         {
-          "hash": "007b0ae2f6ded15e12eb268a68c0fb7191593bda1a43107e22673834015a5590",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/007b0ae2f6ded15e12eb268a68c0fb7191593bda1a43107e22673834015a5590",
-          "ledger": 5105479,
-          "feeChargedStroops": "35955",
-          "resourceFeeStroops": "46342",
-          "instructions": 2259801,
-          "diskReadBytes": 144,
-          "writeBytes": 800,
-          "envelopeBytes": 2560,
+          "hash": "8188f209be0aaa6a5e661c5b350c89dc2ea68baa2f93e01b3e8496f62a730da4",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/8188f209be0aaa6a5e661c5b350c89dc2ea68baa2f93e01b3e8496f62a730da4",
+          "ledger": 5698684,
+          "feeChargedStroops": "21399",
+          "resourceFeeStroops": "26873",
+          "instructions": 3426888,
+          "diskReadBytes": 288,
+          "writeBytes": 704,
+          "envelopeBytes": 2696,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
                 "upto_settled",
-                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
                 "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
                 "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
               ],
               "data": {
                 "actual_amount": "3000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    28,
-                    124,
-                    0,
-                    90,
-                    239,
-                    133,
-                    86,
-                    126,
-                    185,
-                    95,
-                    98,
-                    14,
-                    230,
-                    6,
-                    194,
-                    224,
-                    115,
-                    170,
+                    51,
+                    135,
+                    67,
+                    214,
+                    251,
+                    45,
+                    81,
+                    3,
+                    179,
+                    138,
+                    242,
                     43,
-                    168,
-                    127,
-                    118,
-                    229,
-                    224,
-                    39,
-                    167,
-                    219,
-                    253,
-                    229,
-                    21,
-                    158,
-                    110
+                    94,
+                    178,
+                    17,
+                    72,
+                    227,
+                    61,
+                    220,
+                    209,
+                    94,
+                    99,
+                    195,
+                    214,
+                    142,
+                    19,
+                    142,
+                    192,
+                    149,
+                    207,
+                    247,
+                    245
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
         },
         {
-          "hash": "3e590698de74566121c02966338236907e88008b3157cedfd581d75b44286bf2",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/3e590698de74566121c02966338236907e88008b3157cedfd581d75b44286bf2",
-          "ledger": 5105479,
-          "feeChargedStroops": "35955",
-          "resourceFeeStroops": "46342",
-          "instructions": 2259801,
-          "diskReadBytes": 144,
-          "writeBytes": 800,
-          "envelopeBytes": 2560,
+          "hash": "de01317d035e55f6bc0ddc09f5de6ea172c80e72ce45b094fe46550cc3355920",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/de01317d035e55f6bc0ddc09f5de6ea172c80e72ce45b094fe46550cc3355920",
+          "ledger": 5698684,
+          "feeChargedStroops": "20127",
+          "resourceFeeStroops": "26873",
+          "instructions": 3426888,
+          "diskReadBytes": 288,
+          "writeBytes": 704,
+          "envelopeBytes": 2696,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
           "events": [
             {
               "topics": [
                 "upto_settled",
-                "CAFLGBBXESMRLBFNTG3USDML66437G74EACP3LVOUZPUUJDJQT3HMQEO",
+                "CBFIYRHJG4C4E4AU3K5XCCMSZKZR3IMVFPCKNAJ3OBRQCHDLPCT3GV53",
                 "GCADNNOZTTKEGX3Z2TA6O2MLPVPMPXL3OLI6UWWQNWZSEANFDOMNE6F6",
                 "GARJEZ3CMPI6UJ7OAAX3GIQ5OVX3FJTCLC2DEZVLTUA2K62GY3HDKGTK"
               ],
               "data": {
                 "actual_amount": "4000",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    53,
-                    5,
-                    238,
-                    4,
-                    47,
-                    196,
-                    105,
-                    140,
+                    79,
+                    205,
+                    26,
+                    3,
+                    28,
+                    147,
+                    194,
+                    37,
+                    180,
+                    39,
                     30,
-                    100,
-                    73,
-                    125,
-                    255,
+                    123,
+                    246,
+                    135,
+                    82,
+                    200,
+                    79,
+                    149,
+                    45,
+                    2,
+                    149,
+                    153,
+                    103,
+                    200,
+                    186,
+                    114,
+                    223,
+                    78,
+                    87,
                     32,
-                    61,
-                    128,
-                    52,
-                    72,
-                    20,
-                    111,
-                    1,
-                    5,
-                    116,
-                    132,
-                    36,
-                    174,
-                    136,
-                    236,
-                    62,
-                    32,
-                    249,
-                    126
+                    151,
+                    12
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -1908,7 +2310,7 @@
       "token": "all",
       "scenario": "facilitator refuses an allowance that outlives the window",
       "expected": "refused before settlement",
-      "outcome": "refused: 5205479 is over 204 ledgers ahead",
+      "outcome": "refused: 5798684 is over 204 ledgers ahead",
       "pass": true,
       "transactions": []
     },
@@ -1916,7 +2318,7 @@
       "token": "all",
       "scenario": "facilitator refuses an allowance that ends before the deadline",
       "expected": "refused before settlement",
-      "outcome": "refused: 5105481 is before ledger 5105646",
+      "outcome": "refused: 5698686 is before ledger 5698851",
       "pass": true,
       "transactions": []
     },
@@ -1932,22 +2334,21 @@
       "token": "all",
       "scenario": "fresh proxy extends its instance by the cap per settlement",
       "expected": "instance +720 ledgers per settlement, code unchanged",
-      "outcome": "CBPUP5UONTDW5FXCX6FE5PWXT5M4LA7BF5NIM7PDHEAU4UFYCDW4MBGA: instance live until 5226440 → 5227880 after 2 settlements, code unchanged at 8215837",
+      "outcome": "CCAUGKKXF4BMC2FN4ADDHXDD7KPWSQBBWS3UE6UOOHHR43LEPF5JADSQ: instance live until 5819645 → 5821085 after 2 settlements, code unchanged at 8809046",
       "pass": true,
       "transactions": [
         {
-          "hash": "999ac4b94a396089f683374535338a8a116618f3647dbac5d6c5819a86aa45cf",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/999ac4b94a396089f683374535338a8a116618f3647dbac5d6c5819a86aa45cf",
-          "ledger": 5105483,
-          "feeChargedStroops": "46886",
-          "resourceFeeStroops": "58544",
-          "instructions": 1576611,
-          "diskReadBytes": 376,
-          "writeBytes": 776,
-          "envelopeBytes": 2500,
+          "hash": "42a9c35abbfb3ed5c2ddf4516330fc649d9246f0f726cb3cd703e7b980023798",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/42a9c35abbfb3ed5c2ddf4516330fc649d9246f0f726cb3cd703e7b980023798",
+          "ledger": 5698687,
+          "feeChargedStroops": "24422",
+          "resourceFeeStroops": "30162",
+          "instructions": 2708059,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
           "events": [
             {
               "topics": [
@@ -1958,62 +2359,61 @@
               ],
               "data": {
                 "actual_amount": "1",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    189,
-                    192,
-                    144,
-                    244,
-                    238,
-                    124,
-                    228,
-                    208,
-                    144,
-                    187,
-                    83,
-                    21,
-                    116,
-                    191,
-                    24,
-                    16,
-                    104,
-                    105,
-                    40,
-                    111,
-                    207,
-                    158,
-                    117,
-                    152,
-                    49,
-                    60,
-                    73,
-                    133,
-                    133,
-                    11,
+                    168,
+                    139,
                     63,
-                    165
+                    110,
+                    144,
+                    129,
+                    245,
+                    110,
+                    92,
+                    87,
+                    238,
+                    179,
+                    152,
+                    142,
+                    65,
+                    20,
+                    92,
+                    107,
+                    118,
+                    218,
+                    248,
+                    254,
+                    88,
+                    80,
+                    156,
+                    250,
+                    207,
+                    47,
+                    248,
+                    89,
+                    162,
+                    222
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
         },
         {
-          "hash": "0389a4a605e1b8528a6cd9517901f163ebb01ffe4993dbdea595048140e4deb3",
-          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/0389a4a605e1b8528a6cd9517901f163ebb01ffe4993dbdea595048140e4deb3",
-          "ledger": 5105484,
-          "feeChargedStroops": "43849",
-          "resourceFeeStroops": "55048",
-          "instructions": 1606865,
-          "diskReadBytes": 376,
-          "writeBytes": 776,
-          "envelopeBytes": 2500,
+          "hash": "b793452ef6645b46e6833cd9bcf761e74dbbf8254b216de581ffc73ba447f91c",
+          "link": "https://testnet.sorobanscan.rumblefish.dev/transactions/b793452ef6645b46e6833cd9bcf761e74dbbf8254b216de581ffc73ba447f91c",
+          "ledger": 5698688,
+          "feeChargedStroops": "23075",
+          "resourceFeeStroops": "28611",
+          "instructions": 2737335,
+          "diskReadBytes": 520,
+          "writeBytes": 680,
+          "envelopeBytes": 2636,
           "feeSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
-          "txSource": "GB7CH4WL5O7EPIO5ZEXHG7DLGN6DPJVRPSZRFDFAJWDD6TO2JIMK7Q7G",
-          "opSource": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
+          "txSource": "GDWHQT74HWFLIWJIYMX7POQIPT5EBSDPX666MJJUGT7AYP47G3HR7ON2",
           "events": [
             {
               "topics": [
@@ -2024,45 +2424,45 @@
               ],
               "data": {
                 "actual_amount": "1",
-                "facilitator": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM",
                 "max_amount": "1000000",
                 "nonce": {
                   "type": "Buffer",
                   "data": [
-                    51,
-                    227,
                     135,
-                    172,
-                    163,
-                    55,
-                    55,
-                    234,
-                    191,
-                    226,
-                    145,
-                    108,
-                    96,
-                    138,
-                    118,
-                    63,
+                    85,
+                    31,
+                    0,
+                    29,
+                    155,
+                    203,
+                    219,
                     107,
-                    239,
-                    213,
-                    194,
-                    12,
+                    163,
+                    84,
+                    240,
+                    255,
+                    184,
+                    100,
+                    56,
+                    251,
+                    158,
+                    36,
+                    208,
+                    247,
+                    91,
+                    204,
                     89,
-                    187,
-                    188,
-                    64,
-                    48,
-                    136,
-                    171,
-                    122,
-                    223,
-                    80,
-                    106
+                    96,
+                    85,
+                    166,
+                    100,
+                    201,
+                    180,
+                    229,
+                    89
                   ]
-                }
+                },
+                "receiver_authorizer": "GBM7Q4MDPBB4QOYUKRZIOO2PZDIZIO4YX44AKFJNZPR3SDP6EKC7BNLM"
               }
             }
           ]
@@ -2074,7 +2474,7 @@
       "token": "all",
       "scenario": "proxy instance and code stay alive",
       "expected": "TTL >= 518280 ledgers",
-      "outcome": "instance 3110351, code 3110353 ledgers left at ledger 5105484",
+      "outcome": "instance 3110357, code 3110358 ledgers left at ledger 5698688",
       "pass": true,
       "transactions": []
     },

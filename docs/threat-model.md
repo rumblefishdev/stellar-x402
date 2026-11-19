@@ -2,8 +2,8 @@
 
 Written so far: the `upto` contract, `/verify` RPC failover, auth-entry expiry, settlement fees
 (what `/settle` can cost the facilitator: spend budgets, breakers, fee griefing with failed
-transactions) and the facilitator key. Planned: catalog integrity, auth-entry validation, SSRF in
-Bazaar metadata, API key abuse.
+transactions), API keys and the facilitator key. Planned: catalog integrity, auth-entry
+validation, SSRF in Bazaar metadata.
 
 ## `upto` contract
 
@@ -14,9 +14,10 @@ itself is covered separately.
 ### Assets and trust
 
 - **The payer's tokens.** The client authorizes up to `max_amount` of one token, to one
-  recipient, through one facilitator, within a time window.
-- **The seller's payment.** The seller serves first and relies on the facilitator to settle the
-  amount it asks for afterwards.
+  recipient, with one receiver authorizer, within a time window.
+- **The seller's payment.** The seller serves first. In self-managed mode it signs the actual
+  amount itself; in facilitator-delegated mode it relies on the facilitator to settle the amount
+  it asks for.
 - **The facilitator's XLM.** It pays every transaction fee and fee bump.
 
 What each party must trust:
@@ -34,33 +35,50 @@ What each party must trust:
 
 - **Attack:** Someone who sees the client's signed entry (in the payload, or in a pending
   transaction) settles it first, for example for 1 stroop, cheating the seller.
-- **Mitigation:** The client signs `facilitator`, and the contract calls
-  `facilitator.require_auth()`; the facilitator's authorization covers `actual_amount`. Another
-  submitter fails with `Error(Auth, InvalidAction)` (spike S5, and the 0004 "different facilitator"
-  scenario). Another facilitator that rewrites `facilitator` to itself breaks the client's
-  signature (0004 tampering scenario).
+- **Mitigation:** The client signs `receiver_authorizer`, and the contract calls
+  `receiver_authorizer.require_auth()`; that authorization covers `actual_amount`. Without the
+  receiver authorizer's signature, a submitter fails with `Error(Auth, InvalidAction)` (spike S5,
+  and the e2e "different facilitator" scenario). Another facilitator that rewrites
+  `receiver_authorizer` to itself breaks the client's signature (e2e tampering scenario).
 - **Residual risk:** None found.
 
 #### Replay of a signed entry
 
 - **Attack:** Submitting the same signed entry a second time.
-- **Mitigation:** Soroban makes each auth entry single-use: `Error(Auth, ExistingValue)`. Shown on
-  testnet in 0004.
+- **Mitigation:** Soroban makes each auth entry single-use: `Error(Auth, ExistingValue)`. This is
+  the only single-use check; the contract stores no nonce of its own (ADR 0010, D6). Shown on
+  testnet in 0004 and again on 2026-11-12. The facilitator records `(from, auth nonce)` before
+  every settlement and refuses the entry afterwards: a zero settlement never reaches the chain, and
+  the record keeps concurrent `/settle` calls from paying for a duplicate (spec §8.1). The record
+  reopens only when nothing was sent or the transaction ended `FAILED`; either way the host's
+  nonce is unused, so the entry still settles at most once.
 - **Residual risk:** None.
 
-#### Replay of a payment nonce
+#### Reuse of a payment ID
 
-- **Attack:** A client (or a facilitator holding two entries) signs two payments with the same x402
-  nonce.
-- **Mitigation:** The contract stores `(from, nonce)` until at least `allowance_expiration_ledger`
-  and refuses a second settlement with `NonceUsed` (shown in 0004). After the entry expires, the
-  facilitator's durable record of settled pairs refuses reuse at verify and settle (spec §8.1).
-- **Residual risk:** The contract keys the nonce by `(from, nonce)`, without the facilitator, and
-  each facilitator's record covers only its own settlements. A client can sign the same nonce for
-  two sellers on different facilitators: both pass `/verify`, both sellers serve, the first
-  settles, and the second's `settle_upto` fails with `NonceUsed` while the first entry is live.
-  This doesn't move extra funds, but it leaves the second seller unpaid; see
-  [Seller not paid](#seller-not-paid).
+- **Attack:** A client signs two entries with the same x402 `nonce`.
+- **Mitigation:** None needed: `nonce` is only a payment ID, and two signed entries are two
+  payments the client authorized. Both settle (e2e, 2026-11-12). Until 2026-11-12 the contract
+  stored the nonce and refused the second with `NonceUsed`, which left a second seller who had
+  already served unpaid.
+- **Residual risk:** An indexer or seller that treats `nonce` as unique sees two settlements under
+  one ID. Use the transaction hash, or `(from, auth nonce)`, as the unique key.
+
+#### Receiver authorizer key
+
+- **Attack:** In self-managed mode the resource server holds a hot key that authorizes the actual
+  amount. Someone who steals it authorizes charges on open authorizations.
+- **Mitigation:** The key can only authorize `settle_upto` calls the client already signed: the
+  money goes to the signed `payTo`, at most the signed ceiling, within the signed window. It holds
+  no funds. In facilitator-delegated mode the facilitator holds this authority instead, and the
+  server trusts it to charge only the amount asked for.
+- **Residual risk:** A stolen key can charge every open authorization up to its ceiling, to the
+  seller's own `payTo`. The exposure is the same as a dishonest seller's (see the trust note
+  above), bounded by the ceilings and windows. Open authorizations are bound to the key, so it
+  can't be revoked before they expire, and rotating it strands them; short windows limit both.
+  Each facilitator's settlement record is its own, so in self-managed mode a server that
+  zero-settled an entry at one facilitator can still charge it, within its ceiling, through
+  another.
 
 #### Blind signing by the client
 
@@ -103,7 +121,7 @@ What each party must trust:
   the payer until `allowance_expiration_ledger`; after a zero settlement, the full ceiling. 0004
   measured 750,000 left after settling 250,000 of a 1,000,000 ceiling.
 - **Mitigation:** Only the proxy is the spender, and it calls `transfer_from` only inside
-  `settle_upto`, after a new client signature, an unused nonce and the facilitator's authorization.
+  `settle_upto`, after a new client signature and the receiver authorizer's authorization.
   The next settlement's `approve` overwrites the value. The allowance expires with the ledger the
   client signed, at most about `maxTimeoutSeconds` ahead.
 - **Residual risk:** A wallet or explorer shows an open allowance to the proxy for a few minutes. A
@@ -114,8 +132,8 @@ What each party must trust:
 
 - **Attack:** A token contract re-enters the proxy, lies in events, charges transfer fees or ignores
   expiry.
-- **Mitigation:** Soroban forbids re-entry, and the nonce is written before any token call. The
-  proxy holds no funds or shared state a token could reach; its only state is nonces keyed by payer.
+- **Mitigation:** Soroban forbids re-entry. The proxy holds no funds and stores no contract data a
+  token could reach.
   The facilitator lists accepted tokens in `/supported` and checks balance changes in the
   settle-time simulation, not only events.
 - **Residual risk:** A bad token can only harm the payer and seller who chose it, for example a
@@ -125,7 +143,7 @@ What each party must trust:
 
 - **Attack:** In `upto` the seller serves before settlement, so a client can receive the service
   and then make the settlement fail: move its balance away between `/verify` and `/settle`, or
-  reuse its nonce with another facilitator so the second settlement fails with `NonceUsed`.
+  revoke its allowance to the proxy.
 - **Mitigation:** Short windows (`maxTimeoutSeconds`) and settling soon after serving. At settle,
   the facilitator re-simulates against current state, which shows a balance below the actual
   amount, and refuses before sending, so it pays no fee. Sellers can settle per request or in
@@ -143,28 +161,33 @@ What each party must trust:
   0004 were caught this way). Spend budgets and breakers per payer and per facilitator ([ADR
   0007](adr/0007-fee-abuse-containment.md)) bound what gets through.
 - **Residual risk:** The state can still change between simulation and inclusion (a few seconds),
-  and the fee is charged on failure. Bounded by the budgets.
+  and the fee is charged on failure. Bounded by the budgets. An `upto` record reopened after a
+  `FAILED` transaction is resent only after a passing simulation, and the number of resends per
+  entry is bounded (0015).
 
 #### Fee inflation by rent
 
 - **Attack:** Payments that create ledger entries (a recipient's first balance in a token, a
-  client's first allowance entry, a nonce entry with a long TTL) or extend an entry's TTL (a token
+  client's first allowance entry, a host nonce entry with a long TTL) or extend an entry's TTL (a token
   instance whose TTL runs low, or the proxy's own instance and code) pay rent on top of the normal
   fee. A payment that touches an archived entry (the token's instance or code, a non-SAC balance,
   a C-account's SAC balance) restores it and pays its restore rent in the same fee: 0021's testnet
   run measured resource fees of 342,189 and 551,787 stroops with archived entries, against 14,278
   for live USDC.
   The payer picks `allowance_expiration_ledger`, and the facilitator pays temporary rent on the
-  nonce entry and the token's allowance entry until then: in the unit test
+  token's allowance entry until then: in the unit test
   `a_far_allowance_expiration_costs_the_facilitator_rent`, the furthest expiry the network allows
   costs about 14 million stroops more than one 12 ledgers ahead. The host also keeps a nonce
   entry for the client's signature until `signatureExpirationLedger`, which the payer picks too
-  and the contract never sees. Over the fee ceiling, the settlement is refused after the seller
+  and the contract never sees; in self-managed mode the same holds for the server's entry and its
+  `signatureExpirationLedger`. Over the fee ceiling, the settlement is refused after the seller
   has served; under it, every settlement can be made to cost up to the ceiling.
 - **Mitigation:** The facilitator computes fees from a fresh simulation and caps them with
   `maxFeeStroops` (250,000 by default, ADR 0007). At verify it refuses an
   `allowance_expiration_ledger` beyond the payment window and a `signatureExpirationLedger` that
-  differs from it (README, Verify step 2). The second check is the only bound on the signature
+  differs from it (README, Verify step 2); at settle, in self-managed mode, it refuses a server
+  entry whose `signatureExpirationLedger` is past the client's. Like the client rule, that check
+  lives only in the spec until the facilitator's `upto` settlement (task 0015) implements it. The second check is the only bound on the signature
   nonce's rent, so it is required, not defence in depth; the facilitator's `/verify` for `upto` is task 0015, and until
   then the rule is enforced only by the e2e suite's `checkClientAuth`. The contract refuses an
   expiry more than 17,280 ledgers (about a day) ahead, so even a facilitator that skips the check
@@ -185,9 +208,9 @@ What each party must trust:
 
 #### Nonce griefing
 
-- **Attack:** A third party consumes a client's nonce to block its payment.
-- **Mitigation:** Storing a nonce requires the client's signature and the facilitator's
-  authorization. Nonces are keyed per payer, so payers can't collide.
+- **Attack:** A third party consumes a client's auth nonce to block its payment.
+- **Mitigation:** Consuming it requires the client's signed entry and the receiver authorizer's
+  authorization. Host nonces are keyed per address, so payers can't collide.
 - **Residual risk:** None.
 
 #### Proxy archived
@@ -329,8 +352,8 @@ Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6
 
 Scope: what `/settle` for `exact` can cost the facilitator, which pays every fee (AD-10), and the
 spend budgets and breakers that bound it (AD-18, [ADR 0007](adr/0007-fee-abuse-containment.md),
-task 0024). `/settle` accepts any SEP-41 token. On testnet it takes no API key; on pubnet it will
-require one (0105).
+task 0024). `/settle` accepts any SEP-41 token. On testnet it takes no API key; on pubnet it
+requires one (0105, "API keys" below).
 
 ### Threats
 
@@ -386,22 +409,42 @@ require one (0105).
 
 #### Payload front-running
 
-- **Attack:** A seller (or anyone the payload reaches) submits the buyer's signed payload itself,
-  paying its own fee, before the facilitator does. Our transaction then fails on chain at our fee
-  with `Error(Auth, ExistingValue)`: the nonce is used. Charged to the payer, three of them would
-  close the buyer's USDC breaker for every seller.
-- **Mitigation:** A reused nonce feeds no breaker: the payer signed one payment and it settled.
-  The fee still counts against the budgets. The payment itself settled once, so nobody is paid
-  twice. The host checks the nonce when the token calls `require_auth`, before a C-account's
-  `__check_auth` runs, so the error names the token, never the payer: shown on testnet for a
-  `test-wallet` payer in a wasm token and in a SAC (task 0024,
-  `apps/facilitator/test/live/results/front-run-testnet.json`).
-- **Residual risk:** Each front-run costs us one fee, bounded by the budgets, and costs the
-  front-runner its own. A wasm token can raise `Error(Auth, ExistingValue)` itself (a
-  `require_auth` of its own on a used entry), so its failures feed no breaker; they stay bounded
-  by the budgets. The same error in a C-account payer's own frame can't come from a front-run
-  (the token's frame fails first), only from the wallet's own nested auth, so it is blamed on the
-  payer like any failure there: its breaker opens at once.
+- **Attack:** Anyone who sees the buyer's signed entry submits it in a transaction of their own,
+  paying its own fee, before the facilitator's lands. It reaches the seller, anyone the seller's
+  logs reach, and every node of the network: our pending transaction is flooded to all connected
+  peers, and the RPC node holds it. Our transaction then fails on chain at our fee with
+  `Error(Auth, ExistingValue)`: the nonce is used. Or it lands first and our checks' simulation
+  fails the same way. The payer can also spend the nonce itself, on a second entry it signs under
+  the same nonce. Charged to the payer, three of them would close the buyer's USDC breaker for
+  every seller.
+- **Mitigation:** A used nonce proves only that some entry with that nonce was used, not that this
+  payment was paid: the same signed entry pays the seller, a second entry under the same nonce
+  (shown on testnet: 1 stroop to another account) pays the seller nothing. So `/settle` never
+  answers `success` for a transaction it didn't submit, and never tells the client to sign a new
+  payment either: it answers `…_nonce_consumed_elsewhere`, and the chain tells which it was (task
+  0141; both cases in `apps/facilitator/test/fixtures/nonce-consumed-elsewhere.json`). The code
+  comes from the payer's nonce entry on chain, not from the error: our failed transaction wrote no
+  nonce, so an entry means another transaction used it. Answering
+  `success` would let a buyer race one entry through two facilitators to the same seller and be
+  served twice. With an error event that names it, a used nonce feeds no breaker; without one (an
+  RPC without diagnostic events) it still does until task 0141 decision 9. The fee still counts
+  against the budgets, and each such record is logged with it
+  (`settlement_nonce_consumed_elsewhere`). The host runs a C-account's `__check_auth` first and
+  checks the nonce after it, when the token calls `require_auth` (`authenticate`, then
+  `verify_and_consume_nonce`, in soroban-env-host's `auth.rs`), so for a payer whose `__check_auth`
+  passes the error names the token: shown on testnet for a `test-wallet` payer in a wasm token and
+  in a SAC (task 0024, `apps/facilitator/test/live/results/front-run-testnet.json`). A wallet whose
+  own check fails first, say on a spending limit the front-run used up, fails in its own frame.
+- **Residual risk:** A buyer whose entry was submitted by someone else paid and is refused: the
+  seller holds the payment until it refunds. The front-runner gains nothing and pays its own fee; no
+  case was found in about 4,500 pubnet settlements of four submitters (March to November 2026).
+  Stellar has no private submission, so only an entry bound to the facilitator, as
+  `contracts/upto-proxy` binds it, would prevent it. Each front-run costs us one fee, bounded by the
+  budgets. A wasm token can raise `Error(Auth, ExistingValue)` itself (a `require_auth` of its own
+  on a used entry), so its failures feed no breaker; they stay bounded by the budgets. They are
+  answered as a used nonce only when the payer's nonce entry is on chain. The same error in a C-account payer's own frame can't come from a
+  front-run (the token's frame fails first), only from the wallet's own nested auth, so it is blamed
+  on the payer like any failure there: its breaker opens at once.
 
 #### Shared budget exhaustion by Sybil self-payments
 
@@ -420,9 +463,10 @@ require one (0105).
   `spend_budget_nearing` fires at 80 % of a shared budget, and the facilitator README has a
   runbook to tell an attack from real traffic.
 - **Residual risk:** Accepted on testnet (decided by akot, 2026-10-30): the shared budgets bound
-  the loss, not availability. On pubnet `/verify` and `/settle` will require an API key issued
-  after Discord sign-in, and a key's settlements count in a budget of its own, not in the shared
-  ones (0105, 0106, 0107; akot, 2026-11-03); `stellar:pubnet` is refused until they land. A
+  the loss, not availability. On pubnet `/verify` and `/settle` require an API key (0105), to be
+  issued after Discord sign-in (0106), and a key owner's settlements will count in a budget of its
+  own, not in the shared ones (0107; akot, 2026-11-03); `stellar:pubnet` is refused until that
+  lands. A
   Discord account then plays the part of an address, but only up to its free quota, and all free
   quotas share one budget, so many accounts use up only the free traffic (0107).
 
@@ -440,6 +484,142 @@ require one (0105).
 - **Residual risk:** The USDC route is accepted, as Sybil self-payments are: per-party budgets
   bound one address, not one attacker. On pubnet API keys (0105) close it only if the `payTo`
   budget is also kept per caller, one of 0107's decisions.
+
+## API keys
+
+Scope: the API key a `/verify` or `/settle` request for `stellar:pubnet` must carry (AD-11,
+[ADR 0007](adr/0007-fee-abuse-containment.md)'s amendments of 2026-11-03 and 2026-11-13, task
+0105), and its registry. A key says who calls, so the rate limiter and, with 0107, the fee budgets
+can count a caller; it gives no right over anyone's funds, and a payment is still authorized only
+by its payer's signature. Who may get a key is the portal's rule (0106), not covered here.
+
+### Threats
+
+#### A key leaks
+
+- **Attack:** A seller's key ends up in a repository, a log or a client bundle, and someone else
+  calls `/verify` and `/settle` with it. They use up the owner's rate budget, so the owner's own
+  requests get a 429, and with 0107 the owner's free quota and fee budget.
+- **Mitigation:** The owner's key is revoked, by the operator's script or the portal, and the
+  revocation holds from the next request on every instance: the registry is read on each request
+  and nothing caches it. The count is the owner's, so the replacement key starts no new budget
+  for the thief to share. The `x402_` prefix lets a secret scanner recognize a key. The
+  facilitator logs a key's owner, never the key or its hash.
+- **Residual risk:** Until the owner notices, the thief spends the owner's budgets. A key never
+  expires on its own. `/settle` can't be called from a browser (no CORS), but nothing stops a
+  seller from shipping its key in one.
+
+#### The registry or its backup is read
+
+- **Attack:** Someone reads `api_keys`, from the database, a dump or a backup (ADR 0012), to call
+  as the sellers in it.
+- **Mitigation:** The registry holds each key's SHA-256, never the key, and the table's own CHECK
+  refuses anything but 64 hex digits in that column. A key is 32 random bytes, so its hash can't
+  be searched back into the key, salted or not. The hash is not a credential: sent as a key it is
+  refused as malformed, without a read. Beside it, `api_key_copies` holds a sealed copy of each
+  key the portal issued, so the API hub can show it again (0106): AES-256-GCM under the portal's
+  `KEY_ENCRYPTION_KEY`, which the database never holds, bound to the key's owner and hash so a
+  copy moved to another row doesn't open, and deleted when the portal revokes the key. A dump
+  alone opens no copy.
+- **Residual risk:** The owners are readable, and from 0106 they are Discord account ids, which
+  its privacy policy has to cover. A dump together with `KEY_ENCRYPTION_KEY`, an encrypted
+  credential on the server that only the portal's container reads, gives every active key the
+  portal issued. Grants don't close the copies to anyone else in the database: the facilitator
+  connects as its owner and could read them, so only the encryption keeps them (0106 decision
+  18). Whoever can write the database can add a key of their own; that takes the database
+  password, which only the facilitator and the migration service hold (ADR 0012), or the
+  password of the portal's role `x402_portal`, which may insert a key.
+
+#### Someone holds the hub's token secret
+
+- **Attack:** The portal's backend issues, shows and revokes a key on the word of a token the API
+  hub signs, an HMAC under the secret `sorobanscan-hub/production/x402-token` (0106). Whoever
+  holds the secret signs a token for any Discord account and any act: a key for an account that
+  never asked or that the hub would refuse, any account's key shown, or revoked.
+- **Mitigation:** The secret is in AWS Secrets Manager, where the hub's backend reads it, and on
+  the server in one file, the encrypted credential `portal-hub-token-secret`, decrypted for the
+  portal's container only. Neither side logs it or a token. A token lives 60 seconds, names one
+  account and one act, and is signed under x402's own audience and context, so a token for
+  another of the hub's products doesn't pass here. The secret can be changed with no moment in
+  which a good token is refused, apart from the seconds of each of the backend's two restarts
+  (runbook, The portal's backend).
+- **Residual risk:** The backend can't tell a token the hub signed from one signed with a stolen
+  secret, and a key issued with one is a real key for that account. Membership of Stellar
+  Developers and its screening are the hub's to check before it signs for `issue`; the backend
+  checks only the account's age. Whoever can read the secret in that AWS account holds this
+  power, and so does root on the server.
+
+#### Requests without a valid key, in bulk
+
+- **Attack:** Someone floods `/verify` and `/settle` with pubnet requests that carry no key, or a
+  made-up one. A request refused for its key counts in no budget, so no 429 ever stops them: each
+  costs a body read and parse of at most `BODY_LIMIT_BYTES` (64 KiB), and each made-up key of the
+  right form one read of the registry.
+- **Mitigation:** A key of the wrong form is refused without a read. The read is one primary-key
+  lookup on the registry's own pool of 3 connections, so the flood queues there and takes no
+  connection from settlement, which runs on the main pool, or from the rate limiter's counters,
+  which have their own: a request on a network without keys, as every testnet payment is, doesn't
+  wait behind it. Nothing is verified or simulated for
+  such a request, so it costs no RPC call and no fee. The facilitator is reachable only through
+  Cloudflare (ADR 0011), whose rate rules are the place to stop a flood. The Free plan has one
+  rate-limit rule for the whole `sorobanscan.com` zone, shared with sorobanscan and the Prices
+  API, and a paid plan is 0038's to decide, so today that rule may not be ours to set.
+- **Residual risk:** Accepted (akot, 2026-11-13). A real key is read from the registry like a
+  made-up one, so while the flood keeps the registry's pool busy, every request with a key waits
+  behind it and may get a 500. The flood needs no pubnet: today's testnet process reads the
+  registry for a request that names `stellar:pubnet`, though there it holds up nobody, since
+  testnet's payments carry no key. Counting these requests by IP would stop it, but one caller
+  without a key could then lock out every seller behind its address, as sellers on Cloudflare
+  Workers are (0060). A budget of their own for refused requests has the same fault if it is
+  checked before the read, and spares no read if it is checked after; remembering unknown hashes
+  stops only a repeated key, and a flood makes up a new one each time. To settle before pubnet
+  opens, in 0126 or 0038. No alarm watches the 401s
+  yet: they are in `http_requests_total` under their route, with the status as a log field only.
+
+#### Guessing a key, or learning which keys exist
+
+- **Attack:** Someone tries keys until one works, or probes whether a key was ever issued.
+- **Mitigation:** A key is 256 random bits. An unknown key and a revoked one get the same answer,
+  401 `invalid_api_key`, after the same lookup, so the answer doesn't tell them apart.
+- **Residual risk:** None known.
+
+#### Naming another network to skip the key
+
+- **Attack:** A caller without a key names a network that needs none, or misspells
+  `stellar:pubnet`, in the hope of a pubnet settlement.
+- **Mitigation:** The rule reads `paymentRequirements.network`, the field the checks and the
+  settlement run on: a request settles on pubnet only if that field is exactly `stellar:pubnet`,
+  and then it needs the key. Any other value is another network: `invalid_network` if the process
+  doesn't serve it, a testnet settlement if it does. A payload that names a network other than
+  its requirements' is refused by the checks (`network_mismatch`).
+- **Residual risk:** The rule holds as long as the network a settlement runs on comes from this
+  field. 0126, which makes one process pick each network's pool by it, has to keep that.
+
+#### A new key for a new budget
+
+- **Attack:** A caller that used up its rate budget, or with 0107 its free quota, replaces its
+  key to start again.
+- **Mitigation:** The limiter counts by the key's owner, not the key, and an owner has one active
+  key (a partial unique index, whoever writes the row), so a replaced key continues the count.
+- **Residual risk:** A caller with several owners has several budgets. An owner costs a Discord
+  account that passed the portal's gates (0106), or the operator's decision to issue one by hand.
+
+#### A client over its budget still makes the server read its body
+
+- **Attack:** A client past its rate budget keeps sending. Before 0105 it got its 429 without the
+  body being read; now `/verify` and `/settle` read the body first, since it names the network,
+  so each request costs a read and a JSON parse of at most 64 KiB. On pubnet a caller past its
+  owner's budget costs a read of the key registry too: only the read names the owner, so it comes
+  before the count.
+- **Mitigation:** The body limit bounds each request's cost, and a client over budget is still
+  answered from memory, without a store write. A body that names no network counts under the
+  client's IP, so a malformed or oversized one is limited as before. The registry read is the one
+  primary-key lookup a made-up key costs, on the registry's own pool ("Requests without a valid
+  key, in bulk").
+- **Residual risk:** Accepted (akot, 2026-11-13): a parse costs less than the store write every
+  request within budget already makes. A flood large enough to matter is the edge's to stop.
+  Revoking the key of an owner that floods doesn't spare the read: a revoked key is looked up
+  like any other.
 
 ## Facilitator key
 

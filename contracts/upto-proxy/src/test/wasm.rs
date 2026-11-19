@@ -68,7 +68,7 @@ fn wasm_interface_has_only_the_spec_functions() {
     })
     .collect();
     functions.sort();
-    assert_eq!(functions, ["is_nonce_used", "settle_upto"]);
+    assert_eq!(functions, ["settle_upto"]);
 }
 
 /// Resource cost of one settlement through the WASM with the SAC (recorded for 0005).
@@ -90,7 +90,7 @@ fn wasm_settlement_cost() {
             token,
             from,
             to: Address::generate(&env),
-            facilitator: Address::generate(&env),
+            receiver_authorizer: Address::generate(&env),
             max_amount: MAX,
             nonce: BytesN::from_array(&env, &[7; 32]),
             valid_after: VALID_AFTER,

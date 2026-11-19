@@ -3,9 +3,9 @@ id: "0015"
 title: "Wire upto settlement into the facilitator's /settle (post-T1)"
 type: FEATURE
 status: backlog
-milestone: 2
+milestone: 3
 related_adr: ["0003", "0005", "0006"]
-related_tasks: ["0009", "0004", "0005", "0012", "0035", "0019", "0024", "0025", "0034"]
+related_tasks: ["0009", "0004", "0005", "0012", "0035", "0019", "0024", "0025", "0034", "0105"]
 tags: [facilitator, signer-pool, upto, settlement, priority-medium, effort-medium, payments]
 links:
   - ../../../docs/architecture/m1-spine.md
@@ -38,6 +38,21 @@ history:
       Moved to milestone 2 and waits on 0034: work starts only once the x402 Foundation
       accepts the Stellar upto spec. Context fixed: the record, budgets and lease come from 0019,
       0024 and 0025, not 0009.
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Added the seller check for facilitator-delegated mode: the facilitator signs the amount
+      itself, so `/settle` must check that the caller owns the offer's payTo (an API key alone
+      is not enough). related_tasks += 0105.
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Moved to milestone 3. The Panel Review budget gives Tranche #2 only the spec, submitted to
+      the TSC (0034). Tranche #3 holds the upstream merge, the conformance suite with a settled
+      transaction per scheme, and the buffer for TSC turnaround, and all of them need this task.
+      It can still start early if upstream accepts the spec during M2.
 ---
 
 # Wire upto settlement into the facilitator's /settle (post-T1)
@@ -111,6 +126,22 @@ address.
      whenever its TTL drops under its own threshold, so settlements never carry that rent. It
      helps `exact` too. Fits the operator jobs of 0025 and an alert in 0027.
 - Build the `settle_upto` call from the payload and submit it through the pool (AD-2, AD-4).
+- **Facilitator-delegated mode: only the seller may set the amount.** Here the facilitator signs
+  the receiver authorization itself, so the chain proves nothing about who asked for the amount.
+  The spec leaves it to the facilitator to authenticate the resource server's `/settle` "out of
+  band" (`scheme_upto_stellar.md`, "Receiver Authorizer Modes"). Without that check:
+  1. The client, who holds its own payload, calls `/settle` with amount 0 before the seller does.
+     The facilitator records `(from, authorization nonce)` as settled, and the seller's own
+     `/settle` is refused: served, never paid.
+  2. Anyone who sees the payload (logs, a proxy) calls `/settle` with amount = the ceiling, and the
+     client pays the maximum for what it didn't use.
+
+  An API key alone (0105) is not enough, since a client can have one too. `/settle` for a
+  facilitator-delegated `upto` payment must check that the caller owns the offer's `payTo` (the
+  key bound to that seller's account), and refuse others before recording anything. Decide how
+  that binding is kept and what testnet does, where 0105 asks for no key. Self-managed mode needs
+  none of this: the seller's own signature over `actual_amount` is the proof, checked by the
+  enforcing simulation and on chain.
 - **Zero-amount `upto`:** submit nothing and return `transaction: ""`, as the spec allows.
   Document that the client's nonce stays unused until its deadline. This was 0007 step 5
   (0007 Emerged 2).
@@ -136,3 +167,6 @@ address.
       extends the accepted tokens' instances outside settlements, so the measured 330,032-stroop
       stacked case settles
 - [ ] `/supported` lists `upto` on testnet
+- [ ] In facilitator-delegated mode, `/settle` refuses a caller that doesn't own the offer's
+      `payTo`, before it records anything; tests cover the client's own zero `/settle` and a
+      stranger's `/settle` at the ceiling

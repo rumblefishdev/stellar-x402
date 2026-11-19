@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createServer } from "@stellar-x402/mcp";
+import { createServer } from "./server.js";
 import { type CliConfig, loadConfig } from "./config.js";
 
 // stdout carries the MCP protocol, so everything else goes to stderr.

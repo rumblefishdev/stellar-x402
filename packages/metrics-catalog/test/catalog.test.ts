@@ -95,10 +95,14 @@ describe("CATALOG", () => {
     }
   });
 
-  test("http_requests_total: sets [route] and [status] when status=500, scope process", () => {
+  test("http_requests_total: sets [route], [status] for a 500 and [route, status] for /verify's 503, scope process", () => {
     const m = def("http_requests_total");
     expect(m.scope).toBe("process");
-    expect(m.sets).toEqual([{ dims: ["route"] }, { dims: ["status"], when: { status: ["500"] } }]);
+    expect(m.sets).toEqual([
+      { dims: ["route"] },
+      { dims: ["status"], when: { status: ["500"] } },
+      { dims: ["route", "status"], when: { route: ["/verify"], status: ["503"] } },
+    ]);
     expect(m.values?.route).toEqual([
       "/verify",
       "/settle",
@@ -166,6 +170,7 @@ describe("CATALOG", () => {
       account_state_mismatches: "network",
       account_effects_unexpected: "network",
       backup_secret_reads: "process",
+      upstream_files_changed: "process",
     });
   });
 
@@ -227,6 +232,7 @@ describe("CATALOG", () => {
       "settlement_history_gone_total",
       "settlement_landed_after_expired_total",
       "settlement_rewrapped_total",
+      "settlement_nonce_consumed_elsewhere_total",
       "signer_failures_total",
       "pool_events_total",
       "settlement_uncertain_total",
@@ -288,6 +294,7 @@ describe("CATALOG", () => {
       account_state_mismatches: [g, "Count", net],
       account_effects_unexpected: [c, "Count", net],
       backup_secret_reads: [c, "Count", proc],
+      upstream_files_changed: [g, "Count", proc],
     };
     expect(Object.fromEntries(ALL.map((m) => [m.name, [m.kind, m.unit, m.scope]]))).toEqual(
       expected,
@@ -376,10 +383,11 @@ describe("effectiveSets", () => {
     expect(effectiveSets(def("disk_used_percent"))).toEqual([{ dims: ["path"] }]);
   });
 
-  test("http_requests_total has two sets, the second only for a 500", () => {
+  test("http_requests_total has three sets, the second only for a 500, the third for /verify's 503", () => {
     expect(effectiveSets(def("http_requests_total"))).toEqual([
       { dims: ["route"] },
       { dims: ["status"], when: { status: ["500"] } },
+      { dims: ["route", "status"], when: { route: ["/verify"], status: ["503"] } },
     ]);
   });
 });

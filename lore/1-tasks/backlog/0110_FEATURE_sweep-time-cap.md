@@ -8,7 +8,7 @@ related_adr: ["0011"]
 related_tasks: ["0027", "0019"]
 tags: [facilitator, settlement, priority-low, effort-small, platform]
 links:
-  - ../active/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md
+  - ../archive/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md
 history:
   - date: "2026-11-03"
     status: backlog

@@ -22,8 +22,18 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     group: "facilitator",
     signal: { catalog: "http_requests_total", dims: { status: "500" } },
     description: {
-      what: "The facilitator answered with status 500, across every route and network: an error it doesn't classify, so it treats it as ours. A burst sends one message. A lease or drain 503 isn't counted.",
+      what: "The facilitator answered with status 500, across every route and network: an error it doesn't classify, so it treats it as ours. A burst sends one message. A 503 isn't counted: verify-rpc-unavailable covers /verify's, and a lease or drain 503 on /settle is routine.",
       next: `Read the error lines around that time in /x402/${c.envName}/app with Logs Insights.`,
+      noData: SILENT_EVENT,
+    },
+  });
+
+  f.event("verify-rpc-unavailable", {
+    group: "facilitator",
+    signal: { catalog: "http_requests_total", dims: { route: "/verify", status: "503" } },
+    description: {
+      what: "/verify answered 503 rpc_unavailable: no RPC URL gave upstream's verify a verdict (each hung for 10 s or answered unexpected_verify_error), or the facilitator's ledger read failed on every URL. Sellers can't check payments, so buyers are refused. A burst sends one message.",
+      next: `Read verify_rpc_unavailable and rpc_exhausted in /x402/${c.envName}/app with Logs Insights: rpc_exhausted names each URL and why it failed.`,
       noData: SILENT_EVENT,
     },
   });
@@ -73,7 +83,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       comparison: ">",
       threshold: 0,
       description: {
-        what: `Settle on ${network} has waited for a free channel for 3 minutes, every sample of each minute: every channel is busy or out of the pool.`,
+        what: `Settle on ${network} has waited for a free channel for 3 minutes, every sample of each minute: every channel is busy, out of the pool, or held back after a deploy (0090).`,
         next: "Check channel-quarantined and the traffic; add channels (docs/runbook.md, OpenBao) when it is load rather than faults that holds them.",
         noData: SILENT_LEVEL,
       },

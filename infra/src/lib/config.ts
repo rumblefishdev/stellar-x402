@@ -58,6 +58,11 @@ export const ALARM_GROUPS = [
    * two series have data (decision 70).
    */
   "protocol",
+  /**
+   * `upstream-changed` and `upstream-silent`, from the check's daily upstream section (task 0029),
+   * once its 08:00 UTC run has published: until then `upstream-silent` sees no point and fires.
+   */
+  "upstream",
 ] as const;
 export type AlarmGroup = (typeof ALARM_GROUPS)[number];
 

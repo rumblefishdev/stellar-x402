@@ -1,4 +1,5 @@
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
+import { apiKeyHash, isApiKeyOwner, newApiKey } from "@stellar-x402/api-keys";
 import {
   FallbackRpc,
   SettlementSubmitter,
@@ -32,8 +33,10 @@ import {
   type Reconciliation,
 } from "./settlement/reconcile.js";
 import { createLeaseKeeper } from "./settlement/lease.js";
+import { createChannelHolder, type ChannelHolder } from "./settlement/open-channels.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
+import { createNonceLookup } from "./settlement/nonce-used.js";
 import { createTrustlineLookup } from "./settlement/trustline.js";
 import {
   UPSTREAM_TIMEOUT_MS,
@@ -104,7 +107,7 @@ export function buildRpc(
 
 /**
  * Upstream's signer for `ExactStellarScheme`, which `/verify` uses only for the facilitator's
- * address (`@x402/stellar` 2.28.0 `exact/facilitator/index.mjs:69-104`); `/settle` signs through
+ * address (`@x402/stellar` 2.31.0 `exact/facilitator/index.mjs:71-106`); `/settle` signs through
  * the pool, so upstream never signs and no secret is needed here.
  */
 function verifyOnlySigner(address: string): FacilitatorStellarSigner {
@@ -128,6 +131,7 @@ export function buildChecks(
   >,
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
+  metrics: NetworkMetrics,
   seams?: UpstreamSeams,
 ): VerifierDeps {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
@@ -142,6 +146,8 @@ export function buildChecks(
     maxValidityLedgers: config.settlement.maxValidityLedgers,
     latestLedger: async () => (await rpc.getLatestLedger()).sequence,
     missingTrustline: createTrustlineLookup(rpc, config.network, logger),
+    nonceUsed: createNonceLookup(rpc, config.network, logger),
+    metrics,
   };
 }
 
@@ -154,9 +160,10 @@ export function buildVerifier(
   rpc: Parameters<typeof buildChecks>[1],
   fees: FeeSettings,
   logger: Pick<Logger, "warn" | "info">,
+  metrics: NetworkMetrics,
   seams?: UpstreamSeams,
 ): Verify {
-  return createVerifier(buildChecks(config, rpc, fees, logger, seams));
+  return createVerifier(buildChecks(config, rpc, fees, logger, metrics, seams));
 }
 
 /**
@@ -194,6 +201,8 @@ export function buildSettlement(
   settle: Settle;
   submitter: SettlementSubmitter;
   reconciliation: Reconciliation;
+  /** Holds back the channels a previous process left open; run when the lease is acquired (0090). */
+  channelHolder: ChannelHolder;
   drain: () => Promise<void>;
 } {
   const { logger, metrics } = deps;
@@ -207,6 +216,7 @@ export function buildSettlement(
     logger,
     metrics,
     budgetMs: config.settlement.settleBudgetMs,
+    nonceUsed: deps.checks.nonceUsed,
   });
   // The only sender of transactions in the service (AD-2). `main()` checks its channels before
   // it starts, and `/settle` reaches it only while the process holds the lease (0025).
@@ -254,10 +264,22 @@ export function buildSettlement(
     settleTimeoutMs: config.settlement.settleTimeoutMs,
     budgetMs: config.settlement.settleBudgetMs,
     latestLedger: deps.checks.latestLedger,
+    nonceUsed: deps.checks.nonceUsed,
     records,
     lease: deps.lease,
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, metrics, network });
+  const channelHolder = createChannelHolder({
+    store: deps.store,
+    network,
+    channels: config.channels,
+    latestLedger: async () => {
+      const latest = await deps.rpc.getLatestLedger();
+      return { sequence: latest.sequence, closeTime: Number(latest.closeTime) };
+    },
+    hold: (address, until) => submitter.hold(address, until),
+    logger,
+  });
   // Gauges read at each sample, from memory only (0027 AD-5): `stats()` copies the pool's
   // counters and load, and the reconciler's age is taken at the read.
   metrics.registerGauge("pool_queued", () => {
@@ -271,10 +293,11 @@ export function buildSettlement(
   });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
   const drain = async () => {
+    channelHolder.close();
     await submitter.close();
     await settle.drain();
   };
-  return { settle, submitter, reconciliation, drain };
+  return { settle, submitter, reconciliation, channelHolder, drain };
 }
 
 /**
@@ -341,15 +364,19 @@ export function compose(
   // One fee configuration: `/verify` and `/settle` check with it, and the pool pays with it, so
   // they share one ceiling and one bid (AD-10).
   const fees = feeSettings(config.fees, rpc);
-  const checks = buildChecks(config, rpc, fees, logger, opts.seams);
+  const checks = buildChecks(config, rpc, fees, logger, metrics, opts.seams);
   const signer = openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
-  // One lease per network's channel set (AD-17): only its holder settles.
+  // One lease per network's channel set (AD-17): only its holder settles, and only once the
+  // channels the previous holder left a transaction open on are held back (0090). The holder is
+  // built with the submitter below, before the keeper's first attempt.
+  const late: { channelHolder?: ChannelHolder } = {};
   const lease = createLeaseKeeper({
     store: stores.settlements,
     network: config.network,
     ttlMs: config.settlement.leaseTtlMs,
     logger,
     metrics,
+    onAcquired: () => late.channelHolder!.holdOpen(),
   });
   // The spend lane (AD-18, 0024): before a submit, the fee account's balance floor, the breakers
   // and the fee budgets; once a record is final, the fee charged and the breakers' counts. The fee
@@ -391,7 +418,7 @@ export function compose(
     logger,
     metrics,
   });
-  const { settle, reconciliation, drain } = buildSettlement(config, {
+  const built = buildSettlement(config, {
     rpc,
     fees,
     checks,
@@ -407,6 +434,8 @@ export function compose(
     ...(opts.sleep && { sleep: opts.sleep }),
     lease: lease.current,
   });
+  const { settle, reconciliation, drain } = built;
+  late.channelHolder = built.channelHolder;
   return {
     deps: {
       config,
@@ -451,7 +480,8 @@ export async function main(
   const config = parseConfig(env);
   const logger = jsonLogger(config.logLevel, opts.write, config.rpcUrls);
   let pools:
-    { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool } | undefined;
+    | { main: pg.Pool; reserve: pg.Pool; rateLimits: pg.Pool; discovery: pg.Pool; apiKeys: pg.Pool }
+    | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   let rpcStall: RpcStallTracker | undefined;
   /** The EMF writer, for the catch: a start that failed stops it. */
@@ -466,7 +496,8 @@ export async function main(
     );
     // The stores need a migrated schema (`pnpm migrate`); the service never migrates it.
     // Reservations queue on the global scope's lock, a flood's hits on its key's row lock, and a
-    // burst of public listings on the pool itself; their own pools keep those off the others.
+    // burst of public listings or of made-up API keys' registry reads on the pool itself; their
+    // own pools keep those off the others.
     // A listing takes milliseconds (at most ~0.5 s measured at 1 000 000 entries), so the
     // discovery pool cuts one off sooner: until 0023's rate limits, 3 slow ones hold it.
     const url = config.databaseUrl;
@@ -475,6 +506,7 @@ export async function main(
       reserve: createPool(url, poolErrorLogger(logger), 3),
       rateLimits: createPool(url, poolErrorLogger(logger), 3),
       discovery: createPool(url, poolErrorLogger(logger), 3, DISCOVERY_STATEMENT_TIMEOUT_MS),
+      apiKeys: createPool(url, poolErrorLogger(logger), 3),
     };
     // Every migration this code knows, applied by the deploy before it starts (ADR 0011). A schema
     // ahead of the code passes, so a rollback to an earlier image starts.
@@ -596,6 +628,94 @@ export async function migrateMain(env: Record<string, string | undefined> = proc
   try {
     const applied = await migrate(pool, Date.now(), MIGRATIONS, { logger });
     logger.info("migrated", { applied });
+  } finally {
+    await pool.end();
+  }
+}
+
+/** What the operator's key script answers a mistake with: the entry point prints the message. */
+export class KeysError extends Error {
+  override name = "KeysError";
+}
+
+const KEYS_USAGE = `usage: keys issue <name> | keys revoke <name | owner> | keys list
+  issue <name>     a new key for operator:<name>, printed once; <name> is a-z, 0-9, "_" and "-"
+  revoke <owner>   revokes the owner's active key at once; a bare <name> means operator:<name>
+  list             every key: owner, state, times and the start of its hash`;
+
+/** A name the operator gives a key's holder: what follows `operator:` in the owner. */
+const OPERATOR_NAME = /^[a-z0-9][a-z0-9_-]*$/;
+
+type KeysCommand =
+  { command: "issue"; owner: string } | { command: "revoke"; owner: string } | { command: "list" };
+
+/** The command line of the key script; anything it doesn't take is a {@link KeysError}. */
+function parseKeysCommand(argv: readonly string[]): KeysCommand {
+  const [command, target, ...rest] = argv;
+  const usage = () => new KeysError(KEYS_USAGE);
+  if (command === "list" && target === undefined) return { command };
+  if ((command !== "issue" && command !== "revoke") || target === undefined || rest.length > 0)
+    throw usage();
+  // Only the portal issues an owner of another kind (0106), so `issue` takes a name alone; a
+  // revocation may name any owner, as the operator revokes a leaked key whoever issued it.
+  const named = OPERATOR_NAME.test(target);
+  const owner = named ? `operator:${target}` : target;
+  if ((command === "issue" && !named) || !isApiKeyOwner(owner)) throw usage();
+  return { command, owner };
+}
+
+/**
+ * `pnpm keys`: the operator's hand on the API key registry (0105), the same one the portal
+ * writes (0106). It needs only `DATABASE_URL`, of the network whose callers the key is for.
+ *
+ * `issue` prints the new key once, through `write` (stdout) and never through the logger: only
+ * its SHA-256 is stored, so a lost key is replaced, not read back. `revoke` holds from the
+ * caller's next request, on every instance. A mistake rejects with a {@link KeysError}.
+ */
+export async function keysMain(
+  argv: readonly string[],
+  env: Record<string, string | undefined> = process.env,
+  write: (line: string) => void = (line) => void process.stdout.write(`${line}\n`),
+): Promise<void> {
+  const parsed = parseKeysCommand(argv);
+  const { databaseUrl } = parseMigrateConfig(env);
+  // Stdout is the operator's, so a lost connection is logged to stderr.
+  const logger = jsonLogger("info", (line) => process.stderr.write(line));
+  const pool = createPool(databaseUrl, poolErrorLogger(logger), 1);
+  try {
+    const pending = await pendingMigrations(pool);
+    if (pending.length > 0)
+      throw new KeysError(`the schema lacks migrations: ${pending.join(", ")}`);
+    const { apiKeys } = postgresStores(pool);
+    if (parsed.command === "list") {
+      const keys = await apiKeys.list();
+      if (keys.length === 0) write("no keys");
+      const at = (ms: number) => new Date(ms).toISOString();
+      for (const key of keys)
+        write(
+          [
+            key.owner,
+            key.state,
+            `issued ${at(key.createdAt)}`,
+            key.revokedAt === undefined ? "-" : `revoked ${at(key.revokedAt)}`,
+            `sha256 ${key.hash.slice(0, 12)}`,
+          ].join("\t"),
+        );
+      return;
+    }
+    const { owner } = parsed;
+    if (parsed.command === "revoke") {
+      if (!(await apiKeys.revoke(owner, Date.now())))
+        throw new KeysError(`${owner} has no active key`);
+      write(`revoked: ${owner}`);
+      return;
+    }
+    const key = newApiKey();
+    if (!(await apiKeys.issue({ hash: apiKeyHash(key), owner, now: Date.now() })))
+      throw new KeysError(`${owner} has an active key: revoke it first`);
+    write(`owner: ${owner}`);
+    write(`key: ${key}`);
+    write('Shown once: only its SHA-256 is stored. Sent as "Authorization: Bearer <key>".');
   } finally {
     await pool.end();
   }

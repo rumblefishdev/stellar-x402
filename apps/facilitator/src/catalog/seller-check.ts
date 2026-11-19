@@ -1,9 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { PaymentRequiredV2Schema } from "@stellar-x402/bazaar";
 import { SellerFetchError, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
-import { PaymentRequiredV2Schema } from "@x402/core/schemas";
 import type { PaymentRequired } from "@x402/core/types";
 import type { Logger } from "../logger.js";
 
@@ -24,7 +24,7 @@ export type SellerAnswer =
 
 /**
  * Asks the seller for its listing with one unpaid request (0063) and reads its 402 terms as the
- * buyer's MCP server does (`packages/mcp` preview). The request goes through the seller-fetch
+ * buyer's MCP server does (`apps/mcp-local` preview). The request goes through the seller-fetch
  * guard: public addresses only, no redirects, a deadline and a body cap.
  */
 export async function askSeller(
@@ -53,7 +53,7 @@ export async function askSeller(
   } catch (error) {
     return { ok: false, reason: "unreadable_402", detail: String(error) };
   }
-  // Decoding checks the encoding only; the upstream schema checks the shape.
+  // Decoding checks the encoding only; the schema checks the shape.
   const detail = shapeError(paymentRequired);
   if (detail) return { ok: false, reason: "unreadable_402", detail };
   return { ok: true, paymentRequired };
@@ -97,7 +97,7 @@ export async function askMcpSeller(
       cursor = page.nextCursor;
     } while (!listed && cursor);
     if (!listed) return { ok: false, reason: "no_tool", detail: call.name };
-    // The terms as upstream's payment wrapper sends them (`@x402/mcp` 2.28.0
+    // The terms as upstream's payment wrapper sends them (`@x402/mcp` 2.31.0
     // `createPaymentRequiredResult`): an error result carrying them in `structuredContent`, or as
     // JSON in its first text (9 of 20 live sellers). Read here, not with upstream's MCP client,
     // whose schema reads terms with too many tags as no 402 at all.
@@ -147,17 +147,8 @@ export async function askMcpSeller(
   }
 }
 
-/**
- * Why 402 terms don't have upstream's shape, or `undefined` when they do. `serviceName`, `tags` and
- * `iconUrl` are left to the listing's validator, which drops a malformed one as the Bazaar spec
- * says (`bazaar.md:380-391`) and as it does for a payment's copy; upstream's schema refuses the
- * whole 402 for one, as 47 of 400 live sellers would be (2026-10-28).
- */
+/** Why 402 terms don't have x402's shape, or `undefined` when they do. */
 function shapeError(paymentRequired: PaymentRequired): string | undefined {
-  const resource = { ...paymentRequired.resource } as Record<string, unknown>;
-  delete resource.serviceName;
-  delete resource.tags;
-  delete resource.iconUrl;
-  const parsed = PaymentRequiredV2Schema.safeParse({ ...paymentRequired, resource });
+  const parsed = PaymentRequiredV2Schema.safeParse(paymentRequired);
   return parsed.success ? undefined : parsed.error.message;
 }

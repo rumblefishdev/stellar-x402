@@ -12,6 +12,6 @@
     "clean": "rm -rf .turbo"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^16.3.0"
+    "@stellar/stellar-sdk": "^16.4.1"
   }
 }

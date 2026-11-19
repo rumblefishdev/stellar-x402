@@ -8,8 +8,8 @@ related_adr: ["0011", "0013"]
 related_tasks: ["0027", "0026", "0047"]
 tags: [infra, operations, monitoring, security, priority-medium, effort-medium, platform]
 links:
-  - ../active/0027_FEATURE_alerts-and-metrics/README.md
-  - ../active/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md
+  - ../archive/0027_FEATURE_alerts-and-metrics/README.md
+  - ../archive/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md
   - ../../../docs/adr/0013-facilitator-key-custody.md
   - ../../../docs/monitoring.md
 history:
@@ -34,7 +34,7 @@ the backup secret, with the server down too. This task adds those two sections a
   they need more design: the declared channel set, the read points, and the findings sent to SNS.
   Decision 71 moved that PR, with 0027's criteria 6, 7 and 9, to this task.
 - The alarms are already defined in `infra/` (#114) and documented in 0027's
-  [alarm list](../active/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md), Money and
+  [alarm list](../archive/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md), Money and
   security; `watchSecurity` is off in `infra/envs/production.json`.
 - From ADR 0013: theft (decision 8) and reads of the backup secret (decision 9). The backup secret
   is created by 0026.

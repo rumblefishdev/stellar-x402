@@ -1,11 +1,11 @@
 ---
 id: "0120"
-title: "Search the Bazaar: /discovery/search with ranking, and a search tool in the MCP server"
+title: "Search the Bazaar: /discovery/search with ranking"
 type: FEATURE
 status: backlog
 milestone: 2
 related_adr: ["0008", "0012"]
-related_tasks: ["0029", "0063"]
+related_tasks: ["0029", "0063", "0137"]
 tags: [bazaar, discovery, mcp, priority-medium, effort-large]
 links:
   - ../../../docs/rfp/07-x402-facilitator-bazaar.md
@@ -18,7 +18,7 @@ history:
       no later task held it.
 ---
 
-# Search the Bazaar: `/discovery/search` with ranking, and a search tool in the MCP server
+# Search the Bazaar: `/discovery/search` with ranking
 
 ## Summary
 
@@ -42,11 +42,12 @@ ranked by fit, so that I can find a paid resource without knowing its seller or 
 - Settle the design with the owner first: ranking signals, keyword and fuzzy search first or
   vectors, cursor shape, what an empty query returns.
 - The route, its port method and its PostgreSQL adapter.
-- The MCP server's search tool over the route.
+- Agree the route's request and response types first: 0137 builds the MCP search tool on them.
 
 ## Acceptance Criteria
 
 - [ ] Given listings in the catalog, when a client calls `/discovery/search` with a plain-words
       query, then it gets matching listings ranked by fit, in upstream's response shape, with a
       cursor for the next page
-- [ ] Given the MCP server, when an agent calls its search tool, then it gets the same results
+
+The MCP search tool over the route, and its criteria, moved to 0137.

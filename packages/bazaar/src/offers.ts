@@ -1,7 +1,6 @@
 import { PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { PaymentRequirements } from "@x402/core/types";
 import { LIMITS } from "./limits.js";
-import { serializedBytes } from "./validate.js";
 
 export type OffersResult =
   | { ok: true; offers: PaymentRequirements[]; droppedFields: number }
@@ -14,8 +13,8 @@ export type OffersResult =
 
 /**
  * The seller's offers a listing keeps (0063): only those to the listing key's network and `payTo`,
- * each cut to the spec's seven fields by the upstream schema, at most `LIMITS.offers` of them with
- * `extra` up to `LIMITS.offerExtraBytes`. One over a limit refuses the whole listing, so a seller
+ * each cut to the spec's seven fields by the upstream schema, at most `LIMITS.offers` of them; their
+ * `extra` counts only toward the whole listing's cap. One over a limit refuses the whole listing, so a seller
  * sees why rather than a listing missing an offer. `droppedFields` counts the fields the schema cut.
  */
 export function sellerOffers(
@@ -38,10 +37,6 @@ export function sellerOffers(
     if (!parsed.success)
       return { ok: false, reason: "invalid_offer", detail: parsed.error.message };
     droppedFields += Object.keys(raw).length - Object.keys(parsed.data).length;
-    const bytes = serializedBytes(parsed.data.extra ?? {});
-    if (bytes === undefined || bytes > LIMITS.offerExtraBytes) {
-      return { ok: false, reason: "too_large", detail: "accepts.extra", bytes };
-    }
     offers.push(parsed.data as PaymentRequirements);
   }
   return { ok: true, offers, droppedFields };

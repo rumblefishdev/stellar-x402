@@ -1,0 +1,54 @@
+{
+  "x402Version": 2,
+  "error": "Payment required",
+  "resource": {
+    "url": "http://localhost:4021/weather?city=Warsaw",
+    "description": "Current temperature for a city",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "stellar:testnet",
+      "amount": "10000",
+      "asset": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "payTo": "GDPBXAO27ZR2M2TM6DVG5IVJ5D3C6DLHPE5FXYXKAUTM6XKPIACDAIH3",
+      "maxTimeoutSeconds": 300,
+      "extra": { "areFeesSponsored": true }
+    }
+  ],
+  "extensions": {
+    "bazaar": {
+      "info": {
+        "input": { "type": "http", "queryParams": { "city": "Warsaw" }, "method": "GET" },
+        "output": { "type": "json", "example": { "city": "Warsaw", "tempC": 14 } }
+      },
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "const": "http" },
+              "method": { "type": "string", "enum": ["GET"] },
+              "queryParams": {
+                "type": "object",
+                "properties": { "city": { "type": "string" } },
+                "required": ["city"]
+              }
+            },
+            "required": ["type", "method"],
+            "additionalProperties": false
+          },
+          "output": {
+            "type": "object",
+            "properties": { "type": { "type": "string" }, "example": { "type": "object" } },
+            "required": ["type"]
+          }
+        },
+        "required": ["input"]
+      }
+    }
+  }
+}

@@ -20,12 +20,8 @@ import type { LeaseFence } from "../src/ports/index.js";
 import type { SettlementHooks } from "../src/settlement/hooks.js";
 import { createReconciler } from "../src/settlement/reconcile.js";
 import { createRecords } from "../src/settlement/records.js";
-import {
-  SETTLE_REASONS,
-  createSettler,
-  type SettlerDeps,
-  type Submitter,
-} from "../src/settlement/settle.js";
+import { SETTLE_REASONS } from "../src/settlement/reasons.js";
+import { createSettler, type SettlerDeps, type Submitter } from "../src/settlement/settle.js";
 import { PAYER_AUTH_REASON, payerNonce, type Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { holdLease } from "./port-contracts.js";
@@ -37,13 +33,6 @@ let fence: LeaseFence | undefined;
 beforeEach(async () => {
   fence = await holdLease(db.stores().settlements);
 });
-
-// `attemptsOf` reads a private WeakMap that only the real submitter fills; these tests put the
-// attempts on the error instead. `settle-pool.test.ts` runs the real pool's.
-vi.mock("@stellar-x402/signer-pool", async (original) => ({
-  ...(await original<typeof import("@stellar-x402/signer-pool")>()),
-  attemptsOf: (error: unknown) => (error as { attempts?: unknown[] })?.attempts ?? [],
-}));
 
 const network = STELLAR_NETWORKS.testnet;
 const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
@@ -199,6 +188,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     budgetMs: 5_000,
     pollMs: 5,
     latestLedger: async () => CURRENT,
+    nonceUsed: async () => false,
     lease: () => fence,
     ...overrides,
   });
@@ -240,6 +230,7 @@ describe("REFUTE B: one process answers a success twice (finding 3 by another ti
       logger,
       metrics,
       budgetMs: 5_000,
+      nonceUsed: async () => false,
     });
     // The settler's success write goes out on a connection that dies: no reply for a while
     // (pg's query_timeout is 15 s), then an error. Other connections work.

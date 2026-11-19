@@ -6,7 +6,7 @@ status: backlog
 milestone: 2
 related_adr: ["0009"]
 related_tasks: ["0029", "0041", "0042", "0046", "0058"]
-tags: [tests, e2e, priority-medium, effort-large]
+tags: [tests, e2e, priority-medium, effort-large, dev-tools]
 links: []
 history:
   - date: "2026-11-06"
@@ -27,11 +27,14 @@ scenario and no refusal, so it can't stand in for this.
 
 - Today's end-to-end and live pieces, each run by hand and each in its own shape:
   `apps/mcp-local/e2e`, `apps/facilitator/test/live` (verify, settle, token and spend matrices,
-  front-run probe), `packages/signer-pool/test/live`, `contracts/upto-proxy/e2e`, and the gate in
+  front-run probe, catalog and API key smokes, nonce consumed elsewhere),
+  `packages/signer-pool/test/live`, `contracts/upto-proxy/e2e`, and the gate in
   `conformance/`.
 - The live scripts start their own facilitator; none tests refusals through the public URL.
-- Related: 0041 (two example integrations), 0042 (MCP in Claude Desktop), 0046 (the MCP e2e
-  tidy), 0058 (the upto e2e harness).
+  The deployed testnet facilitator is `https://x402-facilitator.sorobanscan.com`
+  (`docs/runbook.md`).
+- Related: 0029 (the official suite, done), 0041 (two example integrations), 0042 (MCP in
+  Claude Desktop), 0046 (the MCP e2e tidy), 0058 (the upto e2e harness).
 - Not for now (the owner, 2026-11-05).
 
 ## Implementation

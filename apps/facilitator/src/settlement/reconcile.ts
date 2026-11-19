@@ -17,7 +17,8 @@ import type {
   SettlementStore,
 } from "../ports/index.js";
 import { isFinalRecord, resultUpdate, type Records } from "./records.js";
-import { SETTLE_REASONS } from "./settle.js";
+import type { IsNonceUsed } from "./nonce-used.js";
+import { SETTLE_REASONS, reasonAfterFailure } from "./reasons.js";
 import { payerExpiration } from "./verify.js";
 
 export interface ReconcilerDeps {
@@ -34,6 +35,8 @@ export interface ReconcilerDeps {
    * store after it. What does is `addHash`'s state check, which refuses a closed record.
    */
   budgetMs: number;
+  /** Whether the payer's nonce is used on chain, read after our transaction failed (0141). */
+  nonceUsed: IsNonceUsed;
   now?: () => number;
 }
 
@@ -83,6 +86,7 @@ export function createReconciler(deps: ReconcilerDeps) {
       ? rewrappedOutcome(res, attempt.hash, getNetworkPassphrase(network))
       : undefined;
     const rewrap = found?.rewrap;
+    const failure = success ? undefined : failureCause(res);
     const channel = attempt.channel !== undefined && { channel: attempt.channel };
     const { record: finished, won } = await records.finish(
       record.key,
@@ -91,7 +95,15 @@ export function createReconciler(deps: ReconcilerDeps) {
         ledger: res.ledger,
         feeCharged: found?.feeCharged ?? res.resultXdr.feeCharged().toBigInt(),
         ...channel,
-        ...(!success && { errorReason: SETTLE_REASONS.failed, failure: failureCause(res) }),
+        ...(failure && {
+          errorReason: await reasonAfterFailure(
+            SETTLE_REASONS.failed,
+            record.payer,
+            record.nonce,
+            deps.nonceUsed,
+          ),
+          failure,
+        }),
         attempts: rewrap
           ? [
               ...others,
@@ -177,17 +189,7 @@ export function createReconciler(deps: ReconcilerDeps) {
    * The ledger bound of a hash stored without one: the payer's auth expiry, past which no envelope
    * of this payment can land, ours or someone else's fee bump of it (0087).
    */
-  const fallbackLedger = (record: SettlementRecord): number | undefined => {
-    try {
-      const { transaction } = record.paymentPayload.payload as { transaction: string };
-      return payerExpiration(
-        new Transaction(transaction, getNetworkPassphrase(network)),
-        record.payer,
-      );
-    } catch {
-      return undefined;
-    }
-  };
+  const fallbackLedger = (record: SettlementRecord) => payerLedgerBound(record, network);
 
   /**
    * Whether the RPC's history reaches back to the record's claim: only then does `NOT_FOUND` say a
@@ -387,7 +389,12 @@ export function createReconciler(deps: ReconcilerDeps) {
         ? { state: "success", ...fields }
         : {
             state: result.status,
-            errorReason: SETTLE_REASONS[result.status],
+            errorReason: await reasonAfterFailure(
+              SETTLE_REASONS[result.status],
+              record.payer,
+              record.nonce,
+              deps.nonceUsed,
+            ),
             ...(result.failure && { failure: result.failure }),
             ...fields,
           },
@@ -436,6 +443,25 @@ export interface Reconciliation {
   start(): void;
   /** Stops the sweeps, and settles once a sweep under way has ended: the drain waits for it. */
   close(): Promise<void>;
+}
+
+/**
+ * The last ledger the payer's authorization allows: the bound of an attempt stored before attempts
+ * kept their own. `undefined` when the payload can't be read.
+ */
+export function payerLedgerBound(
+  record: SettlementRecord,
+  network: StellarNetwork,
+): number | undefined {
+  try {
+    const { transaction } = record.paymentPayload.payload as { transaction: string };
+    return payerExpiration(
+      new Transaction(transaction, getNetworkPassphrase(network)),
+      record.payer,
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 /** Between the end of one sweep and the start of the next (decision 27). */

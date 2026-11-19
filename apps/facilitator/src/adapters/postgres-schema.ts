@@ -3,7 +3,7 @@ import type pg from "pg";
 import type { Logger } from "../logger.js";
 
 /**
- * The PostgreSQL schema of the four ports (ADR 0012), as ordered migrations that `migrate` applies
+ * The PostgreSQL schema of the ports (ADR 0012), as ordered migrations that `migrate` applies
  * once each.
  *
  * Expand/contract: a deploy runs the new migrations while the previous release still serves, so a
@@ -252,6 +252,40 @@ CREATE TABLE settlement_in_flight (
     // alone, as before. A row a rewrap adds copies its inner hash from ours.
     name: "0012_settlement_inner_hash",
     sql: "ALTER TABLE settlement_hashes ADD COLUMN inner_hash text;",
+  },
+  {
+    // 0105: the API key registry. A key's SHA-256, never the key; its owner (`operator:<name>`,
+    // or `discord:<id>` from 0106); active or revoked. The partial unique index gives an owner one
+    // active key, whoever writes the row: the operator's script or the portal. A revoked key keeps
+    // its row. The CHECKs repeat `assertApiKey`, so a row written past the adapter can't put a key
+    // in the hash column. A new table, so the release before it keeps working: it reads no key.
+    name: "0013_api_keys",
+    sql: `
+CREATE TABLE api_keys (
+  key_hash text PRIMARY KEY CHECK (key_hash ~ '^[0-9a-f]{64}$'),
+  owner text NOT NULL
+    CHECK (owner ~ '^[a-z]+:[a-z0-9][a-z0-9_-]*$' AND char_length(owner) <= 128),
+  state text NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'revoked')),
+  created_at bigint NOT NULL,
+  revoked_at bigint,
+  CHECK ((state = 'revoked') = (revoked_at IS NOT NULL))
+);
+CREATE UNIQUE INDEX api_keys_one_active ON api_keys (owner) WHERE state = 'active';
+`,
+  },
+  {
+    // 0106: the portal shows an owner its key again, and the registry holds a hash, so each key
+    // the portal issues has a copy here, sealed with a key only the portal holds. The portal
+    // deletes it when the key is revoked. Nothing in the facilitator reads the table, and a key
+    // the operator's script issues has no row. A new table, so the release before it keeps
+    // working.
+    name: "0014_api_key_copies",
+    sql: `
+CREATE TABLE api_key_copies (
+  key_hash text PRIMARY KEY REFERENCES api_keys (key_hash),
+  sealed bytea NOT NULL CHECK (octet_length(sealed) BETWEEN 1 AND 1024)
+);
+`,
   },
 ];
 
