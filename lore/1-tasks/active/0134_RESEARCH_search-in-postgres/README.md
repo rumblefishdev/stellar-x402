@@ -90,3 +90,48 @@ Verdict: rethink. Each point and where it went:
 behind it, on 3,000 catalog listings and on ToolRet, are in
 [R-search-measurement](notes/R-search-measurement.md), with the scripts, queries and grades in
 `benchmark/`. The differences from the Panel Review response are rows in 0132's deviations table.
+
+## Design Decisions
+
+### From Plan
+
+1. **Recall@20 decides between methods; nDCG@10 is still reported to SCF.** The consumer is an
+   agent reading a candidate list.
+2. **This task covers matching, ordering and the cursor.** The quality score and curation moved
+   to 0154.
+3. **Both parts, as §4 promises:** PostgreSQL full-text and a small self-hosted embedding model,
+   fused with RRF. The measurement tunes them; it does not decide whether the dense part exists.
+4. **Vectors in PostgreSQL with `pgvector`,** from the pgvector project's own image pinned by
+   digest, not an image we build.
+5. **The model in its own container, 512 MiB,** counted in ADR 0011's totals; search falls back
+   to words when it is down.
+6. **The model is `granite-embedding-30m-english`.** The same quality as the other small models
+   on ToolRet and on our test, at the lowest query time.
+7. **A listing matches only by meaning (cosine ≥ 0.60); words order the matches.** The same
+   quality as any-word matching with a third of the matches.
+8. **No cut before fusion:** every match is ranked and the cursor reaches the last one.
+9. **A keyset cursor** (last score and listing key); a shift at a page boundary is accepted.
+10. **A listing joins search once its vector is stored;** `partialResults` keeps the spec's
+    meaning ("truncated"), and §3's reading is a deviation for the M2 evidence (0132).
+11. **A search reads one network's store;** a search without `network` follows 0126's rule for
+    `/discovery/resources`.
+12. **One text per listing** from service name, tool name, URL path words, tags, description and
+    parameters, read by both parts.
+
+### Emerged
+
+13. **Filters apply before ranking,** as the spec's filter parameters require, so a filtered query
+    ranks among the listings that pass.
+14. **k = 20 and meaning weighted 4,** picked from the measured grid's flat part; the first point
+    tried (k = 60, 3 : 1) sat on its slope.
+15. **The fields are built once by one SQL function into a stored generated column,** so the
+    words part, the vector text and its hash can't disagree.
+16. **The vector job takes no lock:** it writes a vector only while the listing's text hash is
+    the one it embedded.
+17. **Model input is cut at 512 tokens and the joined text at 2,000 characters.**
+18. **While a new model's vectors are written, search answers by words alone,** so no listing
+    drops out during the switch.
+19. **Tuning never uses 0135's evaluation set,** which only scores the ranking.
+20. **Curation-only mode, served until 0135 reaches nDCG@10 ≥ 0.75, is 0154's to define.**
+21. **`bge-base-en-v1.5` rejected on quality,** not memory: tuned for it, 0.702 nDCG@10 against
+    granite's 0.725, once the server's 125 GiB removed the memory reason.
