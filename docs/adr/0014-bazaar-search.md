@@ -90,9 +90,11 @@ The measurements are in
   order only once 0135's run reaches nDCG@10 ≥ 0.75. Below that, search serves curated order.
 - **Network.** A search reads one network's store. A search without a `network` filter follows the
   rule 0126 sets for `/discovery/resources`.
-- **Cursor.** Opaque to the client; it carries the last result's fused score and listing key, and
-  the next page starts after it. When listings change between two requests, a result may repeat
-  or be skipped at a page boundary.
+- **Cursor.** Opaque to the client; it carries the last result's score and listing key, and the
+  next page starts after it. Each new listing above it shifts the next page by one, so a result
+  may repeat or be skipped at a page boundary. It also carries how the page was ranked, fused or
+  words alone, and the model: fused and words-only scores differ in scale, so a cursor from
+  another ranking or model is refused as an invalid cursor and the client starts again.
 - **`partialResults`** keeps the spec's meaning: `true` when matches were cut that no page will
   return. Only the words part has a set of matches, the listings that hold a query word; it is
   `true` when that set is larger than the 50 candidates taken from it. The meaning part ranks
