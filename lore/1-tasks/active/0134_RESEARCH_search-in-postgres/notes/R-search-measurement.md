@@ -31,16 +31,37 @@ Python with onnxruntime 1.32.0 and tokenizers 0.23.3; they are not the server's.
   keyword, paraphrase, typo, long sentence, MCP tool (`queries.json`). Each has a `need`: what a
   correct result does.
 - **Grades:** the top 20 of every method and model were pooled and graded 0–3 against the `need`
-  by four LLM judges that did not know which method returned a listing; 2,497 pairs in all, 846 of
-  them graded 1–3 (`grades.json`, the rest are 0). No listing in any model's top 10 is ungraded.
+  by LLM judges that did not know which method returned a listing, in two rounds: the first round
+  for words only and three models, the second, by other judges, for the pairs the four later
+  models added. 2,497 pairs in all, 846 of them graded 1–3 (`grades.json`, the rest are 0). No
+  listing in any run's top 20 is ungraded.
+  - Round-two grades give at most 4.3% of any model's top-10 gain; scoring them all 0 puts
+    bge-small fused (0.714) above granite (0.706), so the two are tied on this test.
+  - Three grades name listings the judge was not shown (q34/1135, q12/493) or overwrite a first
+    round grade (q12/1493, q32/2875); their effect on nDCG@10 is at most 0.001. A rerun should
+    refuse a grade for a listing the judge was not shown.
+  - The corpus is all Stellar pubnet listings plus others; a pubnet search sees only the 1,637
+    Stellar ones, where 36% come from one host. The grid below gives both.
 - **Words only:** PostgreSQL 18 full-text, `english` configuration, a weighted `tsvector` (name
   1.0, tags 0.67, description 0.5, parameters 0.33), the query's words OR-ed, ranked by
   `ts_rank_cd` (`lexical.py`).
 - **Meaning only:** exact cosine between the query's vector and every listing's.
-- **Fused:** Reciprocal Rank Fusion, k = 60, over each part's top 50. Equal weights lost to meaning
-  alone (bge-small R@20 −0.061, 95% CI −0.109 .. −0.015); meaning weighted 3 to words 1 did not.
-  The weights were picked on these 40 queries, so they are a starting point; tuning them needs more
-  queries of this kind, never 0135's evaluation set.
+- **Fused:** Reciprocal Rank Fusion over each part's top 50. The tables below use meaning weighted
+  3 to words 1, k = 60, the first point tried. A grid for granite (nDCG@10, all 3,000 listings /
+  the 1,637 Stellar ones alone):
+
+  | k   | w = 1         | w = 2         | w = 3         | w = 4         | w = 6         |
+  | --- | ------------- | ------------- | ------------- | ------------- | ------------- |
+  | 10  | 0.665 / 0.667 | 0.720 / 0.715 | 0.721 / 0.722 | 0.723 / 0.722 | 0.723 / 0.721 |
+  | 20  | 0.662 / 0.660 | 0.719 / 0.703 | 0.723 / 0.718 | 0.726 / 0.722 | 0.723 / 0.723 |
+  | 30  | 0.652 / 0.654 | 0.713 / 0.697 | 0.720 / 0.711 | 0.723 / 0.717 | 0.726 / 0.722 |
+  | 60  | 0.643 / 0.651 | 0.689 / 0.677 | 0.706 / 0.695 | 0.716 / 0.700 | 0.723 / 0.708 |
+
+  Meaning alone scores 0.715 / 0.713. ADR 0014 takes k = 20, w = 4: +0.012 nDCG@10 (95% CI
+  −0.005 .. +0.030) and +0.014 R@20 (−0.005 .. +0.035) over meaning alone. Equal weights at k = 60
+  lose: −0.072 nDCG@10 (−0.125 .. −0.016). Choosing w on 20 queries and scoring the other 20 gains
+  +0.006 over meaning alone, so the grid is flat, not tuned. Tuning needs more queries of this
+  kind, never 0135's evaluation set.
 
 nDCG@10 / R@20, fused 3 : 1 (`eval_ours.py`):
 
@@ -62,10 +83,11 @@ By query class, nDCG@10:
 | granite only      | 0.665   | 0.711      | 0.653 | 0.798 | 0.746 | 0.715 |
 | granite fused 3:1 | 0.723   | 0.669      | 0.672 | 0.710 | 0.755 | 0.706 |
 
-Words alone miss paraphrases and typos. Fused minus granite alone, with paired 95% intervals over
-8 queries a class: keyword +0.058 (+0.014 .. +0.127), long −0.088 (−0.124 .. −0.056), paraphrase
-−0.042, typo +0.019 and MCP +0.009, the last three within noise; all 40 queries −0.009 (−0.037 ..
-+0.019). Relevant, for R@20, means a grade of 2 or 3.
+Words alone miss paraphrases and typos: 2 typo queries get nothing, and 9 of 40 have no relevant
+listing in the top 10. Fused (3 : 1, k = 60) minus granite alone: all 8 long queries lose, −0.088
+(exact sign-flip p = 0.008, 0.039 after a Holm correction for 5 classes); the keyword gain, +0.058,
+rests on one query (q01, +0.287; the other 7 average +0.025) and does not survive the correction;
+paraphrase, typo and MCP are within noise. Relevant, for R@20, means a grade of 2 or 3.
 
 ## ToolRet
 
@@ -85,8 +107,11 @@ numbers are not comparable with its table; the order between models holds within
 | snowflake-arctic-embed-s | 28.71 | 42.91 | −3.49 (−4.04 .. −2.95)         | 2                 |
 | all-MiniLM-L6-v2       | 26.23   | 41.24 | −5.97 (−6.53 .. −5.41)         | 2                 |
 
-granite's R@20 is ahead of bge-small's: +0.88 (+0.13 .. +1.56). On our test bge-base against
-granite is −0.023 nDCG@10 and +0.013 R@20 (−0.052 .. +0.078).
+granite's R@20 is ahead of bge-small's: +0.88 (+0.13 .. +1.56) averaged per query; averaged per
+subset bge-small leads, 27.93 to 27.11 nDCG@10, so the two are tied. The 256-token cut truncates
+17.9% of tool texts with granite's tokenizer and 24.8% with bge's, which may favour granite. On our
+test bge-base against granite is −0.023 nDCG@10 and +0.013 R@20 (−0.052 .. +0.078); an interval
+that wide could not show a gain of ToolRet's size.
 
 ## Cost
 

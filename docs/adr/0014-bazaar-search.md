@@ -7,14 +7,17 @@
 
 The RFP asks for `GET /discovery/search` "with natural language query and cursor pagination" and
 for search with ranking (`docs/rfp/07-x402-facilitator-bazaar.md`). The upstream spec gives the
-request a `query`, filters, an advisory `limit` and a `cursor`, and the response `partialResults`,
-"`true` when additional matches were truncated" (x402 `specs/extensions/bazaar.md`).
+request a `query`, the filters `type`, `payTo`, `scheme`, `network` and `extensions`, an advisory
+`limit` and a `cursor` the server may ignore, and the response `partialResults`, "`true` when
+additional matches were truncated" (x402 `specs/extensions/bazaar.md`, `@x402/extensions`
+`SearchDiscoveryResourcesParams`).
 
 The Panel Review response, the approved plan for Tranche #2, promises in §4 hybrid lexical and
 dense retrieval fused with Reciprocal Rank Fusion (RRF), on ClickHouse, with a small self-hosted
 sentence-transformer model "(e.g. `all-MiniLM-L6-v2`)" so that no external inference API is on the
 request path. The fused score is one of three inputs to the ranking, with a quality score and a
-curation bump. §3 reads `partialResults` as "the ranking pass hasn't finished", and asks for an
+curation bump, and the ranking replaces curation-only mode only at nDCG@10 ≥ 0.75 on the team's
+graded set. §3 reads `partialResults` as "the ranking pass hasn't finished", and asks for an
 opaque cursor because the ranked set can shift.
 
 What this has to fit:
@@ -25,7 +28,7 @@ What this has to fit:
 - The server is shared: our containers are limited to 1.875 GiB together while production serves
   testnet, and the facilitator to 512 MiB and one CPU ([ADR 0011](0011-facilitator-hosting.md)).
 - The catalog is small. Testnet holds one listing; the largest public catalog, CDP's, held 34,782
-  on 2026-11-18, 1,637 of them on Stellar pubnet, all with English descriptions.
+  on 2026-11-18, 1,637 of them on Stellar pubnet from 21 hosts, all with English descriptions.
 
 The measurements are in
 [R-search-measurement](../../lore/1-tasks/active/0134_RESEARCH_search-in-postgres/notes/R-search-measurement.md).
@@ -40,61 +43,68 @@ The measurements are in
   - parameters: the names and descriptions of the inputs a listing takes, an HTTP listing's query
     and body fields or an MCP tool's arguments, at most 40, each cut at 300 characters.
 
-  Both parts read these fields; the meaning part reads them joined, cut at 2,000 characters.
+  The fields are built once, by one SQL function over the stored listing, into a stored generated
+  column. The words part, the meaning part and the text's hash all read that column, so they can't
+  disagree about what a listing says.
 
+- **Filters.** `network`, `type`, `payTo`, `scheme` and `extensions` apply inside each part, before
+  its candidates are cut, so a filtered query ranks among the listings that pass.
 - **Words.** PostgreSQL's own full-text search, the `english` configuration:
-  - a weighted `tsvector` column, generated from the listing's fields, with a GIN index. Weights
-    start at name 1.0, tags 0.67, description 0.5, parameters 0.33;
+  - a weighted `tsvector` from the fields, with a GIN index. Weights start at name 1.0, tags 0.67,
+    description 0.5, parameters 0.33;
   - the query's words are OR-ed, so a long sentence still matches, and ranked by `ts_rank_cd`.
 - **Meaning.**
   - The model is `ibm-granite/granite-embedding-30m-english`: 30M parameters, 384 dimensions,
-    Apache-2.0, CLS pooling, no query prefix. Listings and queries are embedded the same way and
-    the vectors normalized.
-  - Vectors are a `vector(384)` column in the listing's table, from `pgvector`, in a PostgreSQL
-    image we build on the official `postgres:18` with the `postgresql-18-pgvector` package.
-  - Each vector stores the model that made it and a hash of the text it was made from. Search reads
-    only vectors of the current model, so a new model's queries are never compared with an old
-    model's vectors.
-  - Search compares the query's vector with every listing's of that network (an exact scan, no
-    index).
+    Apache-2.0, CLS pooling, no query prefix, inputs cut at 512 tokens. Listings and queries are
+    embedded the same way and the vectors normalized. The meaning part reads the fields joined,
+    cut at 2,000 characters.
+  - Vectors are a `vector(384)` column in the catalog table, from `pgvector`. Each stores the
+    model that made it and the hash of the text it was made from; search reads only vectors of the
+    current model.
+  - Search compares the query's vector with every listing's that passes the filters (an exact
+    scan, no index).
+- **The PostgreSQL image.** One Dockerfile on the official `postgres:18`, pinned by digest, adds
+  `postgresql-18-pgvector` pinned to one package version, so building it never moves PostgreSQL's
+  own version. Production, CI, local compose and restores use that one image. The extension is
+  created once, in the `public` schema, so the tests' per-file schemas all see the type.
 - **Where the model runs.**
   - In a container of its own, with its own memory limit, reached by the facilitator over the
     environment's internal network. The model file is in the image, pinned by its revision, so
     nothing is downloaded when it starts.
-  - It holds no database password. The facilitator claims listings whose vector is missing or
-    stale, made by another model or from another text (`FOR UPDATE SKIP LOCKED`, as the prune of
-    `catalog_attempts` claims rows), asks the container for each vector and writes it. The
-    listing row is the only record of what needs a vector.
+  - It holds no database password. The facilitator reads listings whose vector is missing or
+    stale (another model, another text hash), asks the container for each vector without holding
+    a lock, and writes it only `WHERE` the text hash is still the one it embedded. The catalog row
+    is the only record of what needs a vector.
   - The facilitator sends the container one listing at a time, so a backlog never takes the CPU
     that queries need.
   - A listing the container fails on is tried again on the next pass. Failures are logged with
     their cause and counted in a metric, so monitoring can alert on a listing that keeps failing.
   - The runtime is ONNX Runtime; 0120 picks the library, with no LGPL dependency
     (`docs/scf/milestone-1-license-audit.md`).
-- **Fusion.** Weighted RRF over each part's top 50, k = 60: a listing scores
-  3 / (60 + its rank by meaning) + 1 / (60 + its rank by words). Ties go by the listing's key.
-- **Tuning.** The weights here are starting points, measured on 0134's 3,000 listings. Any tuning
-  is done on that set or a larger one of the same kind, never on 0135's evaluation set, which only
-  scores the ranking, so its nDCG@10 is not fitted to it.
+- **Fusion.** Weighted RRF over each part's top 50, k = 20: a listing scores
+  4 / (20 + its rank by meaning) + 1 / (20 + its rank by words). Ties go by the listing's key.
+- **Tuning.** These values sit on a flat part of the measured curve, within noise of meaning
+  alone. Any tuning is done on 0134's set or a larger one of the same kind, never on 0135's
+  evaluation set, which only scores the ranking, so its nDCG@10 is not fitted to it.
 - **When a listing has no vector yet.** A new listing joins search only once its vector is stored,
   so a search never mixes listings that were scored two ways. `/discovery/resources` lists it at
-  once. A listing whose text changes keeps its old vector until the job writes the new one.
-- **When the model is down or slow.** When the container doesn't answer within a timeout, which
-  0120 sets from a measurement on the server, the facilitator ranks by words alone, in the same
-  response shape. Every listing is then scored one way, so the answer includes listings with no
-  vector yet. Each fallback is logged with its cause and counted in a metric that monitoring can
-  alert on.
+  once. A listing whose text changes keeps its old vector until the new one is written.
+- **When the model can't be used.** The facilitator ranks by words alone, in the same response
+  shape, when the container doesn't answer within a timeout (0120 sets it from a measurement on
+  the server) and while a new model's vectors are being written for the network. Every listing is
+  then scored one way, so the answer includes listings with no current vector. Each fallback is
+  logged with its cause and counted in a metric that monitoring can alert on.
 - **Quality score and curation.** Task 0154 adds them, and decides what a listing without a
   quality score gets. Until then the fused score is the whole ranking.
-- **When the fused order is served.** As §4 promises (task 0135), the ranking replaces curated
-  order only once 0135's run reaches nDCG@10 ≥ 0.75. Below that, search serves curated order.
+- **When the ranking is served.** As §4 promises (task 0135), the ranking replaces curation-only
+  mode only once 0135's run reaches nDCG@10 ≥ 0.75. Curation-only mode is 0154's to define.
 - **Network.** A search reads one network's store. A search without a `network` filter follows the
   rule 0126 sets for `/discovery/resources`.
 - **Cursor.** Opaque to the client; it carries the last result's score and listing key, and the
   next page starts after it. Each new listing above it shifts the next page by one, so a result
   may repeat or be skipped at a page boundary. It also carries how the page was ranked, fused or
-  words alone, and the model: fused and words-only scores differ in scale, so a cursor from
-  another ranking or model is refused as an invalid cursor and the client starts again.
+  words alone, and the model: the two scores differ in scale, so a cursor from another ranking or
+  model is refused with `400` and the client starts again.
 - **`partialResults`** keeps the spec's meaning: `true` when matches were cut that no page will
   return. Only the words part has a set of matches, the listings that hold a query word; it is
   `true` when that set is larger than the 50 candidates taken from it. The meaning part ranks
@@ -102,27 +112,33 @@ The measurements are in
 
 ## Rationale
 
-- **Meaning carries the search; words help where the query names the thing.** On 3,000 real
-  catalog listings and 40 queries, words alone score nDCG@10 0.436 and miss paraphrases (0.189)
-  and typos (0.288). granite alone scores 0.715, fused 3 : 1 0.706, within noise of each other
-  (−0.009, 95% CI −0.037 .. +0.019). By class, fusion lifts keyword queries (+0.058, +0.014 ..
-  +0.127) and costs long ones (−0.088, −0.124 .. −0.056); the other classes are within noise.
-  Both parts are kept because §4 promises both.
-- **Equal-weight RRF loses to meaning alone** (bge-small R@20 −0.061, 95% CI −0.109 .. −0.015):
-  the words list pushes weak matches up. Weighting meaning 3 : 1 brings fused level with meaning
-  alone, on the same 40 queries the weights were picked on.
-- **granite gives the best small model's quality at the fastest one's speed.** On ToolRet's
-  7,961 queries it scores nDCG@10 32.75, bge-small 32.20, `all-MiniLM-L6-v2` 26.23; on our test
-  0.706, 0.700 and 0.640. It embeds a listing in 8.4 ms and a query in 1.5 ms on an M4, half of
-  bge-small's time. Its 371 MB peak is the most of the small models (MiniLM 252, bge-small 306).
+- **Meaning carries the search.** On 3,000 real catalog listings and 40 queries, words alone score
+  nDCG@10 0.436, return nothing for 2 typo queries and no relevant listing in the top 10 for 9 of
+  the 40; granite alone
+  scores 0.715. Fused 4 : 1 at k = 20 scores 0.726, +0.012 (95% CI −0.005 .. +0.030) over meaning
+  alone, within noise. On the 1,637 Stellar listings alone, the search a pubnet request makes,
+  the order is the same: 0.722 fused, 0.713 meaning alone. Both parts are kept because §4
+  promises both, and the fusion costs nothing measurable.
+- **Equal-weight RRF loses to meaning alone**: −0.072 nDCG@10 (−0.125 .. −0.016) at k = 60. The
+  words list pushes weak matches up; weighting meaning 2 to 6 times words, at k = 10 to 30, gives
+  0.713 to 0.726, a flat stretch the chosen values sit in.
+- **Long queries lose from fusion.** All 8 long-sentence queries score lower fused than by meaning
+  alone (−0.088 at 3 : 1, k = 60, sign-flip p = 0.008); the other classes show no effect that
+  survives 8 queries a class.
+- **granite ties bge-small in quality at half its time.** On ToolRet's 7,961 queries it scores
+  nDCG@10 32.75 against bge-small's 32.20 averaged per query, 27.11 against 27.93 averaged per
+  subset; on our test 0.706 against 0.700. `all-MiniLM-L6-v2` is last on both (26.23, 0.640). It
+  embeds a listing in 8.4 ms and a query in 1.5 ms on an M4, half of bge-small's time; its 371 MB
+  peak is the most of the small models (MiniLM 252, bge-small 306).
 - **PostgreSQL's own full-text search stands in for §4's token table.** It ranks by how often and
   how close the query's words occur, without the rarity weight (IDF) a TF-IDF score adds, and
-  needs no table of our own to keep up to date. Words are a quarter of the fused score.
-- **Typos need no trigram index.** The meaning part handles them: fused 0.672 against words-only
-  0.288 on typo queries.
+  needs no table of our own to keep up to date.
+- **Typos need no trigram index while the model runs.** The meaning part handles them: fused 0.672
+  against words-only 0.288 on typo queries. Words-only fallback has no typo handling.
 - **An exact scan is likely enough at this size.** 3,000 vectors scan in 0.18 ms in NumPy on an
   M4, and the whole public catalog of all networks is about twelve times that. pgvector's scan
-  inside PostgreSQL is not measured yet; 0120 measures it on the server.
+  inside PostgreSQL is not measured yet; 0120 measures it on the server, with the vector stored in
+  line (`SET STORAGE PLAIN`), as pgvector's README suggests for scans.
 - **A container of its own** keeps the model's memory out of the facilitator's 512 MiB and its
   CPU off the `/settle` path, and lets search fall back to words when it is down.
 - **A listing joins search whole.** A listing ranked by words only, among listings ranked by both,
@@ -131,12 +147,11 @@ The measurements are in
 ## Alternatives considered
 
 - **ClickHouse, as §4 names.** All state is in PostgreSQL (ADR 0012). Rejected.
-- **Words only.** nDCG@10 0.436 against 0.706; misses paraphrases and typos. Rejected.
-- **Meaning only.** Within noise of fused on our test, but §4 promises both, and keyword queries
-  gain from words (0.665 → 0.723). Rejected for now.
-- **Equal-weight RRF.** Worse than meaning alone. Rejected.
-- **`all-MiniLM-L6-v2`, §4's example.** −5.97 nDCG@10 on ToolRet and −0.060 on our test against
-  bge-small, both outside noise. Rejected.
+- **Words only.** nDCG@10 0.436 against 0.726; misses paraphrases and typos. Rejected.
+- **Meaning only.** Within noise of fused on our test, but §4 promises both. Rejected for now.
+- **Equal-weight RRF, and §4's unweighted fusion.** Worse than meaning alone. Rejected.
+- **`all-MiniLM-L6-v2`, §4's example.** −5.97 nDCG@10 on ToolRet and −0.066 on our test against
+  granite, both outside noise. Rejected.
 - **`bge-small-en-v1.5`.** The same quality as granite at twice its time, and it needs a query
   prefix. Rejected.
 - **`bge-base-en-v1.5`.** +1.63 nDCG@10 on ToolRet over granite; on our test −0.023 nDCG@10 and
@@ -155,22 +170,24 @@ The measurements are in
 
 ## Consequences
 
-- Production needs our own PostgreSQL image with `pgvector`, and one more container whose memory
-  limit is set from a measurement on the server. ADR 0011's totals don't count it yet.
-- A seller can repeat words in its tags or parameters to rise in the words ranking, since
-  `ts_rank_cd` counts each occurrence. The field caps above bound it, the fusion takes ranks, not
-  scores, and the meaning part is not moved by repetition. Further limits belong with the quality
-  score (0154).
-- A new listing is found by search once the job has embedded it, later than `/discovery/resources`
-  lists it. While the model is down, new listings wait and search answers by words alone.
+- Production needs our own PostgreSQL image with `pgvector`, built and pinned as above, and one
+  more container whose memory limit is set from a measurement on the server. ADR 0011's totals
+  don't count it yet.
+- Adding the stored generated column rewrites the catalog table. On today's catalog that is one
+  row; changing how the fields are built later, on a large catalog, needs a plain column, a
+  trigger and a backfill, to stay within ADR 0012's online-migration limits.
+- A seller can repeat words in its listing to rise in the words ranking, since `ts_rank_cd` counts
+  each occurrence. Parameters are capped above; name, tags and description only by ADR 0008's
+  listing limit. Fusion takes ranks, not scores, which bounds the gain, but the effect of
+  repetition on the vector is not measured. Limits on it belong with the quality score (0154).
+- A new listing is found by search once its vector is written, later than `/discovery/resources`
+  lists it. While the model can't be used, search answers by words alone.
 - Paging ends with the fused candidates: a query reaches at most 100 listings, and
   `partialResults` says when more matched.
 - Changing the model means embedding every listing again: about 5 minutes for 34,782 listings at
-  granite's speed on an M4. Until a listing has the new model's vector, search leaves it out. A
-  model of another size also changes the column's type.
-- Differences from the Panel Review response go to the M2 evidence (task 0132): PostgreSQL instead
-  of ClickHouse, full-text search instead of a token table, granite instead of the example model,
-  RRF weighted 3 : 1, more fields searched, and `partialResults` in the spec's meaning.
+  granite's speed on an M4, while search answers by words alone. A model of another size also
+  changes the column's type.
+- Differences from the Panel Review response go to the M2 evidence (task 0132).
 
 ## References
 
@@ -178,5 +195,7 @@ The measurements are in
   [ADR 0012](0012-facilitator-state-store.md)
 - [Task 0134](../../lore/1-tasks/active/0134_RESEARCH_search-in-postgres/README.md) and its
   [measurement](../../lore/1-tasks/active/0134_RESEARCH_search-in-postgres/notes/R-search-measurement.md);
-  tasks 0120 (the route), 0135 (the evaluation set), 0154 (quality score and curation)
+  tasks 0120 (the route), 0126 (both networks in one process), 0135 (the evaluation set), 0154
+  (quality score and curation)
 - ToolRet: `mangopy/ToolRet-Queries`, `mangopy/ToolRet-Tools` (MTEB task `ToolRetrieval`)
+- pgvector: `github.com/pgvector/pgvector`, README (storage, exact search)

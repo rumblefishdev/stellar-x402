@@ -147,6 +147,8 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     [G-postgres-port-mapping](../../lore/1-tasks/archive/0013_RESEARCH_facilitator-state-store/notes/G-postgres-port-mapping.md).
 - **Search (T2).** It can use the same database: core full-text search, `pg_trgm` and `pgvector`.
   The official `postgres` image has no `pgvector`, so T2 needs an image that does.
+  [ADR 0014](0014-bazaar-search.md) decides what search uses: full-text search and `pgvector`,
+  without `pg_trgm`.
 
 ## Rationale
 

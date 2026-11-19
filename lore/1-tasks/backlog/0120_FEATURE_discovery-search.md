@@ -20,8 +20,8 @@ history:
     status: backlog
     who: karolkow
     note: >
-      0134 chose the approach (ADR 0014); the design questions left here are the empty query and
-      the limit.
+      0134 chose the approach (ADR 0014); the questions left here are listed under
+      Implementation.
 ---
 
 # Search the Bazaar: `/discovery/search` with ranking
@@ -48,9 +48,14 @@ ranked by fit, so that I can find a paid resource without knowing its seller or 
 ## Implementation
 
 - Build what ADR 0014 decides. Settle with the owner first what it leaves open: what an empty
-  query returns, and the largest `limit` served.
-- Pick the ONNX Runtime library for the model's container (no LGPL dependency). Measure on the
-  server its memory, the facilitator's timeout for it and pgvector's exact scan (ADR 0014).
+  query returns, the largest `limit` served, the longest query accepted, and whether search gets a
+  rate budget of its own beside `/discovery/*`'s per-IP limit (ADR 0007).
+- Pick the ONNX Runtime library for the model's container (no LGPL dependency), with its thread
+  count set to the container's CPU quota. Measure on the server its memory, the facilitator's
+  timeout for it and pgvector's exact scan (ADR 0014).
+- The model container's deploy path: its image in the deploy scripts, a systemd unit and a
+  healthcheck like the other services, and a place on an internal network (ADR 0011).
+- A threat-model entry for search: ranking by repeated words, load on the model container.
 - The route, its port method and its PostgreSQL adapter.
 - Agree the route's request and response types first: 0137 builds the MCP search tool on them.
 

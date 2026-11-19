@@ -81,6 +81,7 @@ Verdict: rethink. Each point and where it went:
       model and where it runs, the fusion, and what was rejected
 - [x] Any difference from §4 of the Panel Review response is listed for the M2 evidence (0132)
 - [x] The ADR says what the search does while a listing's vector or quality score is missing
+      (the vector here; what a listing without a quality score gets is 0154's)
 - [x] 0120 is updated to name the chosen approach
 
 ## Result
