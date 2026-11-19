@@ -1653,8 +1653,8 @@ the ClickHouse project's CA. Its write-ahead log, the volume `x402-metrics-wal`,
 while the VM can't be reached. node_exporter's textfile collector reads the host probe's files in
 `/var/lib/x402/textfile`: `host-probe.prom`, the gauges of its last run, replaced whole each
 minute, so its age is the probe's; and one file per counter (`watchdog_restarts_total.prom`,
-`facilitator_failures_total.prom`), the total since the file was made, written only when the
-event happens. The facilitator's `/metrics` joins at the switch (0139 step 7). ClickHouse's own
+`facilitator_failures_total.prom`), the total since the file was made, written when the event
+happens and rewritten by every run, so every file's age is the probe's. The facilitator's `/metrics` joins at the switch (0139 step 7). ClickHouse's own
 endpoint is on, but listens on 127.0.0.1 inside `app-clickhouse-1` (the explorer's
 `crates/db-clickhouse/config.d/prometheus.xml`), so the agent can't reach it yet: only
 `docker exec` or a scraper in that container's network namespace can. The VM lets only the CNs in
@@ -1679,7 +1679,9 @@ cd /srv/x402/metrics && sudo docker compose exec -T agent \
   wget -qO- localhost:9090/metrics | grep prometheus_remote_storage_samples_total
 ```
 
-On the VM, `up{host="ch-prod-01"}` answers in Prometheus (`ssh -L 9090:localhost:9090 monitoring`).
+On the VM, in Prometheus (`ssh -L 9090:localhost:9090 monitoring`), each of these answers for
+`ch-prod-01`: `up{job="node"} == 1`, `node_textfile_scrape_error == 0`, and
+`time() - node_textfile_mtime_seconds < 120` for all three of the probe's files.
 
 ## Not here yet
 

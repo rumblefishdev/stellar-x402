@@ -2,8 +2,9 @@
 # Host signals as EMF lines in the file the CloudWatch agent ships to /x402/<env>/metrics (lore
 # 0027 decision 10; the server-side spine's AD-5 and AD-6), and the same values as textfiles for
 # node_exporter, which the metrics agent sends to the monitoring VM (ADR 0011, "Host metrics";
-# 0139). The only writer of either: the watchdog and x402@'s ExecStopPost call it too. Each check is independent; one that fails, or a
-# job that never ran, writes a value past its alarm's threshold. Nothing goes to stdout;
+# 0139). The only writer of either: the watchdog and x402@'s ExecStopPost call it too. Each check
+# is independent; one that fails, or a job that never ran, writes a value past its alarm's
+# threshold. Nothing goes to stdout;
 # diagnostics go to stderr (the journal, or the calling unit's file).
 #   x402-host-probe              every check once (x402-host-probe.timer, root, every minute)
 #   x402-host-probe count NAME   one line with 1 for the counter NAME (the watchdog)
@@ -65,7 +66,8 @@ textfile() { # name content
 }
 
 # A counter's file: its total since the file was made, so a restart of node_exporter or the
-# server never resets it. Written only when its event happens: no age rule reads it.
+# server never resets it. Written when its event happens and again by every run with its total,
+# so the age rule ADR 0011 puts on every textfile holds for it too.
 # ponytail: two writers in the same instant can lose one count; flock(1) if that ever matters.
 count_file() { # counter by
   v=$(sed -n "s/^$1 \([0-9][0-9]*\)$/\1/p" "$X402_TEXTFILE/$1.prom" 2> /dev/null)
@@ -199,6 +201,7 @@ textfile host-probe "$prom
 certificate_days_left{certificate=\"cloudwatch-agent\"} $cloudwatch
 certificate_days_left{certificate=\"metrics-agent\"} $(certificate_days_left "$X402_METRICS_CERT")
 "
-# Every counter's file from the first run, at 0, so a missing one reads as a fault.
-for c in $COUNTERS; do [ -e "$X402_TEXTFILE/$c.prom" ] || count_file "$c" 0; done
+# Every counter's file on every run, at its total (0 the first time): a missing one reads as a
+# fault, and its age is the probe's like host-probe.prom's.
+for c in $COUNTERS; do count_file "$c" 0; done
 exit "$status"

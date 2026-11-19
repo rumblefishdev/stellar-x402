@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -32,6 +33,8 @@ const dir = mkdtempSync(join(tmpdir(), "x402-probe-"));
 const fakes = join(dir, "bin");
 const stamps = join(dir, "last-ok");
 const cert = join(dir, "agent.crt");
+// The metrics agent's, with another end date, so each labelled sample is checked against its file.
+const metricsCert = join(dir, "metrics-agent.crt");
 const credentials = join(dir, "credentials");
 // A unix socket path holds at most 108 bytes; relative to the cwd keeps it short anywhere.
 const socket = relative(process.cwd(), join(dir, "bao.sock"));
@@ -93,6 +96,27 @@ exec ${realDate} "$@"`,
     ],
     { stdio: "ignore" },
   );
+  execFileSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:P-256",
+      "-nodes",
+      "-keyout",
+      "/dev/null",
+      "-days",
+      "200",
+      "-subj",
+      "/CN=x402-metrics-agent-test",
+      "-out",
+      metricsCert,
+    ],
+    { stdio: "ignore" },
+  );
   const end = execFileSync("openssl", ["x509", "-noout", "-enddate", "-in", cert]).toString();
   certEnd = Math.floor(Date.parse(end.replace("notAfter=", "")) / 1000);
   writeFileSync(credentials, "[AmazonCloudWatchAgent]\naws_access_key_id = x\n");
@@ -131,7 +155,7 @@ async function probe(
       X402_CERT: cert,
       X402_CREDENTIALS: credentials,
       X402_TEXTFILE: textfileDir,
-      X402_METRICS_CERT: cert,
+      X402_METRICS_CERT: metricsCert,
       FAKE_PG_ID: "pg",
       FAKE_PSQL: "0 42",
       ...env,
@@ -360,7 +384,9 @@ describe.skipIf(process.platform !== "linux")("x402-host-probe", () => {
         expect(s[name], name).toBe(r.values[name]);
       const days = r.values["certificate_days_left"];
       expect(s['certificate_days_left{certificate="cloudwatch-agent"}']).toBe(days);
-      expect(s['certificate_days_left{certificate="metrics-agent"}']).toBe(days);
+      // 365 against 200 days, made a moment apart: each sample read its own file.
+      const gap = days! - s['certificate_days_left{certificate="metrics-agent"}']!;
+      expect(gap === 164 || gap === 165, `gap ${gap}`).toBe(true);
       expect(s["certificate_days_left"]).toBeUndefined();
     });
 
@@ -385,6 +411,20 @@ describe.skipIf(process.platform !== "linux")("x402-host-probe", () => {
       r = await probe({ SERVICE_RESULT: "success" }, ["stopped"], t);
       expect(total(r, "facilitator_failures_total")).toBe(1);
       expect(Object.keys(r.textfiles).every((f) => f.endsWith(".prom"))).toBe(true);
+    });
+
+    test("rewrites every counter file on each run, keeping its total", async () => {
+      // ADR 0011's age rule reads every textfile: an event-only file would go stale.
+      const t = mkdtempSync(join(dir, "textfile-"));
+      await probe({}, [], t);
+      await probe({}, ["count", "watchdog_restarts_total"], t);
+      const file = join(t, "watchdog_restarts_total.prom");
+      utimesSync(file, 1_000, 1_000);
+      const r = await probe({}, [], t);
+      expect(statSync(file).mtimeMs).toBeGreaterThan(1_000_000);
+      expect(samples(r.textfiles["watchdog_restarts_total.prom"]!)["watchdog_restarts_total"]).toBe(
+        1,
+      );
     });
 
     test("a directory it can't write fails the run, and the EMF lines still go out", async () => {
