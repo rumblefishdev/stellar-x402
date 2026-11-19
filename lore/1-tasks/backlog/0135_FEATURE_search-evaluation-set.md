@@ -4,7 +4,7 @@ title: "Labelled query set and nDCG@10 run for the Bazaar search"
 type: FEATURE
 status: backlog
 milestone: 2
-related_adr: ["0008"]
+related_adr: ["0008", "0014"]
 related_tasks: ["0120", "0134", "0132"]
 tags: [bazaar, search, evaluation, priority-high, effort-medium, discovery]
 links:
@@ -38,6 +38,8 @@ curated order.
     curated order is used;
   - a re-run at every milestone boundary, then monthly for 6 months after launch.
 - The M1 evidence says the evaluation starts with the ranking it measures.
+- ADR 0014 (task 0134) sets the ranking's starting weights on a separate set of 3,000 real
+  listings and 40 queries; any tuning stays on that kind of set, so this set only scores.
 
 ## Implementation Plan
 

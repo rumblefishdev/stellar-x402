@@ -4,8 +4,8 @@ title: "Search the Bazaar: /discovery/search with ranking"
 type: FEATURE
 status: backlog
 milestone: 2
-related_adr: ["0008", "0012"]
-related_tasks: ["0029", "0063", "0137"]
+related_adr: ["0008", "0012", "0014"]
+related_tasks: ["0029", "0063", "0137", "0134", "0135", "0154"]
 tags: [bazaar, discovery, mcp, priority-medium, effort-large]
 links:
   - ../../../docs/rfp/07-x402-facilitator-bazaar.md
@@ -16,6 +16,12 @@ history:
     note: >
       An RFP requirement with no task until now: the M1 plan leaves search out of Tranche 1, and
       no later task held it.
+  - date: "2026-11-19"
+    status: backlog
+    who: karolkow
+    note: >
+      0134 chose the approach (ADR 0014); the design questions left here are the empty query and
+      the limit.
 ---
 
 # Search the Bazaar: `/discovery/search` with ranking
@@ -34,13 +40,19 @@ ranked by fit, so that I can find a paid resource without knowing its seller or 
   defers them to "later tranches" (`m1-spine.md`, Deferred).
 - Upstream `@x402/extensions` 2.28 types the request as `SearchDiscoveryResourcesParams`, with a
   natural-language query.
-- ADR 0012 keeps search in the same PostgreSQL: full-text, `pg_trgm`, `pgvector`.
+- [ADR 0014](../../../docs/adr/0014-bazaar-search.md) (task 0134) chose the approach: PostgreSQL
+  full-text search and `granite-embedding-30m-english` vectors in `pgvector`, fused by weighted
+  RRF; the model in its own container, with words alone when it is down; a listing searchable once
+  its vector is stored; a keyset cursor; `partialResults` in the spec's meaning. The quality score
+  and curation are 0154's.
 - 0029 notes that upstream's e2e Bazaar check calls `/discovery/search`.
 
 ## Implementation
 
-- Settle the design with the owner first: ranking signals, keyword and fuzzy search first or
-  vectors, cursor shape, what an empty query returns.
+- Build what ADR 0014 decides. Settle with the owner first what it leaves open: what an empty
+  query returns, and the largest `limit` served.
+- Pick the ONNX Runtime library for the model's container (no LGPL dependency) and set its memory
+  limit and the facilitator's timeout for it from a measurement on the server.
 - The route, its port method and its PostgreSQL adapter.
 - Agree the route's request and response types first: 0137 builds the MCP search tool on them.
 

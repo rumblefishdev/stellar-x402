@@ -5,12 +5,14 @@ type: RESEARCH
 status: active
 owner: karolkow
 milestone: 2
-related_adr: ["0008", "0012"]
+related_adr: ["0008", "0012", "0014"]
 related_tasks: ["0120", "0135", "0013", "0154"]
 tags: [bazaar, search, priority-high, effort-small, discovery]
 links:
   - ../../../../docs/adr/0012-facilitator-state-store.md
   - ../../../../docs/scf/milestone-1-evidence.md
+  - ../../../../docs/adr/0014-bazaar-search.md
+  - notes/R-search-measurement.md
 history:
   - date: "2026-11-12"
     status: backlog
@@ -54,10 +56,36 @@ down before the ranking code, so the search is built once.
 - Which embedding model, how large, and where does it run?
 - What is the fallback if the dense part can't run in production: lexical plus curation only?
 
+## Premise
+
+A fresh reviewer (opus), given only the goal and the constraints, attacked the task on 2026-11-18.
+Verdict: rethink. Each point and where it went:
+
+- **0135's 25-resource set can't tell methods apart** (an obvious-first order already scores high
+  on it). The choices here were measured on 3,000 real catalog listings and on ToolRet instead;
+  0135's set only scores the result.
+- **A model inside the facilitator's 512 MiB, on the `/settle` path, is a risk.** The model runs
+  in its own container, with search falling back to words.
+- **`pgvector` is a change no catalog size needs yet.** The owner kept the dense part because §4
+  promises it; the measurement shows it carries the search (words alone 0.436, fused 0.706).
+- **Ranking by volume rewards wash trading, which the facilitator pays fees for.** The quality
+  score moved to its own task, 0154.
+- **The consumer is an agent, so recall in the first 20 matters more than the order of the first
+  10.** Recall@20 decides between methods; nDCG@10 is still reported to SCF.
+- **§3's `partialResults` contradicts the spec.** The spec's meaning is kept; the difference is in
+  0132.
+
 ## Acceptance Criteria
 
-- [ ] An ADR (or an amendment to ADR 0012) records the lexical part, the dense part, the embedding
+- [x] An ADR (or an amendment to ADR 0012) records the lexical part, the dense part, the embedding
       model and where it runs, the fusion, and what was rejected
-- [ ] Any difference from §4 of the Panel Review response is listed for the M2 evidence (0132)
-- [ ] The ADR says what the search does while a listing's vector or quality score is missing
-- [ ] 0120 is updated to name the chosen approach
+- [x] Any difference from §4 of the Panel Review response is listed for the M2 evidence (0132)
+- [x] The ADR says what the search does while a listing's vector or quality score is missing
+- [x] 0120 is updated to name the chosen approach
+
+## Result
+
+[ADR 0014](../../../../docs/adr/0014-bazaar-search.md) records the approach; the measurements
+behind it, on 3,000 catalog listings and on ToolRet, are in
+[R-search-measurement](notes/R-search-measurement.md), with the scripts, queries and grades in
+`benchmark/`. The differences from the Panel Review response are rows in 0132's deviations table.
