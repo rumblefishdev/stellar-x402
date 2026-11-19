@@ -1663,7 +1663,8 @@ it), with `--name=metrics-agent-key`, and its CSR (`CN=x402-metrics-agent-produc
 is `deploy/ansible/files/metrics-agent-production.crt`; the playbook checks it and that it is the
 key's before it copies it. Issued by `soroban-internal-ca-2026`, serial
 `03869E42EE8A16EB9F0060AABC2C0811`, valid until 2027-11-18 14:24:12 UTC. Renewal follows the
-CloudWatch agent's, with these names.
+CloudWatch agent's, with these names, except its last step: the playbook restarts the agent when
+it copies the new certificate, so there is no `systemctl start` to run.
 
 **The admin step,** as `deploy` with sudo, after the playbook run from that merge:
 
