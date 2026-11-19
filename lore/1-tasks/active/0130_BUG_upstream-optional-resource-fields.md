@@ -23,6 +23,12 @@ history:
       #174 merged: until upstream's release, our schema reads a 402 or payment whose serviceName,
       tags or iconUrl breaks a Bazaar limit; the preview cuts name and tags to 500; a wrong type
       still refuses. The upstream PR waits for a signing key.
+  - date: "2026-11-19"
+    status: active
+    who: karolkow
+    note: >
+      The same whole-402 refusal for one malformed offer in `accepts`, measured on the Stellar
+      pubnet catalog; per-offer validation decided.
 ---
 
 # Upstream fix: @x402/core refuses a whole 402 for one bad optional resource field
@@ -36,6 +42,12 @@ released, removes our workaround and proves our MCP server can pay such a seller
 
 ## Context
 
+- The same class hits `accepts` (measured 2026-11-19, one unpaid probe of 2,640 Stellar pubnet
+  listings on 35 hosts): one malformed offer for another network (a `network` that isn't CAIP-2,
+  an empty `asset`, a wrong-typed `amount`) fails `PaymentRequiredV2Schema`, so the valid
+  `stellar:pubnet` offer beside it is lost. 83 listings on 3 hosts are refused this way. The
+  owner decided to validate offers one by one and drop the bad ones, since a client picks any one
+  offer; the check sits at `apps/facilitator/src/catalog/seller-check.ts:152`.
 - Upstream code, at `main` ff58685 (2026-11-10):
   `typescript/packages/core/src/schemas/index.ts:68-95` (`ResourceInfoSchema`): `serviceName` 1–32
   printable ASCII, `tags` at most 5 items of 1–32 printable ASCII, `iconUrl` at most 2048 chars.
