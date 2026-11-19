@@ -12,6 +12,10 @@ history:
     status: mature
     who: stkrolikiewicz
     note: "Field table from 2026-11-18, values read from the code, and Adam's three points from #200"
+  - date: 2026-11-19
+    status: mature
+    who: stkrolikiewicz
+    note: "The certificate label, and Adam's points for steps 6 and 7 from #203 and #204"
 ---
 
 # Step 4: where each log-only field goes, and what the switch has to carry
@@ -55,6 +59,7 @@ The values come from the code that writes them. A value the code adds later is w
 | `spend_store_failures_total` | `op` | breaker, reserve, release | 4 |
 | `spend_refused_total` | `reason` | the policy's 11 refusals | 12 |
 | `rpc_on_fallback` | `rpc` | the `RPC_URLS` index: 0, 1, 2 (`MAX_RPC_URLS` is 3) | gauge |
+| `certificate_days_left` | `certificate` | cloudwatch-agent, metrics-agent: the probe's textfile (#204) | gauge, host |
 
 Each count includes `other`. Measured from the adapter's zero series: **368 series with one
 network, 504 with both**. 232 of them are process-scoped, and `catalog_attempts_total` alone is
@@ -116,3 +121,15 @@ A network-scoped counter without `network` only happens past the types: the root
 - An alarm carried over from a CloudWatch set with a `when` on a dim adds it as a matcher:
   `spend_failure_attributed_total{fault="ours"}`, `settlement_refused_after_verify_total{stage="pool"}`,
   `http_requests_total{status="500"}`.
+
+### For steps 6 and 7 (from Adam's review of #203 and #204)
+
+- **Step 7, the network.** The facilitator joins `x402-metrics` (`deploy/metrics/compose.yaml`).
+  If `x402-production` takes it as an external network, `x402@production` can't start at boot
+  until `x402-metrics.service` has made it, and nothing orders the two units. Adam's option: the
+  playbook makes the network, so neither project owns it.
+- **Step 6, ClickHouse's endpoint.** ADR 0011 scrapes it "so one view covers the shared server",
+  and its series are the unknown part of the ~8,000 the CPX12 holds. Reaching it needs a change in
+  the explorer's container; raise it with their team before step 6.
+- **`project: x402`** is in the agent's `external_labels` (#203), so the VM tells x402's host
+  series from another project's from the first sample on.
