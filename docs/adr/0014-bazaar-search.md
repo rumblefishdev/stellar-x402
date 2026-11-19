@@ -94,8 +94,11 @@ The measurements are in
     their cause and counted in a metric, so monitoring can alert on a listing that keeps failing.
   - The runtime is ONNX Runtime; 0120 picks the library, with no LGPL dependency
     (`docs/scf/milestone-1-license-audit.md`).
-- **Fusion.** Weighted RRF over the top 50 matches by each part, k = 20: a listing scores
-  4 / (20 + its rank by meaning) + 1 / (20 + its rank by words). Ties go by the listing's key.
+- **Fusion.** Weighted RRF over every match, k = 20: a listing scores
+  4 / (20 + its rank by meaning) + 1 / (20 + its rank by words), with no words term for a match
+  that holds no query word. Ties go by the listing's key. Nothing is cut: on the 0134 set,
+  ranking every match scores as well as ranking each part's top 50 (0.724 against 0.725
+  nDCG@10), and with an exact scan a cut saves no work.
 - **Tuning.** These values sit on a flat part of the measured curve, within noise of meaning
   alone. Any tuning is done on 0134's set or a larger one of the same kind, never on 0135's
   evaluation set, which only scores the ranking, so its nDCG@10 is not fitted to it.
@@ -118,8 +121,9 @@ The measurements are in
   may repeat or be skipped at a page boundary. It also carries how the page was ranked, fused or
   words alone, and the model: the two scores differ in scale, so a cursor from another ranking or
   model is refused with `400` and the client starts again.
-- **`partialResults`** keeps the spec's meaning: `true` when matches were cut that no page will
-  return: when more listings match than the 50 each part takes.
+- **`partialResults`** keeps the spec's meaning: `true` when matches were left out that no page
+  will return. Every match is ranked and the cursor reaches the last one, so it is `false`, except
+  while search answers by words alone: matches by meaning were not looked for, so it is `true`.
 
 ## Rationale
 
@@ -192,8 +196,8 @@ The measurements are in
   repetition on the vector is not measured. Limits on it belong with the quality score (0154).
 - A new listing is found by search once its vector is written, later than `/discovery/resources`
   lists it. While the model can't be used, search answers by words alone.
-- Paging ends with the fused candidates: a query reaches at most 100 listings, and
-  `partialResults` says when more matched.
+- Paging reaches every match. On the 0134 set a query has a median of 158 matches, 76 among the
+  Stellar listings alone, and at most 744.
 - Changing the model means embedding every listing again: about 5 minutes for 34,782 listings at
   granite's speed on an M4, while search answers by words alone. A model of another size also
   changes the column's type.

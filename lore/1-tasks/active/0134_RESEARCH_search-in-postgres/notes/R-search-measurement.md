@@ -89,6 +89,32 @@ listing in the top 10. Fused (3 : 1, k = 60) minus granite alone: all 8 long que
 rests on one query (q01, +0.287; the other 7 average +0.025) and does not survive the correction;
 paraphrase, typo and MCP are within noise. Relevant, for R@20, means a grade of 2 or 3.
 
+## Matches and the cut
+
+Measured after the ADR's first draft, with granite, k = 20, meaning weighted 4, every match
+ranked (`matches.py`, `cut.py`). What counts as a match (median matches per query, with the
+Stellar listings alone in brackets):
+
+| A listing matches when                        | Matches   | Relevant kept (grade ≥ 2 / 3) | nDCG@10 | R@20  |
+| --------------------------------------------- | --------- | ----------------------------- | ------- | ----- |
+| it holds any query word, or cosine ≥ 0.60      | 556 (322) | 99% / 99%                     | 0.725   | 0.723 |
+| cosine ≥ 0.60 (the ADR's rule)                 | 158 (76)  | 97% / 99%                     | 0.724   | 0.721 |
+| a query word is in its name or tags, or ≥ 0.60 | 245 (105) | 98% / 99%                     | 0.709   | 0.711 |
+| cosine within 0.10 of the best match           | 24 (12)   | 74% / 83%                     | 0.698   | 0.635 |
+
+OR-ed words match almost everything: "api to check if an IBAN number is valid" holds a word of
+2,232 of the 3,000 listings. With matches by meaning, cutting each part before fusion:
+
+| Cut        | nDCG@10 | R@20  |
+| ---------- | ------- | ----- |
+| 20         | 0.713   | 0.707 |
+| 50         | 0.725   | 0.716 |
+| 100        | 0.726   | 0.717 |
+| none (ADR) | 0.724   | 0.721 |
+
+Matches per query: median 158, 90th percentile 544, at most 744; 36 of 40 queries have more
+than 50 (27 of 40 among the Stellar listings alone).
+
 ## ToolRet
 
 ToolRet (`mangopy/ToolRet-Queries`, `mangopy/ToolRet-Tools`, MTEB task `ToolRetrieval`): 7,961
@@ -143,7 +169,8 @@ base directory with this layout:
 - `models/<name>/onnx/model.onnx` with its tokenizer, from each model's Hugging Face repository;
 - `toolret/`: the two ToolRet parquet sets.
 
-`lexical.py` runs against a local PostgreSQL 18 container; its docstring holds the table it reads.
+`lexical.py`, `matches.py` and `cut.py` run against a local PostgreSQL 18 container; `lexical.py`'s
+docstring holds the table they read.
 `eval_ours.py` counts a listing as graded when a judge was shown it; the judges' input files are
 not committed, so its share of ungraded listings needs them. `embed.py` lists each model's pooling,
 length and query prefix.
