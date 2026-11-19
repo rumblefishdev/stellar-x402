@@ -43,15 +43,22 @@ export interface MetricDef {
   /**
    * The closed values of each billed dim. A facilitator dim includes `other`, and a value outside
    * is written as `other`; a host dim lists what the agent writes (the mount `/`). A label in no
-   * set is a log field and is not restricted.
+   * set is a log field: its closed values, if any, are in `fieldValues`.
    */
   readonly values?: Readonly<Record<string, readonly string[]>>;
   /**
-   * The labels a writer may add as log fields only: in no set, so not billed and not restricted.
+   * The labels a writer may add as log fields only: in no set, so not billed. EMF writes any value;
+   * a field in `fieldValues` is also a closed Prometheus label.
    * With the sets' dims, their `when` keys and `values`, they are every label key the facilitator's
    * port accepts for the metric, so a mistyped key doesn't compile (decision 57).
    */
   readonly fields?: readonly string[];
+  /**
+   * The closed values of the `fields` that are Prometheus labels (0139 step 4), `other` included.
+   * EMF never reads it: they stay log fields there, so CloudWatch bills nothing new before the
+   * switch. A field not listed here stays out of the Prometheus series (its home is the app line).
+   */
+  readonly fieldValues?: Readonly<Record<string, readonly string[]>>;
   readonly emit: Emit;
 }
 
@@ -76,6 +83,7 @@ export const CATALOG = [
     sets: [{ dims: ["result"] }],
     values: { result: ["success", "error", "other"] },
     fields: ["reason", "replay"],
+    fieldValues: { replay: ["true", "false", "other"] },
     emit: "aggregated",
   },
   {
@@ -87,6 +95,14 @@ export const CATALOG = [
     sets: [{ dims: ["stage"], when: { stage: ["pool"] } }],
     values: { stage: ["check", "pool", "other"] },
     fields: ["reason"],
+    fieldValues: {
+      reason: [
+        "settle_exact_stellar_fee_exceeds_maximum",
+        "settle_exact_stellar_signature_expiration_too_soon",
+        "invalid_exact_stellar_payload_fee_exceeds_maximum",
+        "other",
+      ],
+    },
     emit: "eager-first",
   },
   {
@@ -115,6 +131,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["state"],
+    fieldValues: { state: ["success", "failed", "other"] },
     emit: "eager-first",
   },
   // 0087: our inner transaction landed under someone else's fee bump, or bare. Free for us, a
@@ -127,6 +144,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["state"],
+    fieldValues: { state: ["success", "failed", "other"] },
     emit: "aggregated",
   },
   // 0141: another transaction used the payer's nonce first. `window` says where it was seen:
@@ -140,6 +158,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["window"],
+    fieldValues: { window: ["verify", "settle", "other"] },
     emit: "aggregated",
   },
   // The OpenBao signer holds one network's keys (openbao-signer.ts logs its `network`).
@@ -151,6 +170,19 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["reason", "step"],
+    fieldValues: {
+      reason: [
+        "sealed",
+        "denied",
+        "refused",
+        "error",
+        "timeout",
+        "unreachable",
+        "address_mismatch",
+        "other",
+      ],
+      step: ["sign", "check", "other"],
+    },
     emit: "eager-first",
   },
   // From the submitter's `onEvent` in main.ts: one pool per network.
@@ -206,6 +238,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["signed"],
+    fieldValues: { signed: ["true", "false", "other"] },
     emit: "aggregated",
   },
   {
@@ -227,6 +260,22 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["reason"],
+    fieldValues: {
+      reason: [
+        "settle_exact_stellar_timeout",
+        "settle_exact_stellar_rpc_unavailable",
+        "settle_exact_stellar_interrupted",
+        "settle_exact_stellar_shutting_down",
+        "settle_exact_stellar_no_channel_in_time",
+        "settle_exact_stellar_no_channels",
+        "settle_exact_stellar_lease_lost",
+        "settle_exact_stellar_transaction_signing_failed",
+        "settle_exact_stellar_fee_bump_signing_failed",
+        "settle_exact_stellar_facilitator_underfunded",
+        "settle_exact_stellar_spend_store_unavailable",
+        "other",
+      ],
+    },
     emit: "aggregated",
   },
   {
@@ -246,6 +295,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["hook"],
+    fieldValues: { hook: ["beforeSubmit", "onFinal", "onSuccess", "other"] },
     emit: "eager-first",
   },
   {
@@ -275,6 +325,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["held"],
+    fieldValues: { held: ["true", "false", "other"] },
     emit: "aggregated",
   },
   // The pruner deletes from whole tables shared by every network (rate_limits, spend_*), not one
@@ -287,6 +338,17 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
     fields: ["table"],
+    // `settlements_refused` is #205's (0086): listed ahead, so it isn't `other` once that lands.
+    fieldValues: {
+      table: [
+        "spend_reservations",
+        "spend_scopes",
+        "rate_limits",
+        "catalog_attempts",
+        "settlements_refused",
+        "other",
+      ],
+    },
     emit: "aggregated",
   },
   {
@@ -297,6 +359,23 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
     fields: ["stage", "origin"],
+    fieldValues: {
+      stage: [
+        "validate",
+        "normalize",
+        "compare",
+        "budget",
+        "ask",
+        "seller",
+        "upsert",
+        "report",
+        "not_success",
+        "no_ledger",
+        "header",
+        "other",
+      ],
+      origin: ["settle", "resolved", "other"],
+    },
     emit: "aggregated",
   },
   {
@@ -307,6 +386,24 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
     fields: ["origin", "stage", "outcome", "reason"],
+    fieldValues: {
+      origin: ["settle", "resolved", "other"],
+      stage: ["payment", "seller", "other"],
+      outcome: [
+        "rejected",
+        "unchanged",
+        "over_budget",
+        "not_askable",
+        "other_pay_to",
+        "other_key",
+        "too_large",
+        "refreshed",
+        "stale",
+        "upsert_failed",
+        "internal_error",
+        "other",
+      ],
+    },
     emit: "aggregated",
   },
   {
@@ -317,6 +414,7 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
     fields: ["origin"],
+    fieldValues: { origin: ["settle", "resolved", "other"] },
     emit: "aggregated",
   },
   {
@@ -327,6 +425,7 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
     fields: ["origin"],
+    fieldValues: { origin: ["settle", "resolved", "other"] },
     emit: "aggregated",
   },
   {
@@ -337,6 +436,7 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
     fields: ["origin"],
+    fieldValues: { origin: ["settle", "resolved", "other"] },
     emit: "aggregated",
   },
   // An HTTP route's query check; `discoveryResources` takes a network only for its answer.
@@ -394,6 +494,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["state"],
+    fieldValues: { state: ["success", "failed", "other"] },
     emit: "eager-first",
   },
   {
@@ -404,6 +505,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["op"],
+    fieldValues: { op: ["breaker", "reserve", "release", "other"] },
     emit: "eager-first",
   },
   {
@@ -414,6 +516,22 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["reason"],
+    fieldValues: {
+      reason: [
+        "settle_exact_stellar_facilitator_underfunded",
+        "settle_exact_stellar_spend_store_unavailable",
+        "settle_exact_stellar_breaker_open_payer",
+        "settle_exact_stellar_breaker_open_pay_to",
+        "settle_exact_stellar_breaker_open_asset",
+        "settle_exact_stellar_refused",
+        "settle_exact_stellar_spend_limit_payer",
+        "settle_exact_stellar_spend_limit_pay_to",
+        "settle_exact_stellar_spend_limit_asset",
+        "settle_exact_stellar_spend_limit_other",
+        "settle_exact_stellar_spend_limit_global",
+        "other",
+      ],
+    },
     emit: "aggregated",
   },
   // The floor reads one network's fee account (balance-floor.ts).
@@ -502,6 +620,26 @@ export const CATALOG = [
     sets: PLAIN,
     emit: "aggregated",
   },
+  // pool_queued's `channels` and `busy` as series of their own (0139 step 4): a number as a label
+  // would make a new series per value. Registered in main.ts at the switch, so EMF bills nothing.
+  {
+    namespace: FAC,
+    name: "pool_channels",
+    kind: "gauge",
+    unit: "Count",
+    scope: "network",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
+  {
+    namespace: FAC,
+    name: "pool_busy",
+    kind: "gauge",
+    unit: "Count",
+    scope: "network",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
   {
     namespace: FAC,
     name: "rpc_on_fallback",
@@ -510,6 +648,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["rpc"],
+    fieldValues: { rpc: ["0", "1", "2", "other"] },
     emit: "aggregated",
   },
   {
@@ -538,6 +677,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["state"],
+    fieldValues: { state: ["success", "failed", "other"] },
     emit: "aggregated",
   },
   // 0089: declared, emitter not yet on develop

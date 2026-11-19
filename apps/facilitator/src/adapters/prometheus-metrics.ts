@@ -3,10 +3,11 @@
 // (0139 AC3); until then nothing wires it in `main()`.
 //
 // - A series' labels are the union of its catalog sets' dims, plus `network` for a network-scoped
-//   metric. A set's `when` on a dim only limited what CloudWatch billed, so every label is always
+//   metric, plus its `fieldValues` fields (below). A set's `when` on a dim only limited what CloudWatch billed, so every label is always
 //   written and a rule filters on it. A `when` on a label that is no dim still decides whether the
 //   line counts (`spend_budget_nearing_total`'s `budget`, as `seriesDims` says).
-// - `fields` are log fields, never labels (step 4 of 0139 decides where they go).
+// - A field with closed values in the catalog's `fieldValues` is a label too, after the dims; any
+//   other field stays in the app line (0139 step 4). `rpc` is written as its `RPC_URLS` index.
 // - Every counter starts at 0 for every closed label value, so a missing series is a fault.
 // - Gauges are read at scrape time; each series has `<name>_last_read_timestamp_seconds`, which
 //   stops moving when its read fails or has no value.
@@ -53,10 +54,20 @@ export interface MetricIssue {
   value?: string;
 }
 
-/** The metric's label keys in a fixed order: `network` first, then its sets' dims as declared. */
+/**
+ * The metric's label keys in a fixed order: `network` first, then its sets' dims as declared, then
+ * its fields with closed values.
+ */
 export function labelKeys(def: MetricDef): string[] {
-  return [...new Set(effectiveSets(def).flatMap((set) => set.dims))];
+  const dims = effectiveSets(def).flatMap((set) => set.dims);
+  return [...new Set([...dims, ...Object.keys(def.fieldValues ?? {})])];
 }
+
+/** A label's closed values: a dim's `values` or a field's `fieldValues`; none for an open dim. */
+const closedValues = (def: MetricDef, key: string) => def.values?.[key] ?? def.fieldValues?.[key];
+
+// ponytail: the one label rewritten here; main.ts can pass the index itself once EMF is gone.
+const RPC_INDEX = /^RPC_URLS\[(\d+)\]#/;
 
 /**
  * Whether the line counts: some set's `when`, on the labels that are no dim of the metric, holds.
@@ -76,7 +87,7 @@ function counts(def: MetricDef, labels: Labels): boolean {
 function combinations(def: MetricDef, keys: string[], networks: readonly Network[]): Labels[] {
   return keys.reduce<Labels[]>(
     (acc, key) => {
-      const values = key === "network" ? networks : (def.values?.[key] ?? []);
+      const values = key === "network" ? networks : (closedValues(def, key) ?? []);
       return acc.flatMap((labels) => values.map((v) => ({ ...labels, [key]: v })));
     },
     [{}],
@@ -142,11 +153,12 @@ export function prometheusMetrics(opts: {
         out[key] = "other";
         continue;
       }
-      const s = String(raw);
+      const s = key === "rpc" ? (RPC_INDEX.exec(String(raw))?.[1] ?? String(raw)) : String(raw);
+      const closed = closedValues(def, key);
       const ok =
         key === "network"
           ? isStellarNetwork(s)
-          : isDimValue(s) && (def.values?.[key] === undefined || def.values[key].includes(s));
+          : isDimValue(s) && (closed === undefined || closed.includes(s));
       if (!ok) report({ kind: "unknown-value", name: def.name, label: key, value: s });
       out[key] = ok ? s : "other";
     }

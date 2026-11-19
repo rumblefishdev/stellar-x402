@@ -42,7 +42,7 @@ export type SignerState = "unchecked" | "ok" | "failed";
  * without a signature), `timeout`, `unreachable` (no socket), `address_mismatch` (signed by a key
  * other than the configured address's).
  */
-type SignerFailure =
+export type SignerFailure =
   "sealed" | "denied" | "refused" | "error" | "timeout" | "unreachable" | "address_mismatch";
 
 export class SignerError extends Error {

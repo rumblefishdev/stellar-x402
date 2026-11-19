@@ -75,7 +75,7 @@ export const SETTLE_MIN_VALIDITY_LEDGERS = 2;
  * ceiling (a new fee-stats reading or escalation, caught by the pool or by `/settle`'s own
  * re-check), or the auth expiry came too close while the call waited for a channel.
  */
-const REFUSED_AFTER_VERIFY = new Set<string>([
+export const REFUSED_AFTER_VERIFY = new Set<string>([
   SETTLE_REASONS.fee,
   SETTLE_REASONS.ledgerBound,
   // Upstream's code, from `/settle`'s re-check of the checks.
