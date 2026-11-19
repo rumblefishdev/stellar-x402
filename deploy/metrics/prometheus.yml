@@ -4,8 +4,12 @@
 # `docker exec` or a scraper in its network namespace reaches it; 0139 decides which.
 global:
   scrape_interval: 15s
+  # `project` tells x402's host series from another project's on the VM (`backup_age_seconds`,
+  # `certificate_days_left`), as CloudWatch's namespace did. Added later, it would split each
+  # series' history.
   external_labels:
     host: ch-prod-01
+    project: x402
 
 scrape_configs:
   - job_name: node
