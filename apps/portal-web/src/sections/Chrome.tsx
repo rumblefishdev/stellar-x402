@@ -1,4 +1,4 @@
-import { GetKeyLink } from "../components/SectionHead";
+import { LogInLink } from "../components/SectionHead";
 
 const GITHUB = "https://github.com/rumblefishdev/stellar-x402";
 
@@ -19,7 +19,7 @@ export function Header() {
           <a href="#endpoints">Endpoints</a>
           <a href="#faq">FAQ</a>
           <a href={GITHUB}>GitHub</a>
-          <GetKeyLink />
+          <LogInLink />
         </div>
       </nav>
     </header>
