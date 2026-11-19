@@ -876,6 +876,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
               ...(typeof verdict.extra?.reason === "string" && {
                 errorDetail: verdict.extra.reason,
               }),
+              ...(identity.expiration !== undefined && { expirationLedger: identity.expiration }),
             },
             UNSENT_REASONS,
             now(),
@@ -1150,12 +1151,12 @@ function reopenable(record: SettlementRecord, fingerprint: string): boolean {
   );
 }
 
-class OutOfTimeError extends Error {
+export class OutOfTimeError extends Error {
   override readonly name = "OutOfTimeError";
 }
 
 /** The promise's value, or an {@link OutOfTimeError} if it doesn't settle within `ms`. */
-async function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
+export async function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(

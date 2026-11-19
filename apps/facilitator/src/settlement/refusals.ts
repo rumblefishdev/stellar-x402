@@ -3,7 +3,14 @@ import type { VerifyResponse } from "@x402/core/types";
 import type { Logger } from "../logger.js";
 import type { SettlementStore } from "../ports/index.js";
 import { UNSENT_REASONS } from "./reasons.js";
-import { fingerprintOf, identityOf, type PayloadIdentity } from "./settle.js";
+import { isFinalRecord } from "./records.js";
+import {
+  OutOfTimeError,
+  bounded,
+  fingerprintOf,
+  identityOf,
+  type PayloadIdentity,
+} from "./settle.js";
 import type { Verify } from "./verify.js";
 
 /**
@@ -13,7 +20,7 @@ import type { Verify } from "./verify.js";
 export const VERIFY_STORE_TIMEOUT_MS = 2_000;
 
 /**
- * The settlement store didn't answer `/verify` (0086): it failed or ran past
+ * The settlement store didn't record `/verify`'s refusal (0086): it failed or ran past
  * {@link VERIFY_STORE_TIMEOUT_MS}. No verdict, so the route answers 503 and the seller sends the
  * same payment again: a refusal that wasn't recorded would invite a second signature.
  */
@@ -36,25 +43,18 @@ export interface RefusalDeps {
  * settlement key is stored as a `refused` record, which `/settle` then answers from, and a
  * repeat of the same payment gets the stored refusal here without the checks. The answer says the
  * payment won't settle here and, from its auth entry's expiration ledger, when a new one is safe.
- * Wraps the checks only: a breaker's refusal (`verifyWithBreakers`, outside) isn't recorded.
+ * A lookup the store doesn't answer runs the checks, as before 0086: the lookup only saves their
+ * RPC calls, and `/settle` answers from the record itself. Wraps the checks only: a breaker's
+ * refusal (`verifyWithBreakers`, outside) isn't recorded.
  */
 export function verifyWithRefusals(verify: Verify, deps: RefusalDeps): Verify {
   const { network, store, logger, now = Date.now, storeTimeoutMs = VERIFY_STORE_TIMEOUT_MS } = deps;
   const stored = async <T>(op: string, call: () => Promise<T>): Promise<T> => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new StoreUnavailableError(`settlement store ${op}: no answer in time`)),
-        storeTimeoutMs,
-      );
-    });
     try {
-      return await Promise.race([call(), timeout]);
+      return await bounded(call(), storeTimeoutMs);
     } catch (error) {
-      if (error instanceof StoreUnavailableError) throw error;
-      throw new StoreUnavailableError(`settlement store ${op} failed`, { cause: error });
-    } finally {
-      clearTimeout(timer);
+      const what = error instanceof OutOfTimeError ? "no answer in time" : "failed";
+      throw new StoreUnavailableError(`settlement store ${op}: ${what}`, { cause: error });
     }
   };
 
@@ -62,7 +62,10 @@ export function verifyWithRefusals(verify: Verify, deps: RefusalDeps): Verify {
     const identity = requirements.network === network ? identityOf(payload, network) : undefined;
     if (!identity) return verify(payload, requirements, trace);
     const fingerprint = fingerprintOf(payload, requirements);
-    const existing = await stored("get", () => store.get(identity.key));
+    const existing = await stored("get", () => store.get(identity.key)).catch((error: unknown) => {
+      logger.warn("verify_store_lookup_failed", { network, settlementKey: identity.key, error });
+      return undefined;
+    });
     if (existing?.state === "refused" && existing.fingerprint === fingerprint) {
       return refused(
         {
@@ -94,13 +97,16 @@ export function verifyWithRefusals(verify: Verify, deps: RefusalDeps): Verify {
           errorReason: response.invalidReason!,
           ...(response.invalidMessage !== undefined && { errorMessage: response.invalidMessage }),
           ...(typeof response.extra?.reason === "string" && { errorDetail: response.extra.reason }),
+          ...(identity.expiration !== undefined && { expirationLedger: identity.expiration }),
         },
         UNSENT_REASONS,
         at,
       ),
     );
-    // Another record answers for the key (one being settled, or another payload's): the refusal
-    // is this call's alone, as before 0086.
+    // The same payment is being settled: "fee too high" alone would invite a second signature.
+    if (record.fingerprint === fingerprint && !isFinalRecord(record)) return underWay(response);
+    // Another record answers for the key (one that ended, or another payload's): the refusal is
+    // this call's alone, as before 0086.
     if (record.state !== "refused" || record.fingerprint !== fingerprint) return response;
     // A new refusal has version 0; a record it moved from `rejected`, more.
     if (record.version > 0) {
@@ -111,6 +117,20 @@ export function verifyWithRefusals(verify: Verify, deps: RefusalDeps): Verify {
       });
     }
     return refused(response, identity);
+  };
+}
+
+/**
+ * The refusal while a settlement of the same payment is under way (0086, review of #205): its
+ * outcome is `/settle`'s to answer, from the record, so no new signature until then.
+ */
+function underWay(response: VerifyResponse): VerifyResponse {
+  const advice =
+    "a settlement of this payment is under way: send this payment to /settle for its outcome " +
+    "before signing a new one";
+  return {
+    ...response,
+    invalidMessage: response.invalidMessage ? `${advice}; ${response.invalidMessage}` : advice,
   };
 }
 
