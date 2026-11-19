@@ -2,7 +2,7 @@
 id: "0134"
 title: "Decide how the Bazaar search retrieves and ranks in PostgreSQL"
 type: RESEARCH
-status: active
+status: completed
 owner: karolkow
 milestone: 2
 related_adr: ["0008", "0012", "0014"]
@@ -24,6 +24,13 @@ history:
     who: karolkow
     note: >
       Started.
+  - date: "2026-11-19"
+    status: completed
+    who: karolkow
+    note: >
+      Closed after #206 and #209 merged: ADR 0014 records the search (full-text and pgvector,
+      granite-embedding-30m in its own container, matches by meaning, RRF over every match),
+      ADR 0011 counts the model's 512 MiB, 0132 lists the deviations, and 0120 names the approach.
 ---
 
 # Decide how the Bazaar search retrieves and ranks in PostgreSQL

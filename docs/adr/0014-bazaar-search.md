@@ -32,7 +32,7 @@ What this has to fit:
   on 2026-11-18, 1,637 of them on Stellar pubnet from 21 hosts, all with English descriptions.
 
 The measurements are in
-[R-search-measurement](../../lore/1-tasks/active/0134_RESEARCH_search-in-postgres/notes/R-search-measurement.md).
+[R-search-measurement](../../lore/1-tasks/archive/0134_RESEARCH_search-in-postgres/notes/R-search-measurement.md).
 
 ## Decision
 
@@ -207,8 +207,8 @@ The measurements are in
 
 - [ADR 0008](0008-bazaar-catalog-integrity.md), [ADR 0011](0011-facilitator-hosting.md),
   [ADR 0012](0012-facilitator-state-store.md)
-- [Task 0134](../../lore/1-tasks/active/0134_RESEARCH_search-in-postgres/README.md) and its
-  [measurement](../../lore/1-tasks/active/0134_RESEARCH_search-in-postgres/notes/R-search-measurement.md);
+- [Task 0134](../../lore/1-tasks/archive/0134_RESEARCH_search-in-postgres/README.md) and its
+  [measurement](../../lore/1-tasks/archive/0134_RESEARCH_search-in-postgres/notes/R-search-measurement.md);
   tasks 0120 (the route), 0126 (both networks in one process), 0135 (the evaluation set), 0154
   (quality score and curation)
 - ToolRet: `mangopy/ToolRet-Queries`, `mangopy/ToolRet-Tools` (MTEB task `ToolRetrieval`)
