@@ -56,7 +56,7 @@ last days of the milestone go to checking it, not to writing it.
 | D1 | §4: lexical part as a TF-IDF-style score over a per-token document-frequency table | PostgreSQL's own full-text search (`ts_rank_cd`), no table of our own | ADR 0014 |
 | D1 | §4: a small self-hosted model, "e.g. `all-MiniLM-L6-v2`" | `granite-embedding-30m-english`, still small and self-hosted, in its own container | ADR 0014: +6.5 nDCG@10 on ToolRet's 7,961 queries over the example model, at its speed |
 | D1 | §4: RRF of the two parts | RRF weighted 3 : 1 for meaning | ADR 0014: equal weights scored below meaning alone |
-| D1 | §4: `serviceName`, `tags`, `info` description searched | also the URL path's words, and an MCP tool's name and parameters | ADR 0014 |
+| D1 | §4: `serviceName`, `tags`, `info` description searched | also the URL path's words, an MCP tool's name, and the parameters of every listing | ADR 0014 |
 | D1 | §3: `partialResults` true while the ranking pass hasn't finished | the spec's meaning, "additional matches were truncated"; a listing joins search only once its vector is stored | ADR 0014 |
 
 ## Implementation Plan

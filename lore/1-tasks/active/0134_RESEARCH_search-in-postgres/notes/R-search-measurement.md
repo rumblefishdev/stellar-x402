@@ -62,8 +62,10 @@ By query class, nDCG@10:
 | granite only      | 0.665   | 0.711      | 0.653 | 0.798 | 0.746 | 0.715 |
 | granite fused 3:1 | 0.723   | 0.669      | 0.672 | 0.710 | 0.755 | 0.706 |
 
-Words alone miss paraphrases and typos. Fusing words in lifts keyword and typo queries and costs
-long and paraphrased ones; overall the two are within noise on 40 queries.
+Words alone miss paraphrases and typos. Fused minus granite alone, with paired 95% intervals over
+8 queries a class: keyword +0.058 (+0.014 .. +0.127), long −0.088 (−0.124 .. −0.056), paraphrase
+−0.042, typo +0.019 and MCP +0.009, the last three within noise; all 40 queries −0.009 (−0.037 ..
++0.019). Relevant, for R@20, means a grade of 2 or 3.
 
 ## ToolRet
 
@@ -83,7 +85,8 @@ numbers are not comparable with its table; the order between models holds within
 | snowflake-arctic-embed-s | 28.71 | 42.91 | −3.49 (−4.04 .. −2.95)         | 2                 |
 | all-MiniLM-L6-v2       | 26.23   | 41.24 | −5.97 (−6.53 .. −5.41)         | 2                 |
 
-granite's R@20 is ahead of bge-small's: +0.88 (+0.13 .. +1.56).
+granite's R@20 is ahead of bge-small's: +0.88 (+0.13 .. +1.56). On our test bge-base against
+granite is −0.023 nDCG@10 and +0.013 R@20 (−0.052 .. +0.078).
 
 ## Cost
 
@@ -99,10 +102,23 @@ granite's R@20 is ahead of bge-small's: +0.88 (+0.13 .. +1.56).
 | e5-small-v2            | 33M        | 384        | 17.0            | 2.9               | 309          | MIT        |
 | bge-base-en-v1.5       | 110M       | 768        | 43.0            | 9.9               | 710          | MIT        |
 
-An exact cosine scan of 3,000 vectors of 384 dimensions takes 0.18 ms (NumPy, M4).
+An exact cosine scan of 3,000 vectors of 384 dimensions takes 0.18 ms (NumPy, M4). pgvector's
+scan inside PostgreSQL was not measured.
 
 ## Running it
 
-The scripts take one base directory holding `data/` (the corpus, `queries.json`, `grades.json`),
-`models/<name>/onnx/model.onnx` with its tokenizer, and `toolret/` with the two parquet sets.
-`embed.py` lists each model's pooling, length and query prefix.
+The scripts are the record of how the numbers were made, not a one-command run. Each takes one
+base directory with this layout:
+
+- `scripts/`: the files in `benchmark/` (the others import `embed.py` from there);
+- `data/`: `queries.json` and `grades.json` from `benchmark/`, and `listings.jsonl`, which
+  `build_corpus.py` builds from two JSON-lines downloads of CDP's `/discovery/resources`
+  (`stellar.jsonl`, the Stellar pubnet entries, and `cdp.jsonl`, all of them). The downloads are
+  not committed;
+- `models/<name>/onnx/model.onnx` with its tokenizer, from each model's Hugging Face repository;
+- `toolret/`: the two ToolRet parquet sets.
+
+`lexical.py` runs against a local PostgreSQL 18 container; its docstring holds the table it reads.
+`eval_ours.py` counts a listing as graded when a judge was shown it; the judges' input files are
+not committed, so its share of ungraded listings needs them. `embed.py` lists each model's pooling,
+length and query prefix.

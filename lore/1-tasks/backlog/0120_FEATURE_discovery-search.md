@@ -40,19 +40,17 @@ ranked by fit, so that I can find a paid resource without knowing its seller or 
   defers them to "later tranches" (`m1-spine.md`, Deferred).
 - Upstream `@x402/extensions` 2.28 types the request as `SearchDiscoveryResourcesParams`, with a
   natural-language query.
-- [ADR 0014](../../../docs/adr/0014-bazaar-search.md) (task 0134) chose the approach: PostgreSQL
-  full-text search and `granite-embedding-30m-english` vectors in `pgvector`, fused by weighted
-  RRF; the model in its own container, with words alone when it is down; a listing searchable once
-  its vector is stored; a keyset cursor; `partialResults` in the spec's meaning. The quality score
-  and curation are 0154's.
+- [ADR 0014](../../../docs/adr/0014-bazaar-search.md) (task 0134) chose the approach: words and
+  meaning in PostgreSQL, fused by rank, the model in its own container. The quality score and
+  curation are 0154's.
 - 0029 notes that upstream's e2e Bazaar check calls `/discovery/search`.
 
 ## Implementation
 
 - Build what ADR 0014 decides. Settle with the owner first what it leaves open: what an empty
   query returns, and the largest `limit` served.
-- Pick the ONNX Runtime library for the model's container (no LGPL dependency) and set its memory
-  limit and the facilitator's timeout for it from a measurement on the server.
+- Pick the ONNX Runtime library for the model's container (no LGPL dependency). Measure on the
+  server its memory, the facilitator's timeout for it and pgvector's exact scan (ADR 0014).
 - The route, its port method and its PostgreSQL adapter.
 - Agree the route's request and response types first: 0137 builds the MCP search tool on them.
 

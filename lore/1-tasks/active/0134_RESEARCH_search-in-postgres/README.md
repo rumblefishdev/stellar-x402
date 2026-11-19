@@ -58,7 +58,7 @@ down before the ranking code, so the search is built once.
 
 ## Premise
 
-A fresh reviewer (opus), given only the goal and the constraints, attacked the task on 2026-11-18.
+A fresh reviewer, given only the goal and the constraints, attacked the task on 2026-11-18.
 Verdict: rethink. Each point and where it went:
 
 - **0135's 25-resource set can't tell methods apart** (an obvious-first order already scores high
