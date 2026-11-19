@@ -90,13 +90,16 @@ passes once fees drop. If its payer signed a second payment meanwhile, both can 
    reopenable `rejected` record of the same payment to it, AD-16's second written exception.
    Blocking by key, not fingerprint: two payloads with one nonce can't both land, and another
    payload under the key gets `…_nonce_already_used`, as AD-6 answers.
-4. **`/verify` answers 503 when the store fails**, `store_unavailable`: an unrecorded refusal would
-   invite the second signature. `/settle` keeps its 500 before the claim.
-5. **The pruner deletes `refused` records after 1 h** (`REFUSED_HORIZON_MS`): the auth entry lasts
-   at most 66 ledgers after signing. Settlement records were never pruned before.
+4. **`/verify` answers 503 when the store fails to record a refusal**, `store_unavailable`: an
+   unrecorded refusal would invite the second signature. `/settle` keeps its 500 before the claim.
+   A failed lookup runs the checks instead (decision 14).
+5. **The pruner deletes `refused` records once they can't land** (`REFUSED_HORIZON_MS`, at least
+   1 h): the payer's expiration ledger must have closed too (decision 15). Settlement records were
+   never pruned before.
 6. **A transactional migration** (`0015_settlement_refused`): online migrations wait for 0080.
-   The partial index `WHERE state = 'refused'` holds `settlements` writes for one scan, small on
-   testnet and nothing on a new mainnet database.
+   `ADD COLUMN` holds reads and writes of `settlements` until the group commits, for one scan to
+   build the partial index `WHERE state = 'refused'`: small on testnet and nothing on a new
+   mainnet database. A group past its 1.5 s fails the run, unretried.
 7. **One release, with a deploy note**: the release before reads `refused` as open and answers a
    repeat `settlement_pending` during the deploy; it never settles it.
 
@@ -110,12 +113,29 @@ passes once fees drop. If its payer signed a second payment meanwhile, both can 
    `extra.expirationLedger`; `/verify` adds the same from the payload alone, with no ledger read.
 10. **`refused` is never a `transition` target** (`isForward`): only `refuse` writes it.
 11. **`/verify` reads the store before the checks**: a `refused` record of the same payload is
-    answered without an RPC call. Any other record leaves `/verify` as before.
-12. **2 s store timeout in `/verify`** (`VERIFY_STORE_TIMEOUT_MS`): `/verify` has no budget of its
-    own.
+    answered without an RPC call. Any other record, or no answer, leaves `/verify` as before.
+12. **2 s store timeout in `/verify`** (`VERIFY_STORE_TIMEOUT_MS`), for the lookup and the write:
+    `/verify` has no budget of its own.
 13. **A bogus payload can occupy a key**: a refusal is recorded before any signature check, so a
     payload naming someone's payer and nonce, refused, blocks that payment here. It needs the nonce
     first, and whoever has it can submit the payment on chain anyway (0141's front-run).
+
+### From review (#205, Stan's comments, decided by okarcz)
+
+14. **A failed lookup runs the checks**: a slow store no longer turns a valid payment into a 503.
+    The lookup only saves RPC calls; `/settle` claims the key and answers from the `refused`
+    record, so a refused payment that passes `/verify` during an outage still never settles. No
+    counter: the log line `verify_store_lookup_failed` only.
+15. **Pruned by expiration ledger**: upstream refuses on simulation and fee before any expiry
+    check, and our "too far" checks are relative to the current ledger, so a payload signed for
+    thousands of ledgers, refused for its fee, passed everything once the hour had gone. The
+    record keeps `expiration_ledger`; the pruner reads the latest ledger once a tick and deletes a
+    record of its network once that ledger has closed. A failed read prunes only records without
+    one, which never pass the payer-auth check.
+16. **"Under way" advice in `/verify`**: a refusal while a non-final record of the same payload
+    holds the key says to ask `/settle` for its outcome before signing a new payment.
+17. **`refuse` leaves a pre-0073 record** (`reopened` -1) as it is, as `reopen` does: moved to
+    `refused`, its old `created_at` let the pruner delete an AD-6 record.
 
 ## Future Work
 
