@@ -708,6 +708,51 @@ of them run it. Mainnet was in this state on 2026-11-06 (29, Core supporting 30)
 3. Raise `supported` for that network to the new version in a PR and deploy the alarms: this one
    goes back to OK. `protocol-changed` fires on the upgrade itself, with its own `expected`.
 
+## The Prometheus rules
+
+From 0139's switch, the alarms on the server's metrics run as Prometheus rules on the monitoring
+VM (ADR 0011, "Monitoring stack"). The rule file is
+[`deploy/metrics/rules/x402-production.yml`](../deploy/metrics/rules/x402-production.yml),
+written by `make rules` in `infra/` from the same rows as the alarms
+(`infra/src/lib/rules.ts`), so each rule keeps its alarm's name with an `x402-` prefix, its
+threshold and this page's section. Until the switch nothing on the VM loads it.
+
+- `network` is a label, not part of the name: pubnet adds alert instances, not rules.
+- Every Event alarm is one branch of the single rule `x402-event`; its `check` label is the
+  alarm's name.
+- What stays in CloudWatch: the off-server check's and the uptime probe's alarms, `audit-disk`,
+  `certificate`, `credentials-stale`, `telemetry-silent` and `log-volume-app`. The EMF alarms go
+  with EMF.
+- `facilitator-silent`, `gauges-silent` and `probe-silent` read a series' arrival, which
+  Prometheus reads another way: `x402-facilitator-silent` (the liveness series),
+  `x402-gauge-stale` and `x402-textfile-stale` below.
+
+### gauge-stale
+
+A facilitator gauge's `_last_read_timestamp_seconds` is over 15 minutes old, or missing for a
+network since the start, while the process runs. The `gauge` label names it; find its read error
+in the app logs (`metric_issue`, `read-failed`).
+
+### textfile-stale
+
+A host probe textfile in `/var/lib/x402/textfile` is over 5 minutes old, missing, or unreadable
+(`node_textfile_scrape_error`). Check the `x402-host-probe` timer and its journal.
+
+### server-silent
+
+No sample from ch-prod-01's metrics agent for 5 minutes. Check `x402-metrics` and
+`/var/log/x402/metrics/agent.log` ([runbook](runbook.md#the-metrics-agent)), then the agent's
+certificate.
+
+### target-down
+
+The agent has failed to scrape one of its targets (`job`) for 5 minutes.
+
+### agent-certificate
+
+The metrics agent's client certificate has under 30 days left. Renew it as the
+[runbook](runbook.md#the-metrics-agent) says.
+
 ## Every metric
 
 Every metric in [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts), then

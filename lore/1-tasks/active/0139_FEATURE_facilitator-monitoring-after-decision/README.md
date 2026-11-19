@@ -30,6 +30,14 @@ history:
       Step 4: the log-only fields of 21 metrics become labels through the catalog's
       `fieldValues`, the rest stay in app lines, and Adam's three points from #200 are recorded
       ([S-log-only-fields](notes/S-log-only-fields.md)).
+  - date: "2026-11-19"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Step 6, the rules: `make rules` in `infra/` writes `deploy/metrics/rules/x402-production.yml`
+      from the alarm rows, `network` a label and the Event rows one rule, with the server rules
+      for liveness, stamps, textfiles and the agent. Alertmanager's routes and the heartbeat come
+      next.
 ---
 
 # Carry out the monitoring decision for the facilitator, with every alarm fired again
