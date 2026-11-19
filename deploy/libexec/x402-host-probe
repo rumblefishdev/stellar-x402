@@ -68,7 +68,9 @@ textfile() { # name content
 # A counter's file: its total since the file was made, so a restart of node_exporter or the
 # server never resets it. Written when its event happens and again by every run with its total,
 # so the age rule ADR 0011 puts on every textfile holds for it too.
-# ponytail: two writers in the same instant can lose one count; flock(1) if that ever matters.
+# ponytail: no lock. Each file has two writers (its event and every run), so an event between a
+# run's read and its replace loses one count, and a scrape in that window reads a reset that
+# increase() counts as the whole total; flock(1) around this if that ever matters.
 count_file() { # counter by
   v=$(sed -n "s/^$1 \([0-9][0-9]*\)$/\1/p" "$X402_TEXTFILE/$1.prom" 2> /dev/null)
   textfile "$1" "# TYPE $1 counter
