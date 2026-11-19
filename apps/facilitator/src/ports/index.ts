@@ -30,6 +30,7 @@ export {
   type ClaimResult,
   type LeaseFence,
   type NewSettlement,
+  type Refusal,
   type ReopenResult,
   type SettlementAttempt,
   type SettlementKey,

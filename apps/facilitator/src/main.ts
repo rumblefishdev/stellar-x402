@@ -561,6 +561,10 @@ export async function main(
     // Every budget sums the one window (0024 S-design §5).
     const pruner = createPruner({
       settlements: stores.settlements,
+      ledger: {
+        network: config.network,
+        latest: async () => (await rpc.getLatestLedger()).sequence,
+      },
       spend: stores.spend,
       rateLimits: stores.rateLimits,
       catalogAttempts: stores.catalogAttempts,

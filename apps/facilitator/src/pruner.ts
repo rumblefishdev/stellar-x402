@@ -1,3 +1,4 @@
+import type { StellarNetwork } from "@stellar-x402/config";
 import type { Logger } from "./logger.js";
 import type { ProcessMetrics } from "./metrics.js";
 import type {
@@ -23,9 +24,10 @@ const BUDGET_MS = 1_000;
 export const spendHorizonMs = (windowMs: number) => Math.max(2 * windowMs, 7 * DAY_MS);
 
 /**
- * How long a `refused` record is kept (0086): its auth entry expires at most 66 ledgers (about
- * 5.5 min) after it was signed, before the refusal, and then it can't land anywhere. The rest is
- * margin for clock skew between processes and slow ledgers.
+ * How long a `refused` record is kept at least (0086). One with an expiration ledger is kept
+ * until that ledger has closed too: the checks can refuse a payload for its fee before any expiry
+ * check, so one signed for thousands of ledgers can pass later. One without never passes the
+ * payer-auth check, so the hour is margin for clock skew between processes.
  */
 export const REFUSED_HORIZON_MS = 60 * 60_000;
 
@@ -34,6 +36,12 @@ const CATALOG_ATTEMPTS_HORIZON_MS = 30 * DAY_MS;
 
 export interface PrunerDeps {
   settlements: Pick<SettlementStore, "pruneRefusals">;
+  /**
+   * The network this process settles on and its latest closed ledger, read once a tick: a
+   * `refused` record of it is pruned once its expiration ledger is at most that. A failed read
+   * prunes only records without one, that tick.
+   */
+  ledger: { network: StellarNetwork; latest: () => Promise<number> };
   spend: Pick<SpendStore, "prune" | "pruneScopes">;
   rateLimits: Pick<RateLimitStore, "prune">;
   catalogAttempts: Pick<CatalogAttemptStore, "prune">;
@@ -74,6 +82,17 @@ export function createPruner(deps: PrunerDeps): Pruner {
     clock = () => performance.now(),
     random = Math.random,
   } = deps;
+  // The tick's latest closed ledger, for `settlements_refused`.
+  let tickLedger: { network: StellarNetwork; latest: number } | undefined;
+  const latestClosed = async () => {
+    try {
+      return { network: deps.ledger.network, latest: await deps.ledger.latest() };
+    } catch (error) {
+      logger.warn("store_prune_ledger_failed", { table: "settlements_refused", error });
+      metrics.increment("store_prune_failures_total", { table: "settlements_refused" });
+      return undefined;
+    }
+  };
   const tables = [
     {
       table: "spend_reservations",
@@ -99,7 +118,8 @@ export function createPruner(deps: PrunerDeps): Pruner {
     {
       table: "settlements_refused",
       store: {
-        prune: (before: number, limit: number) => deps.settlements.pruneRefusals(before, limit),
+        prune: (before: number, limit: number) =>
+          deps.settlements.pruneRefusals(before, tickLedger, limit),
       },
       horizonMs: REFUSED_HORIZON_MS,
     },
@@ -131,6 +151,7 @@ export function createPruner(deps: PrunerDeps): Pruner {
   };
 
   const runOnce = async () => {
+    tickLedger = await latestClosed();
     for (const table of tables) await pruneTable(table);
   };
 

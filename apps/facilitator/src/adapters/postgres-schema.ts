@@ -288,18 +288,21 @@ CREATE TABLE api_key_copies (
 `,
   },
   {
-    // 0086: a check refusal is recorded as a `refused` record, with the checks' message and our
-    // own code next to upstream's reason (`extra.reason`), so the
-    // same payment never settles here once it would pass; the pruner deletes it after its auth
-    // entry expired, through the partial index. Transactional, as online migrations wait for
-    // 0080: the build holds writes to `settlements` for as long as one scan of it, milliseconds on
-    // testnet's few thousand rows and nothing on a new mainnet database. A nullable column and a
-    // new index, so the release before keeps working: it never writes `refused`, and reads such a
+    // 0086: a check refusal is recorded as a `refused` record, with the checks' message, our
+    // own code next to upstream's reason (`extra.reason`) and the payer's expiration ledger, so
+    // the same payment never settles here once it would pass; the pruner deletes it once that
+    // ledger has closed, through the partial index. Transactional, as online migrations wait for
+    // 0080: `ADD COLUMN` takes ACCESS EXCLUSIVE until the group commits, so reads and writes of
+    // `settlements` wait for as long as one scan of it, milliseconds on testnet's few thousand
+    // rows and nothing on a new mainnet database. The group has 1 s a statement and 1.5 s in all,
+    // and one that runs out fails the run (`25P04`, not retried). Nullable columns and a new
+    // index, so the release before keeps working: it never writes `refused`, and reads such a
     // record as not final, so it answers a repeat `settlement_pending` and never settles it.
     name: "0015_settlement_refused",
     sql: `
 ALTER TABLE settlements ADD COLUMN error_message text;
 ALTER TABLE settlements ADD COLUMN error_detail text;
+ALTER TABLE settlements ADD COLUMN expiration_ledger bigint;
 CREATE INDEX settlements_refused ON settlements (created_at) WHERE state = 'refused';
 `,
   },

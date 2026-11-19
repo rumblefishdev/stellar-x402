@@ -675,6 +675,19 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         }
       });
 
+      it("is never a transition's target: only refuse writes it", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        expect(
+          await store.transition(s.key, "claimed", {
+            state: "refused",
+            errorReason: "invalid_fee",
+            updatedAt: 2_000,
+          }),
+        ).toBeUndefined();
+        expect(await store.get(s.key)).toMatchObject({ state: "claimed" });
+      });
+
       it("prunes only refused records created before the cutoff, in batches", async () => {
         for (const nonce of ["1", "2", "3"])
           await store.refuse({ ...settlement(nonce), createdAt: 1_000 }, FEE, UNSENT, 1_000);
@@ -686,11 +699,50 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
           errorReason: "invalid_like",
           updatedAt: 2_000,
         });
-        expect(await store.pruneRefusals(5_000, 2)).toBe(2);
-        expect(await store.pruneRefusals(5_000, 2)).toBe(1);
-        expect(await store.pruneRefusals(5_000, 2)).toBe(0);
+        expect(await store.pruneRefusals(5_000, undefined, 2)).toBe(2);
+        expect(await store.pruneRefusals(5_000, undefined, 2)).toBe(1);
+        expect(await store.pruneRefusals(5_000, undefined, 2)).toBe(0);
         expect(await store.get(settlement("4").key)).toMatchObject({ state: "refused" });
         expect(await store.get(kept.key)).toMatchObject({ state: "rejected" });
+      });
+
+      it("keeps a refused record until its expiration ledger has closed on its network", async () => {
+        const at = (nonce: string, expirationLedger: number) =>
+          store.refuse(
+            { ...settlement(nonce), createdAt: 1_000 },
+            { ...FEE, expirationLedger },
+            UNSENT,
+            1_000,
+          );
+        await at("1", 99);
+        await at("2", 100);
+        await at("3", 101);
+        const testnet = { network: "stellar:testnet" as const, latest: 100 };
+        // No ledger read: only records without an expiration go.
+        expect(await store.pruneRefusals(5_000, undefined, 10)).toBe(0);
+        // Another network's ledger counts for nothing here.
+        expect(
+          await store.pruneRefusals(5_000, { ...testnet, network: "stellar:pubnet" }, 10),
+        ).toBe(0);
+        // Not before the hour either.
+        expect(await store.pruneRefusals(1_000, testnet, 10)).toBe(0);
+        expect(await store.pruneRefusals(5_000, testnet, 10)).toBe(2);
+        expect(await store.get(settlement("3").key)).toMatchObject({ state: "refused" });
+        expect(await store.pruneRefusals(5_000, { ...testnet, latest: 101 }, 10)).toBe(1);
+      });
+
+      it("keeps the expiration ledger when it moves a rejected record to refused", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        await store.transition(s.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 2_000,
+        });
+        await store.refuse(s, { ...FEE, expirationLedger: 200 }, UNSENT, 3_000);
+        const testnet = { network: "stellar:testnet" as const, latest: 199 };
+        expect(await store.pruneRefusals(5_000, testnet, 10)).toBe(0);
+        expect(await store.pruneRefusals(5_000, { ...testnet, latest: 200 }, 10)).toBe(1);
       });
     });
 
