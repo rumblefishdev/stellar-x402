@@ -59,6 +59,12 @@ const ENV = z.object({
 const DEFAULT_STATE_DIR = join(homedir(), ".stellar-x402-mcp");
 
 /**
+ * The network this server pays on, and so the one `list_resources` lists unless the agent names
+ * another (0155): the catalog holds both. A setting for it comes with mainnet (task 0044).
+ */
+export const PAY_NETWORK = STELLAR_NETWORKS.testnet;
+
+/**
  * Reads the server's settings from environment variables, as an MCP client such as Claude Desktop
  * passes them. Any missing, wrong or unknown `STELLAR_X402_` value stops the start with a message
  * naming the variable.
@@ -91,7 +97,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   }
   let signer;
   try {
-    signer = createEd25519Signer(vars.STELLAR_X402_SECRET_KEY, STELLAR_NETWORKS.testnet);
+    signer = createEd25519Signer(vars.STELLAR_X402_SECRET_KEY, PAY_NETWORK);
   } catch {
     // The library's message could quote the key, so it is not passed on.
     throw new Error("STELLAR_X402_SECRET_KEY is not a Stellar secret key.");
@@ -99,7 +105,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): CliConfig {
   return {
     ...config,
     payment: {
-      schemes: [{ network: STELLAR_NETWORKS.testnet, client: new ExactStellarScheme(signer) }],
+      schemes: [{ network: PAY_NETWORK, client: new ExactStellarScheme(signer) }],
       payer: signer.address,
       assets: {
         [USDC_TESTNET_ADDRESS]: {
