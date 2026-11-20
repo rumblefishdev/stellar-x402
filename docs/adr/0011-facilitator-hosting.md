@@ -19,7 +19,8 @@
   a separate Hetzner Cloud VM; CloudWatch keeps the logs and the off-server checks) and
   2026-11-18 (task 0106: an API key crosses Cloudflare in plain text, in a pubnet request and
   in the portal backend's answer to `reveal`) and 2026-11-19 (task 0134: a search-model
-  container, 512 MiB, joins the totals)
+  container, 512 MiB, joins the totals) and 2026-11-20 (task 0106: the log files also rotate
+  daily and none is kept past 30 days, the hub's privacy policy)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -575,7 +576,9 @@ One request or one stop must never outlast the layer in front of it:
     `rate_limited` too; that and the retention are looked at again before mainnet (0038).
   - The files rotate with `logrotate` on its own timer, every 10 minutes past 100 MB with 10
     kept, since they share a disk with ClickHouse, using `copytruncate`, as the units hold the
-    files open. We accept two losses, tested locally
+    files open. Since 2026-11-20 each also rotates daily, empty or not, and none is kept past 30
+    days: the API hub's privacy policy keeps log lines up to 30 days, and by size alone a quiet
+    file never rotated (task 0106). We accept two losses, tested locally
     in 0027. At each rotation, the lines the agent hadn't read yet: up to 250 ms, its poll, all
     but a few ms of them still in the rotated file. When a rotation falls inside an AWS outage,
     every app line since the agent stopped sending, about 5 s into it; those stay in the rotated
