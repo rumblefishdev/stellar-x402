@@ -19,6 +19,16 @@ import { askMcpSeller, askSeller } from "./seller-check.js";
 
 export type BazaarApi = Pick<typeof bazaarLib, "validate" | "normalize" | "toExtensionResponses">;
 
+/** One listing key to ask its seller about, and what the attempt knew before asking. */
+interface SellerCheck {
+  url: string;
+  input: bazaarLib.Discovered["discoveryInfo"]["input"];
+  key: CatalogKey;
+  /** The settlement's ledger, kept on the entry. */
+  ledger: number;
+  compared: Omit<CatalogAttempt, "stage" | "outcome">;
+}
+
 export interface CatalogerDeps {
   store: CatalogStore;
   attempts: CatalogAttemptStore;
@@ -59,8 +69,6 @@ const SELLER_RESPONSE_BYTES = 64 * 1024;
 const MCP_RESPONSE_BYTES = 256 * 1024;
 /** A library error lists every issue; the attempt's row keeps its start. */
 const DETAIL_CHARS = 1_000;
-/** The steps of `catalog` taken once the seller is asked: a failure there is the seller stage's. */
-const SELLER_STEPS = ["ask", "seller", "upsert", "report"];
 
 const contentHash = (resource: Omit<DiscoveryResource, "lastUpdated">) =>
   createHash("sha256")
@@ -255,20 +263,52 @@ export function createCataloger({
         return await finish({ ...compared, ...skipped }, record, origin);
       }
 
-      stage = "ask";
+      return await checkSeller(record, origin, {
+        url: result.resourceUrl,
+        input: result.discovered.discoveryInfo.input,
+        key,
+        ledger: record.ledger,
+        compared,
+      });
+    } catch (error) {
+      internalError(stage, record, origin, error);
+      // Still an attempt (row 23), named by the step it failed at.
+      const failed = {
+        stage: "payment",
+        outcome: "internal_error",
+        reason: stage,
+        detail: String(error),
+      } as const;
+      await finish({ ...known, ...failed }, record, origin);
+    }
+  }
+
+  /**
+   * Asks the seller about one listing key and writes its answer (0063): the steps after the
+   * payment's copy showed a check is due. A step that throws is still an attempt (row 23), named
+   * by the step it failed at.
+   */
+  async function checkSeller(
+    record: SettlementRecord,
+    origin: SettlementOrigin,
+    { url, input, key, ledger, compared }: SellerCheck,
+  ): Promise<void> {
+    let stage = "ask";
+    // What the attempt knew so far (key, copy, answer), for a row if a later step throws.
+    let known: Omit<CatalogAttempt, "stage" | "outcome"> = compared;
+    try {
       const checkedAt = now();
       // An MCP listing is checked with an MCP client (row 5), an HTTP one with one request.
-      const input = result.discovered.discoveryInfo.input;
       const answer =
         input.type === "mcp"
           ? await askMcpSeller(
-              result.resourceUrl,
+              url,
               bazaarLib.toolCall(input),
               { ...sellerLimits, maxResponseBytes: MCP_RESPONSE_BYTES },
               logger,
             )
           : await askSeller(
-              bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method }),
+              bazaarLib.sellerRequest(url, { ...input, method: key.method }),
               sellerLimits,
             );
       if (!answer.ok) {
@@ -279,12 +319,12 @@ export function createCataloger({
 
       const asked = { ...compared, answer: answer.paymentRequired };
 
-      known = { ...known, ...asked };
+      known = asked;
 
       stage = "seller";
       const listing = bazaarLib.listingFromSeller(
         answer.paymentRequired,
-        { url: result.resourceUrl, network: key.network, payTo: key.payTo },
+        { url, network: key.network, payTo: key.payTo },
         options,
       );
       if (!listing.ok) {
@@ -316,7 +356,7 @@ export function createCataloger({
       const entry: CatalogEntry = {
         key: listing.entry.key as CatalogKey,
         keyVersion: listing.entry.keyVersion,
-        ledger: record.ledger,
+        ledger,
         checkedAt,
         // The time of the seller's answer (0063): when the listing was last confirmed.
         resource: { ...listing.entry.resource, lastUpdated: new Date(now()).toISOString() },
@@ -361,9 +401,8 @@ export function createCataloger({
         );
     } catch (error) {
       internalError(stage, record, origin, error);
-      // Still an attempt (row 23), named by the step it failed at.
       const failed = {
-        stage: SELLER_STEPS.includes(stage) ? "seller" : "payment",
+        stage: "seller",
         outcome: "internal_error",
         reason: stage,
         detail: String(error),
