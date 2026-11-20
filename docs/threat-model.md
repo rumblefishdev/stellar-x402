@@ -345,6 +345,9 @@ Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6
   more than 720 ledgers ahead isn't recorded either (0156), so it can settle through us once it
   passes, as it could elsewhere; a seller that waits as the answer says pays once. Junk payloads
   within the 720 ledgers still each leave a row for up to about an hour, at the rate limit's pace.
+  While the latest ledger can't be read within 1 s (an RPC outage, or one a flood slows down),
+  `/verify` records every refusal as before 0156, so junk gets rows until its own ledger for as
+  long as that lasts.
 
 #### A payment ended after its claim settles after its payer signed again
 

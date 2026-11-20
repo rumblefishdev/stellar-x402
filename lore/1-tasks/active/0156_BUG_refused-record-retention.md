@@ -37,7 +37,7 @@ request to the test's RPC, and the test checks `spend.prune` right after
 
 ## Context
 
-- Found by the review of PR #210 (`_bmad-output` report of 2026-11-20, finding D2). okarcz
+- Found by the review of PR #210 (review report of 2026-11-20, finding D2). okarcz
   decided: fix before 0086 reaches production.
 - PR #210's head is `develop`, so the fix PR joins it once merged; Stan rewrites #210's body for
   0086 and waits for this PR's number, the new head and its CI (agreed on #210).
@@ -94,7 +94,7 @@ ledger, and the log line `settlement_refusal_unrecorded`. The pruner doesn't cha
 ### Emerged
 
 7. **`/verify`'s advice past the horizon says the payment may still settle**: `this payment may
-   still settle until ledger N: sign a new payment once that ledger has closed`, not 0086's "will
+still settle until ledger N: sign a new payment once that ledger has closed`, not 0086's "will
    not settle here", which would be false without a record. `/settle` returns the key, so
    `withRetry` gives its usual "ended" advice ("the auth entry may still land in ledger N").
 8. **`/settle` reads the ledger through `validOnce`**: the read the answer's advice makes anyway,
@@ -104,4 +104,14 @@ ledger, and the log line `settlement_refusal_unrecorded`. The pruner doesn't cha
 9. **A reopen isn't held to the horizon**: its record already exists, so moving it to `refused`
    adds no row.
 10. **The spine's prune sentence names the record without an expiration ledger**, which goes after
-   the hour: the review's P4 for the spine, on the same lines.
+    the hour: the review's P4 for the spine, on the same lines.
+
+### From review (review of the branch, 2026-11-20)
+
+11. **`/verify`'s uncached ledger read stays as it is** (okarcz: an edge case, don't complicate):
+    a flood plus an RPC outage at once lets far-ahead junk get rows again while the outage
+    lasts (decision 5 records on a failed read). Written into the threat model as residual risk;
+    no cache and no "last known ledger".
+12. **`/verify` skips the horizon when a record already answers for the key**, as `/settle`'s
+    reopen does (decision 9): `refuse` answers from it, under way or moved to `refused`, and adds
+    no row.
