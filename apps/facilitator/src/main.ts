@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
 import { apiKeyHash, isApiKeyOwner, newApiKey } from "@stellar-x402/api-keys";
 import {
@@ -14,6 +15,7 @@ import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js"
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
+import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import type { AppDeps } from "./http/app.js";
@@ -730,6 +732,43 @@ export async function keysMain(
     write(`owner: ${owner}`);
     write(`key: ${key}`);
     write('Shown once: only its SHA-256 is stored. Sent as "Authorization: Bearer <key>".');
+  } finally {
+    await pool.end();
+  }
+}
+
+export class SeedError extends Error {}
+
+/**
+ * The `pnpm seed <hosts file>` command (0155): seeds the catalog once from each host's own
+ * `/.well-known/x402`, into the database `DATABASE_URL` names. What the operator reads goes to
+ * stdout; log lines go to stderr.
+ */
+export async function seedMain(
+  argv: readonly string[],
+  env: Record<string, string | undefined> = process.env,
+  write: (line: string) => void = (line) => void process.stdout.write(`${line}\n`),
+): Promise<void> {
+  const [path, ...rest] = argv;
+  if (path === undefined || rest.length > 0) throw new SeedError("usage: pnpm seed <hosts file>");
+  const origins = parseHosts(await readFile(path, "utf8"));
+  const { databaseUrl } = parseMigrateConfig(env);
+  const logger = jsonLogger("info", (line) => process.stderr.write(line));
+  const pool = createPool(databaseUrl, poolErrorLogger(logger), 4);
+  try {
+    const pending = await pendingMigrations(pool);
+    if (pending.length > 0)
+      throw new SeedError(`the schema lacks migrations: ${pending.join(", ")}`);
+    const stores = postgresStores(pool);
+    const cataloger = createCataloger({
+      store: stores.catalog,
+      attempts: stores.catalogAttempts,
+      rateLimits: stores.rateLimits,
+      logger,
+      metrics: memoryMetrics(),
+    });
+    const reports = await seedHosts(origins, cataloger, { listLocal: false });
+    for (const line of reportLines(reports)) write(line);
   } finally {
     await pool.end();
   }

@@ -793,3 +793,28 @@ version on: a local catalog written before it keeps its old entries until `docke
 | Setting              | Default | Meaning                                                                    |
 | -------------------- | ------- | -------------------------------------------------------------------------- |
 | `CATALOG_LIST_LOCAL` | `false` | `true` lists those URLs too, for a local run or the e2e gate; testnet only |
+
+### Seeding the catalog
+
+`pnpm seed <hosts file>` fills the catalog once with the sellers that exist, without waiting for a
+payment through us (task 0155). It reads every listing from the seller itself, never from another
+catalog:
+
+1. The hosts file has one host a line (`api.seller.example`); blank lines and `#` comments are
+   skipped. Keep it outside the repository.
+2. For each host it reads `https://<host>/.well-known/x402` (at most 512 KiB) and keeps the
+   resource URLs on that host, with GET or POST. Other hosts' URLs and other methods are counted
+   and skipped.
+3. Each URL gets one unpaid request, by the file's method or GET. Its 402 names the listing's
+   method, example and Stellar accounts; each account then gets the check a payment would start,
+   with the declared method, so a seeded listing passes the same gates. It has no `ledger` and its
+   attempt rows no `payer`.
+4. Hosts run at once; within a host one URL every 6 s, below the 30 checks a minute a host's
+   checks after payments may use. A URL that fails never stops the next, nor a host the others.
+
+`robots.txt` is not read: the file and the 402 are what the seller publishes for payment clients.
+Every request says `User-Agent: stellar-x402-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
+so a seller can block it by name. The report goes to stdout: a tab-separated line per URL and
+account (URL, method, network, `payTo`, outcome, reason, detail), a line per host, the totals, and
+each `payTo` seen on more than one host. As with `pnpm keys`, it runs the built `dist/seed.js`
+against the database `DATABASE_URL` names, after `pnpm migrate`.

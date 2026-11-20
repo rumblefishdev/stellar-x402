@@ -4,7 +4,7 @@
 - Date: 2026-10-07, amended 2026-10-20 (task 0032: the `scheme` filter), 2026-10-22 (task 0053:
   resource URLs and empty fields), 2026-10-26 (task 0054: resource hosts) and 2026-10-28 (task
   0063: listings from the seller's own 402, entry limits) and 2026-11-10 (task 0130: a wrong type
-  in an optional field)
+  in an optional field) and 2026-11-20 (task 0155: the operator's seed)
 
 ## Context
 
@@ -28,8 +28,14 @@ settlement.
     carries `extensions.bazaar`.
   - Late successes count: a `resolved` event that finalizes a pending settlement as `success`
     triggers cataloging too.
+  - The operator's seed is the other trigger (task 0155): `pnpm seed <hosts file>` reads each
+    host's own `/.well-known/x402` and sends every resource URL on that host the check a payment
+    would start, for each Stellar account its 402 names, on either network. A seeded listing has no
+    settlement, so no `ledger`, and its attempt rows no `payer`. Nothing is read from another
+    catalog, and `robots.txt` is not read: the file and the 402 are what the seller publishes for
+    payment clients.
   - Nothing else is indexed, and there is no registration endpoint: a seller is listed after its
-    first paid call, its own included (task 0063).
+    first paid call, its own included (task 0063), or by the seed.
 - **Who may change a listing (task 0063).**
   - A listing's content comes from the seller's own unpaid 402, never from the payment. A
     settlement's copy (the buyer's echo of that 402) only decides whether to ask the seller.
@@ -37,7 +43,9 @@ settlement.
     once a minute per listing key and 30 times a minute per host. No budget spans hosts, so one
     payer filling it holds back only the hosts it pays for; `/settle`'s per-IP limit (task 0023)
     and the settled payment each check needs bound the rest. Over a budget the check is
-    skipped; the next payment tries again. There is no retry queue.
+    skipped; the next payment tries again. There is no retry queue. A seed's checks don't count
+    against these budgets: the operator picks the hosts, and the seed asks one URL of a host every
+    6 s, two requests each, below the 30 a minute the host's checks after payments may use.
   - The request uses the listing's method and its example input, bounded by the 32 KiB
     `bazaar` block: `queryParams` as the query, `body` as a JSON body (`{}` without one). Nothing proves before the request that
     the URL is an x402 seller, so a payer can have the facilitator send an unpaid request of any
@@ -133,8 +141,10 @@ settlement.
 
 ## Rationale
 
-- **The trigger ties listings to real payments.** Every listing is backed by a settled payment,
-  which is the catalog's trust anchor; curation and ranking come in Tranche 2.
+- **The trigger ties listings to real payments, or to the operator.** A listing is backed by a
+  settled payment or by the operator's seed from the seller's own file (task 0155); whether anyone
+  paid through us is read from settlements, by the ranking of task 0154, not from a mark on the
+  listing.
 - **Upstream types keep us interoperable** with the x402 discovery ecosystem, and avoid a
   parallel schema.
 - **Only the seller speaks for its listing** (task 0063). Before it, anyone who paid 1 stroop to
@@ -204,7 +214,8 @@ settlement.
   Rejected: the seller's answer replaces them.
 - **Wait for the seller check inside `/settle`.** The buyer would wait for it. Rejected.
 - **A retry queue for failed checks, and caps on new listings per `payTo`.** The next payment
-  retries, and every listing still costs a settled payment. Not needed yet.
+  retries, and every listing a payment adds still costs a settled one; the seed's hosts are the
+  operator's choice. Not needed yet.
 - **Refuse such resource URLs on pubnet only, list them on testnet** (task 0054). No config, and
   the e2e gate lists as is, but local tests would fill our public testnet catalog. Rejected.
 - **Store such entries and hide them from `/discovery/resources`.** Rows nobody reads, counted by
@@ -213,7 +224,9 @@ settlement.
 ## Consequences
 
 - Anyone who settles a real payment, even a tiny one, can create a listing. That is accepted for
-  Tranche 1, and quality is handled by curation and ranking later.
+  Tranche 1, and quality is handled by curation and ranking later. The seed lists, at no cost to
+  anyone, every host the operator names: its report lists each `payTo` seen on more than one host,
+  since a host can name another seller's account (below).
 - An existing listing changes only when the seller's own 402 says so (task 0063). A seller that
   doesn't answer the unpaid request with a usable 402 within 10 s is not listed.
 - The check proves how a URL answers, not that the `payTo` belongs to the URL's owner. Whoever runs
