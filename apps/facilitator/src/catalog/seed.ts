@@ -11,7 +11,7 @@ export const SEED_FILE_BYTES = 512 * 1024;
 /**
  * The wait after each request the seed sends a host: 20 a minute, below the 30 checks a minute a
  * host's budget allows checks after payments (ADR 0008), which keep their share (decision 12). A
- * URL costs one request to learn its listing, then one check per Stellar account its 402 names.
+ * URL costs one request, a second when its 402 declares another method or an MCP tool.
  */
 export const REQUEST_GAP_MS = 3_000;
 /** As long as a seller check may take (`cataloger.ts`'s seller timeout). */
@@ -157,11 +157,9 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
   report.skipped = found.skipped;
   const wait = deps.wait ?? sleep;
   for (const [i, { url, method }] of found.resources.entries()) {
-    const results = await cataloger.seed(url, method);
+    const { results, requests } = await cataloger.seed(url, method);
     report.results.push(...results);
-    // The request that learned the listing, and a check for each account it named.
-    const checks = results.filter((r) => r.network !== undefined && r.outcome !== "refused");
-    if (i < found.resources.length - 1) await wait(REQUEST_GAP_MS * (1 + checks.length));
+    if (i < found.resources.length - 1) await wait(REQUEST_GAP_MS * requests);
   }
   return report;
 }

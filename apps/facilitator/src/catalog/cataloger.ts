@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import * as bazaarLib from "@stellar-x402/bazaar";
 import { isStellarNetwork } from "@stellar-x402/config";
+import type { PaymentRequired } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
@@ -16,7 +17,7 @@ import type {
 } from "../ports/index.js";
 import type { SettlementHooks, SettlementOrigin } from "../settlement/hooks.js";
 import { CHECKS_PER_HOST, overBudget } from "./budget.js";
-import { askMcpSeller, askSeller } from "./seller-check.js";
+import { askMcpSeller, askSeller, type SellerAnswer } from "./seller-check.js";
 
 export type BazaarApi = Pick<typeof bazaarLib, "validate" | "normalize" | "toExtensionResponses">;
 
@@ -34,6 +35,8 @@ interface SellerCheck {
   /** The settlement's ledger, kept on the entry; `null` for a seed (0155). */
   ledger: number | null;
   compared: Omit<CatalogAttempt, "stage" | "outcome">;
+  /** The seller's 402 when it was already asked with this listing's method (the seed's, 0155). */
+  answer?: PaymentRequired;
 }
 
 export interface CatalogerDeps {
@@ -78,10 +81,11 @@ export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"
   drain(): Promise<void>;
   /**
    * Seeds the catalog with one resource URL from its seller's own file (0155): one unpaid request
-   * learns the listing's keys from the 402, then each key gets the check a payment would start.
-   * Never rejects: every failure is a result with its reason.
+   * learns the listing's keys from the 402, then each key gets the check a payment would start, on
+   * that same 402 unless the seller declares another method or an MCP tool. `requests` counts the
+   * requests sent, for the seed's pace. Never rejects: every failure is a result with its reason.
    */
-  seed(url: string, method: string): Promise<SeedResult[]>;
+  seed(url: string, method: string): Promise<{ results: SeedResult[]; requests: number }>;
 };
 
 /**
@@ -314,7 +318,7 @@ export function createCataloger({
   async function checkSeller(
     fields: LogFields,
     origin: CheckOrigin,
-    { url, input, key, ledger, compared }: SellerCheck,
+    { url, input, key, ledger, compared, answer: given }: SellerCheck,
   ): Promise<CatalogAttempt> {
     // The attempt the check ended with, recorded, for the seed's report.
     const end = async (attempt: CatalogAttempt) => {
@@ -327,18 +331,20 @@ export function createCataloger({
     try {
       const checkedAt = now();
       // An MCP listing is checked with an MCP client (row 5), an HTTP one with one request.
-      const answer =
-        input.type === "mcp"
-          ? await askMcpSeller(
-              url,
-              bazaarLib.toolCall(input),
-              { ...sellerLimits, maxResponseBytes: MCP_RESPONSE_BYTES },
-              logger,
-            )
-          : await askSeller(
-              bazaarLib.sellerRequest(url, { ...input, method: key.method }),
-              sellerLimits,
-            );
+      let answer: SellerAnswer;
+      if (given) answer = { ok: true, paymentRequired: given };
+      else if (input.type === "mcp")
+        answer = await askMcpSeller(
+          url,
+          bazaarLib.toolCall(input),
+          { ...sellerLimits, maxResponseBytes: MCP_RESPONSE_BYTES },
+          logger,
+        );
+      else
+        answer = await askSeller(
+          bazaarLib.sellerRequest(url, { ...input, method: key.method }),
+          sellerLimits,
+        );
       if (!answer.ok) {
         const { reason, detail } = answer;
         const failed = { stage: "seller", outcome: "not_askable", reason, detail } as const;
@@ -450,18 +456,22 @@ export function createCataloger({
     },
     async seed(url, method) {
       const fields = { url, origin: "seed" };
+      let requests = 1;
       try {
         const probe = await askSeller(bazaarLib.sellerRequest(url, { method }), sellerLimits);
         if (!probe.ok) {
           const { reason, detail } = probe;
-          return [{ url, method, outcome: "not_askable", reason, detail }];
+          return { results: [{ url, method, outcome: "not_askable", reason, detail }], requests };
         }
         // A listing per account the seller's Stellar offers pay, on either network (decision 6).
         const accounts = new Map<string, { network: string; payTo: string }>();
         for (const { network, payTo } of probe.paymentRequired.accepts)
           if (isStellarNetwork(network)) accounts.set(`${network} ${payTo}`, { network, payTo });
         if (accounts.size === 0)
-          return [{ url, method, outcome: "not_askable", reason: "no_stellar_offer" }];
+          return {
+            results: [{ url, method, outcome: "not_askable", reason: "no_stellar_offer" }],
+            requests,
+          };
         const results: SeedResult[] = [];
         for (const { network, payTo } of accounts.values()) {
           const listing = bazaarLib.listingFromSeller(
@@ -476,20 +486,27 @@ export function createCataloger({
           }
           // The listing's own method and example, which the seller's 402 declares (decision 10).
           const key = listing.entry.key as CatalogKey;
+          // The probe answered this method over HTTP: it is the check's answer, not asked again.
+          const answered = listing.input.type === "http" && key.method === method;
+          if (!answered) requests++;
           const ended = await checkSeller({ ...fields, network }, "seed", {
             url,
             input: listing.input,
             key,
             ledger: null,
             compared: { at: now(), network, payTo, url, key },
+            answer: answered ? probe.paymentRequired : undefined,
           });
           const { outcome, reason, detail } = ended;
           results.push({ url, method: key.method, network, payTo, outcome, reason, detail });
         }
-        return results;
+        return { results, requests };
       } catch (error) {
         internalError("seed", fields, "seed", error);
-        return [{ url, method, outcome: "internal_error", detail: String(error) }];
+        return {
+          results: [{ url, method, outcome: "internal_error", detail: String(error) }],
+          requests,
+        };
       }
     },
   };

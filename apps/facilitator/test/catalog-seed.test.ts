@@ -71,7 +71,7 @@ function setup() {
 describe("cataloger.seed (0155)", () => {
   it("lists a resource from its seller's 402, with no settlement behind it", async () => {
     const { cataloger, rows, attempts, metrics } = setup();
-    const results = await cataloger.seed(`${seller.url}/weather`, "GET");
+    const { results } = await cataloger.seed(`${seller.url}/weather`, "GET");
     expect(results).toEqual([
       {
         url: `${seller.url}/weather`,
@@ -86,6 +86,8 @@ describe("cataloger.seed (0155)", () => {
       { network: "stellar:testnet", pay_to: "GPAYTO", method: "GET", ledger: null },
     ]);
     expect(await attempts()).toEqual([{ payer: null, stage: "seller", outcome: "refreshed" }]);
+    // The 402 that named the listing is the check's answer: the seller is asked once.
+    expect(seller.requests).toHaveLength(1);
     const labels = { origin: "seed", stage: "seller", outcome: "refreshed", reason: "inserted" };
     expect(metrics.value("catalog_attempts_total", labels)).toBe(1);
   });
@@ -101,7 +103,11 @@ describe("cataloger.seed (0155)", () => {
   it("asks again with the method the seller's 402 declares, and lists under it", async () => {
     bazaar = POST;
     const { cataloger, rows } = setup();
-    const [result] = await cataloger.seed(`${seller.url}/weather`, "GET");
+    const {
+      results: [result],
+      requests,
+    } = await cataloger.seed(`${seller.url}/weather`, "GET");
+    expect(requests).toBe(2);
     expect(result).toMatchObject({ method: "POST", outcome: "refreshed" });
     expect(seller.requests).toEqual([
       { method: "GET", url: "/weather", body: "" },
@@ -118,7 +124,8 @@ describe("cataloger.seed (0155)", () => {
       offer({ network: "eip155:8453", payTo: "0xSELLER" }),
     ];
     const { cataloger, rows } = setup();
-    const results = await cataloger.seed(`${seller.url}/weather`, "GET");
+    const { results } = await cataloger.seed(`${seller.url}/weather`, "GET");
+    expect(seller.requests).toHaveLength(1);
     expect(results.map((result) => [result.network, result.payTo, result.outcome])).toEqual([
       ["stellar:testnet", "GPAYTO", "refreshed"],
       ["stellar:pubnet", "GPUBNET", "refreshed"],
@@ -132,7 +139,7 @@ describe("cataloger.seed (0155)", () => {
   it("reports a seller that doesn't answer with a 402, and lists nothing", async () => {
     seller.reply = async () => ({ status: 404 });
     const { cataloger, rows } = setup();
-    expect(await cataloger.seed(`${seller.url}/gone`, "GET")).toEqual([
+    expect((await cataloger.seed(`${seller.url}/gone`, "GET")).results).toEqual([
       {
         url: `${seller.url}/gone`,
         method: "GET",
@@ -147,7 +154,7 @@ describe("cataloger.seed (0155)", () => {
   it("reports a 402 with no Stellar offer", async () => {
     accepts = [offer({ network: "eip155:8453", payTo: "0xSELLER" })];
     const { cataloger } = setup();
-    expect(await cataloger.seed(`${seller.url}/weather`, "GET")).toMatchObject([
+    expect((await cataloger.seed(`${seller.url}/weather`, "GET")).results).toMatchObject([
       { outcome: "not_askable", reason: "no_stellar_offer" },
     ]);
   });
@@ -155,7 +162,7 @@ describe("cataloger.seed (0155)", () => {
   it("reports a 402 whose listing breaks a rule, naming the rule", async () => {
     bazaar = { info: {} };
     const { cataloger, rows } = setup();
-    expect(await cataloger.seed(`${seller.url}/weather`, "GET")).toMatchObject([
+    expect((await cataloger.seed(`${seller.url}/weather`, "GET")).results).toMatchObject([
       { network: "stellar:testnet", payTo: "GPAYTO", outcome: "refused" },
     ]);
     expect(await rows()).toEqual([]);

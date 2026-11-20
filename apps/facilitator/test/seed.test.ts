@@ -154,8 +154,8 @@ describe("seedHosts (0155)", () => {
       { url: `${seller.url}/b`, outcome: "not_askable", reason: "not_402" },
     ]);
     expect((await store.list({ limit: 10, offset: 0 })).total).toBe(1);
-    // /a cost two requests (the one that learns its listing, then the check).
-    expect(wait.mock.calls).toEqual([[2 * REQUEST_GAP_MS]]);
+    // /a cost one request: its 402 named the listing and was the check's answer.
+    expect(wait.mock.calls).toEqual([[REQUEST_GAP_MS]]);
     expect(seller.userAgents[0]).toBe(SELLER_USER_AGENT);
   });
 

@@ -815,7 +815,8 @@ catalog:
    no readable URL are skipped, each named in the report with its reason.
 3. Each URL gets one unpaid request, by the file's method or GET. Its 402 names the listing's
    method, example and Stellar accounts; each account then gets the check a payment would start,
-   with the declared method, so a seeded listing passes the same gates. It has no `ledger` and its
+   on that same 402, so a seeded listing passes the same gates. Only when the 402 declares another
+   method, or an MCP tool, is the seller asked once more that way. It has no `ledger` and its
    attempt rows no `payer`; a listing a settlement wrote keeps its `ledger`.
 4. Hosts run at once; within a host the seed waits 3 s after each request, 20 a minute, below the
    30 checks a minute a host's checks after payments may use. A URL that fails never stops the
