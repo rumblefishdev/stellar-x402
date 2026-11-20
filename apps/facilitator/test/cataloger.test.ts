@@ -3,6 +3,7 @@ import { safeBase64Decode } from "@x402/core/utils";
 import * as bazaarLib from "@stellar-x402/bazaar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCataloger, type CatalogerDeps } from "../src/catalog/cataloger.js";
+import { SELLER_USER_AGENT } from "../src/catalog/seller-check.js";
 import { encodeExtensionResponses } from "../src/http/extension-responses.js";
 import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
@@ -134,6 +135,12 @@ describe("cataloger", () => {
     expect(Object.keys(entry?.extensions ?? {})).toEqual(["bazaar"]);
     expect(seller.requests).toEqual([{ method: "GET", url: "/users/42", body: "" }]);
     expect(counted("seller", "refreshed", "inserted")).toBe(1);
+  });
+
+  it("names our robot to the seller (0155 decision 8)", async () => {
+    const { cataloger } = setup();
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(seller.userAgents).toEqual([SELLER_USER_AGENT]);
   });
 
   it("trims a seller's tags and service name as a payment's copy is, and still lists (row 1)", async () => {
@@ -733,6 +740,14 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     expect(performance.now() - started).toBeLessThan(5_000);
     expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
     expect(await list()).toEqual([]);
+  });
+
+  it("names our robot on every request to an MCP seller (0155 decision 8)", async () => {
+    mcp = await startMcpSeller(() => terms, { session: "s-1" });
+    const { cataloger } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(mcp.userAgents.length).toBeGreaterThan(2);
+    expect(new Set(mcp.userAgents)).toEqual(new Set([SELLER_USER_AGENT]));
   });
 
   it("ends a stateful seller's session once the check is done", async () => {
