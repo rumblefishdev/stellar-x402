@@ -2,7 +2,8 @@
 id: "0155"
 title: "Seed the Stellar Bazaar once from the sellers' own files, without other catalogs"
 type: FEATURE
-status: backlog
+status: active
+owner: karolkow
 milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0134", "0130", "0154", "0070", "0122"]
@@ -16,6 +17,12 @@ history:
     note: >
       Out of 0134's search work: an empty catalog has nothing to search. The catalog takes
       every reachable Stellar seller, read directly from the sellers, not from other catalogs.
+  - date: "2026-11-20"
+    status: active
+    who: karolkow
+    note: >
+      Grilling done (decisions 1-15); four PRs: extract the seller check, discovery for both
+      networks, the robot's User-Agent, then the seed command.
 ---
 
 # Seed the Stellar Bazaar once from the sellers' own files, without other catalogs
@@ -64,6 +71,7 @@ must not look like a copy of one.
 | 12 | The seed asks each host more slowly than the 30-a-minute check budget, so checks after real payments keep their share; the run report lists every `payTo` seen on more than one host | agent | beyond it | no standard | | |
 | 13 | The seed is an operator command, `pnpm seed <hosts file>`, like `pnpm keys`; the hosts file is read from the path given and stays outside git | owner, 2026-11-20 | matches | no standard | | |
 | 14 | A seeded listing carries no mark of its own; whether anyone paid through us comes from settlements, in the ranking of task 0154 | owner, 2026-11-20 | matches | the bazaar spec has no such field (`specs/extensions/bazaar.md`) | | |
+| 15 | One failing resource never stops the rest: each URL is asked on its own, a host whose file fails never stops the other hosts, and every failure is a line in the run report with its reason | owner, 2026-11-20 | beyond it | no standard | | |
 
 ## Implementation
 
@@ -85,6 +93,8 @@ must not look like a copy of one.
 - [ ] No request goes to another x402 catalog during the seed
 - [ ] Every request to a seller carries the `stellar-x402-bazaar` User-Agent
 - [ ] Discovery lists both networks' listings, and `?network=` narrows them to one
+- [ ] Given a host where some resources fail, when the seed runs, then its other resources are
+      still listed and each failure is reported with its reason
 - [ ] The run reports listings added, hosts and `payTo` accounts, and every refused URL with its
       reason
 
