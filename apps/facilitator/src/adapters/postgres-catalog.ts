@@ -42,7 +42,7 @@ export class PostgresCatalogStore implements CatalogStore {
    * the row it then finds, so of concurrent writes the latest `checkedAt` stays.
    */
   async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
-    assertCount(entry.ledger, "ledger");
+    if (entry.ledger !== null) assertCount(entry.ledger, "ledger");
     assertCount(entry.checkedAt, "checkedAt");
     // The one function that writes the catalog: no offer outside the upstream schema is stored.
     for (const offer of entry.resource.accepts) PaymentRequirementsV2Schema.parse(offer);
@@ -125,7 +125,7 @@ export class PostgresCatalogAttemptStore implements CatalogAttemptStore {
         attempt.key?.method ?? null,
         attempt.key?.resourceUrl ?? null,
         attempt.url ?? null,
-        attempt.payer,
+        attempt.payer ?? null,
         attempt.transaction ?? null,
         attempt.stage,
         attempt.outcome,
