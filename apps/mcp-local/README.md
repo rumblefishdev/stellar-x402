@@ -3,11 +3,11 @@
 A local MCP server (stdio) that lets an agent browse the Stellar Bazaar and pay for x402 HTTP
 resources on **Stellar testnet**, within limits you set.
 
-| Tool             | What it does                                                                                            | Needs a key |
-| ---------------- | ------------------------------------------------------------------------------------------------------- | ----------- |
-| `list_resources` | lists catalog entries: price, asset, network, description, how to call                                  | no          |
-| `get_resource`   | asks the seller without paying and returns its terms (price, time limit, input and output)              | no          |
-| `call_paid_http` | calls the resource, pays the 402 price within the limits, returns the response and the transaction hash | yes         |
+| Tool             | What it does                                                                                                                    | Needs a key |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `list_resources` | lists catalog entries: price, asset, network, description, how to call; without a `network`, only testnet's, the one it pays on | no          |
+| `get_resource`   | asks the seller without paying and returns its terms (price, time limit, input and output)                                      | no          |
+| `call_paid_http` | calls the resource, pays the 402 price within the limits, returns the response and the transaction hash                         | yes         |
 
 Without `STELLAR_X402_SECRET_KEY`, `call_paid_http` is not offered: the client's tool list does not
 have it. `list_resources` makes one catalog request per call and never loops over pages: the agent

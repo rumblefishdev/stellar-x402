@@ -452,6 +452,7 @@ export function compose(
           network: config.network,
           store: stores.settlements,
           logger,
+          latestLedger: checks.latestLedger,
         }),
         { policy, logger, metrics },
       ),

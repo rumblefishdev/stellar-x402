@@ -332,13 +332,22 @@ Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6
   answer says to sign P2 only once P1's auth entry has expired. `/verify` answers 503 when it
   can't record the refusal. A resource asking for more than the cap fits stays refused on its
   `maxTimeoutSeconds` anyway (0073 decision 22). The record is kept until P1's expiration ledger
-  has closed, however far it lies: the checks can refuse P1 for its fee before any expiry check.
+  has closed: the checks can refuse P1 for its fee before any expiry check. That ledger comes
+  from the payload alone, before any signature check, so a refusal whose auth entry expires more
+  than 720 ledgers ahead isn't recorded (0156): otherwise junk payloads signed by throwaway keys
+  could keep rows for good. Its answer still says to wait for P1's expiration ledger.
 - **Residual risk:** Whoever holds P1 can submit it on chain without us until its auth entry
   expires; the answer's wait covers a seller that follows it. P1 with another payload under the
   same key (an edited `maxTimeoutSeconds`) is answered `…_nonce_already_used`, and its nonce
   makes only one of them land. During a rolling deploy, a process of the release before reads a
   `refused` record as open and answers `settlement_pending`, without settling it. A breaker's
-  refusal in `/verify` isn't recorded and has the same path once the breaker closes.
+  refusal in `/verify` isn't recorded and has the same path once the breaker closes. P1 signed
+  more than 720 ledgers ahead isn't recorded either (0156), so it can settle through us once it
+  passes, as it could elsewhere; a seller that waits as the answer says pays once. Junk payloads
+  within the 720 ledgers still each leave a row for up to about an hour, at the rate limit's pace.
+  While the latest ledger can't be read within 1 s (an RPC outage, or one a flood slows down),
+  `/verify` records every refusal as before 0156, so junk gets rows until its own ledger for as
+  long as that lasts.
 
 #### A payment ended after its claim settles after its payer signed again
 

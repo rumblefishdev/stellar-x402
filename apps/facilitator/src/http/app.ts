@@ -359,10 +359,7 @@ export function createApp({
     });
   });
   app.use("/discovery", rateLimit(budget("discovery", config.http.rateLimit.discovery)));
-  app.get(
-    "/discovery/resources",
-    discoveryResources(stores.catalog, logger, metrics, config.network),
-  );
+  app.get("/discovery/resources", discoveryResources(stores.catalog, logger, metrics));
 
   app.use((_req, res) => {
     res.status(404).json({ error: "not_found" });

@@ -5,7 +5,9 @@ import type { SettlementStore } from "../ports/index.js";
 import { UNSENT_REASONS } from "./reasons.js";
 import { isFinalRecord } from "./records.js";
 import {
+  LEDGER_READ_MS,
   OutOfTimeError,
+  REFUSAL_HORIZON_LEDGERS,
   bounded,
   fingerprintOf,
   identityOf,
@@ -32,6 +34,11 @@ export interface RefusalDeps {
   network: StellarNetwork;
   store: Pick<SettlementStore, "get" | "refuse">;
   logger: Logger;
+  /**
+   * The network's latest ledger, read only after the checks refused a payload with an expiration
+   * ledger, to keep a refusal too far ahead out of the store (0156).
+   */
+  latestLedger: () => Promise<number>;
   now?: () => number;
   storeTimeoutMs?: number;
 }
@@ -48,7 +55,27 @@ export interface RefusalDeps {
  * refusal (`verifyWithBreakers`, outside) isn't recorded.
  */
 export function verifyWithRefusals(verify: Verify, deps: RefusalDeps): Verify {
-  const { network, store, logger, now = Date.now, storeTimeoutMs = VERIFY_STORE_TIMEOUT_MS } = deps;
+  const {
+    network,
+    store,
+    logger,
+    latestLedger,
+    now = Date.now,
+    storeTimeoutMs = VERIFY_STORE_TIMEOUT_MS,
+  } = deps;
+  /**
+   * How many ledgers the auth entry has left, or `undefined` when the ledger couldn't be read in
+   * time: then the refusal is recorded, as before 0156, since a missed record risks a double
+   * payment and a row only costs disk.
+   */
+  const ledgersLeft = async (expiration: number): Promise<number | undefined> => {
+    try {
+      return expiration - (await bounded(latestLedger(), LEDGER_READ_MS));
+    } catch (error) {
+      logger.warn("latest_ledger_failed", { network, error });
+      return undefined;
+    }
+  };
   const stored = async <T>(op: string, call: () => Promise<T>): Promise<T> => {
     try {
       return await bounded(call(), storeTimeoutMs);
@@ -80,6 +107,20 @@ export function verifyWithRefusals(verify: Verify, deps: RefusalDeps): Verify {
     }
     const response = await verify(payload, requirements, trace);
     if (response.isValid || response.invalidReason === undefined) return response;
+    // A record that already answers for the key adds no row (as `/settle`'s reopen), so it
+    // isn't held to the horizon: `refuse` answers from it as before (0156).
+    if (existing === undefined && identity.expiration !== undefined) {
+      const left = await ledgersLeft(identity.expiration);
+      if (left !== undefined && left > REFUSAL_HORIZON_LEDGERS) {
+        logger.info("settlement_refusal_unrecorded", {
+          network,
+          settlementKey: identity.key,
+          expirationLedger: identity.expiration,
+          ledgersLeft: left,
+        });
+        return unrecorded(response, identity.expiration);
+      }
+    }
     const at = now();
     const record = await stored("refuse", () =>
       store.refuse(
@@ -131,6 +172,21 @@ function underWay(response: VerifyResponse): VerifyResponse {
   return {
     ...response,
     invalidMessage: response.invalidMessage ? `${advice}; ${response.invalidMessage}` : advice,
+  };
+}
+
+/**
+ * A refusal past {@link REFUSAL_HORIZON_LEDGERS} (0156): no record, so the same payment may still
+ * settle, here or elsewhere, until its expiration ledger; a new signature is safe only after it.
+ */
+function unrecorded(response: VerifyResponse, expiration: number): VerifyResponse {
+  const advice =
+    `this payment may still settle until ledger ${expiration}: sign a new payment once that ` +
+    `ledger has closed`;
+  return {
+    ...response,
+    invalidMessage: response.invalidMessage ? `${advice}; ${response.invalidMessage}` : advice,
+    extra: { ...response.extra, expirationLedger: expiration },
   };
 }
 

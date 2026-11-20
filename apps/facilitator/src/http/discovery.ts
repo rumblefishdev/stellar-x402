@@ -1,4 +1,3 @@
-import type { StellarNetwork } from "@stellar-x402/config";
 import type { DiscoveryResourcesResponse } from "@x402/extensions/bazaar";
 import type { RequestHandler } from "express";
 import { z } from "zod";
@@ -62,7 +61,7 @@ const QUERY = z.object({
   type: text.optional(),
   payTo: text.optional(),
   scheme: text.optional(),
-  // CAIP-2: a malformed id is a 400; a well-formed one we don't serve matches nothing.
+  // CAIP-2: a malformed id is a 400; a well-formed one that isn't Stellar's matches nothing.
   network: text.regex(/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/).optional(),
   extensions: text.optional(),
   // 0 asks for the total alone.
@@ -72,8 +71,8 @@ const QUERY = z.object({
 
 /**
  * What the route does with a request. `empty` is a well-formed query nothing in the catalog can
- * match: another network, a scheme we never settle or an extension we never catalog. `ignored`
- * names unknown parameters.
+ * match: a scheme we never settle or an extension we never
+ * catalog. `ignored` names unknown parameters.
  */
 export type DiscoveryQuery =
   | { kind: "query"; query: CatalogQuery; limit: number; offset: number; ignored: string[] }
@@ -86,25 +85,21 @@ export type DiscoveryQuery =
  * used. Unknown parameters are ignored rather than refused: upstream's client sends whatever its
  * version knows, and a 400 would fail every call it makes once upstream adds a filter. An empty
  * value counts as absent, since that client sends `?type=` for `type: ""`. A misspelled known
- * param (`type[]`, `payto`) is refused whatever its value, naming it as sent. `served` is the
- * network this facilitator settles on, the only one its catalog holds (ADR 0012): asking for it
- * filters nothing, and is not passed on, since a filter every entry matches only slows the count.
- * `extensions=bazaar` is the same: every entry has it, and its GIN lookup scans the whole table.
+ * param (`type[]`, `payto`) is refused whatever its value, naming it as sent. `network` is a filter
+ * like `payTo`: the catalog holds both Stellar networks whatever network this facilitator settles
+ * on (0155), and another network's id matches nothing. `extensions=bazaar` is not passed on: every entry has it, and its GIN lookup scans the
+ * whole table.
  */
-export function parseDiscoveryQuery(
-  raw: Record<string, unknown>,
-  served: StellarNetwork,
-): DiscoveryQuery {
+export function parseDiscoveryQuery(raw: Record<string, unknown>): DiscoveryQuery {
   const misspelled = Object.keys(raw).find(misspelledKnown);
   if (misspelled !== undefined) return { kind: "invalid", param: misspelled.slice(0, 64) };
   const given = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== ""));
   const parsed = QUERY.safeParse(given);
   if (!parsed.success) return { kind: "invalid", param: String(parsed.error.issues[0]!.path[0]) };
-  const { scheme, network, extensions, limit: asked, offset = 0, ...filters } = parsed.data;
+  const { scheme, extensions, limit: asked, offset = 0, ...filters } = parsed.data;
   const limit = Math.min(asked ?? DISCOVERY_LIMIT.default, DISCOVERY_LIMIT.max);
   const ignored = Object.keys(raw).filter((param) => !KNOWN_PARAMS.includes(param));
   if (
-    (network !== undefined && network !== served) ||
     (scheme !== undefined && !CATALOGED_SCHEMES.includes(scheme)) ||
     (extensions !== undefined && !CATALOGED_EXTENSIONS.includes(extensions))
   )
@@ -120,10 +115,9 @@ export function discoveryResources(
   catalog: CatalogStore,
   logger: Logger,
   metrics: ProcessMetrics,
-  served: StellarNetwork,
 ): RequestHandler {
   return async (req, res) => {
-    const parsed = parseDiscoveryQuery(req.query, served);
+    const parsed = parseDiscoveryQuery(req.query);
     if (parsed.kind === "invalid") {
       res.status(400).json({ error: "bad_request", param: parsed.param });
       return;

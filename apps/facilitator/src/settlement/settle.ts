@@ -856,6 +856,27 @@ export function createSettler(deps: SettlerDeps): Settle & {
       // 0086: the refusal is recorded, so the same payment never settles here once it would pass,
       // after its payer may have signed another. A reopen the checks refuse turns `refused` too.
       // Before any claim, a store that fails or doesn't answer is a 500, as for the lookup.
+      // 0156: past the horizon the refusal gets no row, so a sender can't keep rows for as long
+      // as it likes; the key still gives the answer the "ended" advice to wait for that ledger.
+      if (identity && !reopening) {
+        const valid = await validOnce();
+        if (valid?.left !== undefined && valid.left > REFUSAL_HORIZON_LEDGERS) {
+          logger.info("settlement_refusal_unrecorded", {
+            network,
+            settlementKey: identity.key,
+            expirationLedger: valid.expiration,
+            ledgersLeft: valid.left,
+          });
+          return {
+            key: identity.key,
+            response: failure(
+              verdict.invalidReason ?? SETTLE_REASONS.unexpected,
+              verdict.payer,
+              verdict.invalidMessage,
+            ),
+          };
+        }
+      }
       if (identity) {
         const errorReason = verdict.invalidReason ?? SETTLE_REASONS.unexpected;
         const record = await bounded(
@@ -1121,7 +1142,18 @@ interface Validity {
  * How long reading the latest ledger may take for an ended answer or a reopen. The longest
  * budget (80 s) plus the store's grace and this stays below the load balancer's 120 s.
  */
-const LEDGER_READ_MS = 1_000;
+export const LEDGER_READ_MS = 1_000;
+
+/**
+ * How far ahead of the latest ledger a refused payload's auth entry may expire and still be
+ * recorded `refused` (0156). The record is kept until that ledger has closed (0086 decision 15),
+ * and the payload alone sets it, before any signature check, so without a bound anyone could keep
+ * rows for good. A payment signed as a client signs is at most `MAX_VALIDITY_LEDGERS` (120 at
+ * most) ahead; 720 ledgers is about the hour the pruner keeps a refusal anyway. Past it the
+ * refusal gets no row, and its answer says to wait for that ledger before signing another
+ * payment: whoever holds this one could land it until then anyway, here or elsewhere.
+ */
+export const REFUSAL_HORIZON_LEDGERS = 720;
 
 /**
  * Whether a repeat with `fingerprint` may reopen `record` (0073 decision 13): the same payment,
