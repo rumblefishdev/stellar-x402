@@ -162,8 +162,10 @@ export interface SubmitOptions {
   onSent?: (hash: string) => void;
   /**
    * Latest time, in milliseconds on the submitter's clock, to start sending: a call still waiting
-   * for a channel then is refused with {@link QueueTimeoutError}. Set it from the client's
-   * signature expiry, so a payment is not held until it can no longer settle.
+   * for a channel then is refused with {@link QueueTimeoutError}, and a channel's sequence read
+   * that keeps failing stops then with its own error (a channel with no entry is still read for
+   * `timeoutSeconds`, so it can be retired). Set it from the client's signature expiry, so a
+   * payment is not held until it can no longer settle.
    */
   deadline?: number;
   /**
@@ -564,7 +566,7 @@ export class SettlementSubmitter {
     }
     for (let resynced = false; ; resynced = true) {
       if (!prepared) {
-        channel.sequence ??= await this.readSequence(channel, hold);
+        channel.sequence ??= await this.readSequence(channel, hold, opts.deadline);
         prepared = await this.prepare(channel.address, channel.sequence, call, opts);
       }
       const result = await this.sendAndConfirm(channel, prepared, opts, hold);
@@ -606,9 +608,20 @@ export class SettlementSubmitter {
    * of existing channels with 502 or a JSON-RPC error (0007 step 7, measured in 0051). Only a
    * channel the RPC still has no entry for after that is taken out of the pool, so later calls
    * don't draw it; a failed read keeps the channel.
+   *
+   * Failed reads stop at the caller's `deadline` too, with the last read's error, and the channel
+   * goes back to the pool (0056): past it the call won't send, so retrying only holds the channel.
+   * Once the RPC has answered "no entry", the read keeps its whole window instead, so a missing
+   * channel is still retired: the facilitator's deadline is shorter than `timeoutSeconds`, and
+   * nobody can use a missing channel meanwhile.
    */
-  private async readSequence(channel: Channel, hold: Hold): Promise<bigint> {
+  private async readSequence(
+    channel: Channel,
+    hold: Hold,
+    deadline: number | undefined,
+  ): Promise<bigint> {
     const giveUpAt = this.now() + this.timeoutSeconds * 1000;
+    let noEntry = false;
     for (;;) {
       let account: xdr.AccountEntry | undefined;
       let failure: unknown;
@@ -620,9 +633,11 @@ export class SettlementSubmitter {
       if (account) return account.seqNum().toBigInt();
       // No entry and no failure: the RPC answered that the channel does not exist.
       const missing = failure === undefined;
+      noEntry ||= missing;
       const error = missing ? new Error(`Account not found: ${channel.address}`) : failure;
       const message = error instanceof Error ? error.message : String(error);
-      if (this.now() >= giveUpAt) {
+      const stopAt = noEntry ? giveUpAt : Math.min(giveUpAt, deadline ?? Infinity);
+      if (this.now() >= stopAt) {
         if (missing) {
           this.pool.retire(channel);
           hold.retired = true;
@@ -632,7 +647,7 @@ export class SettlementSubmitter {
       }
       if (this.closing) throw new ShutdownError("the submitter closed while a read was retried");
       this.emit({ type: "read-retry", channel: channel.address, message });
-      await Promise.race([this.clock.following(giveUpAt), this.closed]);
+      await Promise.race([this.clock.following(stopAt), this.closed]);
     }
   }
 
