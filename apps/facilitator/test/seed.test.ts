@@ -2,7 +2,7 @@ import type { PaymentRequirements } from "@x402/core/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCataloger } from "../src/catalog/cataloger.js";
 import {
-  SEED_GAP_MS,
+  REQUEST_GAP_MS,
   fileResources,
   parseHosts,
   reportLines,
@@ -22,6 +22,10 @@ describe("the hosts file (0155 decision 13)", () => {
       "https://b.example",
       "http://127.0.0.1:8080",
     ]);
+  });
+
+  it("asks a host once, however often the file names it", () => {
+    expect(parseHosts("a.example\nhttps://a.example\na.example/\n")).toEqual(["https://a.example"]);
   });
 });
 
@@ -51,6 +55,7 @@ describe("the seller's /.well-known/x402 (0155 decisions 9, 10)", () => {
       ],
       offHost: 0,
       otherMethod: 0,
+      unreadable: 0,
     });
   });
 
@@ -67,6 +72,15 @@ describe("the seller's /.well-known/x402 (0155 decisions 9, 10)", () => {
       resources: [{ url: "https://seller.example/c", method: "GET" }],
       offHost: 1,
       otherMethod: 1,
+    });
+  });
+
+  it("counts every entry it can't read a URL from (decision 15)", () => {
+    const file = { resources: [{ url: 5 }, "http://[bad", {}, "https://seller.example/ok"] };
+    expect(fileResources(origin, file)).toMatchObject({
+      ok: true,
+      resources: [{ url: "https://seller.example/ok" }],
+      unreadable: 3,
     });
   });
 
@@ -133,7 +147,8 @@ describe("seedHosts (0155)", () => {
       { url: `${seller.url}/b`, outcome: "not_askable", reason: "not_402" },
     ]);
     expect((await store.list({ limit: 10, offset: 0 })).total).toBe(1);
-    expect(wait.mock.calls).toEqual([[SEED_GAP_MS]]);
+    // /a cost two requests (the one that learns its listing, then the check).
+    expect(wait.mock.calls).toEqual([[2 * REQUEST_GAP_MS]]);
     expect(seller.userAgents[0]).toBe(SELLER_USER_AGENT);
   });
 
@@ -158,6 +173,30 @@ describe("seedHosts (0155)", () => {
 });
 
 describe("the seed's report (0155 decision 12)", () => {
+  it("names a payTo seen on two hosts even where no listing was written, cleaned", () => {
+    const lines = reportLines(
+      ["https://a.example", "https://b.example"].map((origin) => ({
+        origin,
+        file: "ok",
+        listed: 1,
+        offHost: 0,
+        otherMethod: 0,
+        unreadable: 0,
+        results: [
+          {
+            url: `${origin}/1`,
+            method: "GET",
+            network: "stellar:pubnet",
+            payTo: "G\u001bX",
+            outcome: "rejected",
+            reason: "invalid_offer",
+          },
+        ],
+      })),
+    );
+    expect(lines.at(-1)).toBe("payTo G X on 2 hosts: https://a.example, https://b.example");
+  });
+
   it("prints a seller's text with no control character, so it can't drive the terminal", () => {
     const [line] = reportLines([
       {
@@ -166,6 +205,7 @@ describe("the seed's report (0155 decision 12)", () => {
         listed: 1,
         offHost: 0,
         otherMethod: 0,
+        unreadable: 0,
         results: [
           {
             url: "https://a.example/1",
@@ -195,6 +235,7 @@ describe("the seed's report (0155 decision 12)", () => {
         listed: 2,
         offHost: 0,
         otherMethod: 0,
+        unreadable: 0,
         results: [
           result("https://a.example/1", "GSHARED"),
           { url: "https://a.example/2", method: "GET", outcome: "not_askable", reason: "not_402" },
@@ -206,6 +247,7 @@ describe("the seed's report (0155 decision 12)", () => {
         listed: 1,
         offHost: 0,
         otherMethod: 0,
+        unreadable: 0,
         results: [result("https://b.example/1", "GSHARED")],
       },
       {
@@ -214,6 +256,7 @@ describe("the seed's report (0155 decision 12)", () => {
         listed: 0,
         offHost: 0,
         otherMethod: 0,
+        unreadable: 0,
         results: [],
       },
     ]);
@@ -221,9 +264,9 @@ describe("the seed's report (0155 decision 12)", () => {
       "https://a.example/1\tGET\tstellar:pubnet\tGSHARED\trefreshed\t\t",
       "https://a.example/2\tGET\t\t\tnot_askable\tnot_402\t",
       "https://b.example/1\tGET\tstellar:pubnet\tGSHARED\trefreshed\t\t",
-      "host https://a.example: file ok, 2 listed, 0 on another host, 0 other methods, 1 written",
-      "host https://b.example: file ok, 1 listed, 0 on another host, 0 other methods, 1 written",
-      "host https://c.example: file status 404, 0 listed, 0 on another host, 0 other methods, 0 written",
+      "host https://a.example: file ok, 2 listed, 0 on another host, 0 other methods, 0 unreadable, 1 written",
+      "host https://b.example: file ok, 1 listed, 0 on another host, 0 other methods, 0 unreadable, 1 written",
+      "host https://c.example: file status 404, 0 listed, 0 on another host, 0 other methods, 0 unreadable, 0 written",
       "total: 2 written, 2 hosts with a listing, 1 payTo",
       "payTo GSHARED on 2 hosts: https://a.example, https://b.example",
     ]);

@@ -9,11 +9,11 @@ import { SELLER_USER_AGENT } from "./seller-check.js";
  */
 export const SEED_FILE_BYTES = 512 * 1024;
 /**
- * The wait between two resource URLs of one host. Each URL costs two requests (the one that learns
- * its listing, then the check), so a host gets at most 20 a minute: below the 30 checks a minute a
- * host's budget allows checks after payments (ADR 0008), which keep their share (decision 12).
+ * The wait after each request the seed sends a host: 20 a minute, below the 30 checks a minute a
+ * host's budget allows checks after payments (ADR 0008), which keep their share (decision 12). A
+ * URL costs one request to learn its listing, then one check per Stellar account its 402 names.
  */
-export const SEED_GAP_MS = 6_000;
+export const REQUEST_GAP_MS = 3_000;
 /** As long as a seller check may take (`cataloger.ts`'s seller timeout). */
 const FILE_TIMEOUT_MS = 10_000;
 /** The only methods a check sends: real listings use these two alone (ADR 0008). */
@@ -25,7 +25,10 @@ export function parseHosts(text: string): string[] {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("#"))
-    .map((line) => (line.includes("://") ? line : `https://${line}`));
+    .map((line) => (line.includes("://") ? line : `https://${line}`))
+    .filter((line) => URL.canParse(line))
+    .map((line) => new URL(line).origin)
+    .filter((origin, i, origins) => origins.indexOf(origin) === i);
 }
 
 export type FileResources =
@@ -36,6 +39,8 @@ export type FileResources =
       offHost: number;
       /** URLs with a method other than GET or POST, skipped. */
       otherMethod: number;
+      /** Entries with no URL that parses, skipped. */
+      unreadable: number;
     }
   | { ok: false; reason: "no_resources" };
 
@@ -53,6 +58,7 @@ export function fileResources(origin: string, file: unknown): FileResources {
   const resources: { url: string; method: string }[] = [];
   let offHost = 0;
   let otherMethod = 0;
+  let unreadable = 0;
   for (const item of listed) {
     let written: unknown;
     let method = "GET";
@@ -65,7 +71,10 @@ export function fileResources(origin: string, file: unknown): FileResources {
       written = fields.url ?? fields.resource ?? fields.path;
       if (typeof fields.method === "string") method = fields.method.toUpperCase();
     }
-    if (typeof written !== "string" || !URL.canParse(written, origin)) continue;
+    if (typeof written !== "string" || !URL.canParse(written, origin)) {
+      unreadable++;
+      continue;
+    }
     const url = new URL(written, origin);
     if (url.host !== host) {
       offHost++;
@@ -79,7 +88,7 @@ export function fileResources(origin: string, file: unknown): FileResources {
     seen.add(`${method} ${url.href}`);
     resources.push({ url: url.href, method });
   }
-  return { ok: true, resources, offHost, otherMethod };
+  return { ok: true, resources, offHost, otherMethod, unreadable };
 }
 
 /** How seeding one host ended: its file, then a result per listing. */
@@ -91,6 +100,7 @@ export interface HostReport {
   listed: number;
   offHost: number;
   otherMethod: number;
+  unreadable: number;
   results: SeedResult[];
 }
 
@@ -129,13 +139,17 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
     listed: 0,
     offHost: 0,
     otherMethod: 0,
+    unreadable: 0,
     results: [],
   };
   let file: unknown;
   try {
     file = await readFile402(origin, deps.listLocal);
   } catch (error) {
-    report.file = error instanceof SellerFetchError ? error.code : (error as Error).message;
+    report.file =
+      error instanceof SellerFetchError
+        ? [error.code, error.detail].filter(Boolean).join(": ")
+        : (error as Error).message;
     return report;
   }
   const found = fileResources(origin, file);
@@ -146,10 +160,14 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
   report.listed = found.resources.length;
   report.offHost = found.offHost;
   report.otherMethod = found.otherMethod;
+  report.unreadable = found.unreadable;
   const wait = deps.wait ?? sleep;
   for (const [i, { url, method }] of found.resources.entries()) {
-    if (i > 0) await wait(SEED_GAP_MS);
-    report.results.push(...(await cataloger.seed(url, method)));
+    const results = await cataloger.seed(url, method);
+    report.results.push(...results);
+    // The request that learned the listing, and a check for each account it named.
+    const checks = results.filter((r) => r.network !== undefined && r.outcome !== "refused");
+    if (i < found.resources.length - 1) await wait(REQUEST_GAP_MS * (1 + checks.length));
   }
   return report;
 }
@@ -174,8 +192,7 @@ export function reportLines(reports: HostReport[]): string[] {
     for (const r of results)
       lines.push(
         [r.url, r.method, r.network, r.payTo, r.outcome, r.reason, r.detail]
-          // A seller's text can carry terminal escapes: no control character is printed.
-          .map((field) => (field ?? "").replace(/\p{Cc}/gu, " "))
+          .map((field) => printable(field ?? ""))
           .join("\t"),
       );
   const written = (r: SeedResult) => r.outcome === "refreshed";
@@ -184,19 +201,31 @@ export function reportLines(reports: HostReport[]): string[] {
     const count = report.results.filter(written).length;
     lines.push(
       `host ${report.origin}: file ${report.file}, ${report.listed} listed, ` +
-        `${report.offHost} on another host, ${report.otherMethod} other methods, ${count} written`,
+        `${report.offHost} on another host, ${report.otherMethod} other methods, ` +
+        `${report.unreadable} unreadable, ${count} written`,
     );
-    for (const r of report.results.filter(written)) {
-      const hosts = hostsOf.get(r.payTo!) ?? new Set<string>();
+    for (const r of report.results) {
+      if (r.payTo === undefined) continue;
+      const hosts = hostsOf.get(r.payTo) ?? new Set<string>();
       hosts.add(report.origin);
-      hostsOf.set(r.payTo!, hosts);
+      hostsOf.set(r.payTo, hosts);
     }
   }
   const total = reports.flatMap((report) => report.results).filter(written).length;
   const withListing = reports.filter((report) => report.results.some(written)).length;
-  lines.push(`total: ${total} written, ${withListing} hosts with a listing, ${hostsOf.size} payTo`);
+  const accounts = new Set(
+    reports.flatMap((report) => report.results.filter(written).map((r) => r.payTo)),
+  );
+  lines.push(
+    `total: ${total} written, ${withListing} hosts with a listing, ${accounts.size} payTo`,
+  );
   for (const [payTo, hosts] of hostsOf)
     if (hosts.size > 1)
-      lines.push(`payTo ${payTo} on ${hosts.size} hosts: ${[...hosts].join(", ")}`);
+      lines.push(`payTo ${printable(payTo)} on ${hosts.size} hosts: ${[...hosts].join(", ")}`);
   return lines;
+}
+
+/** A seller's text can carry terminal escapes: no control character is printed. */
+function printable(text: string): string {
+  return text.replace(/\p{Cc}/gu, " ");
 }

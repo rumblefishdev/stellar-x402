@@ -90,6 +90,14 @@ describe("cataloger.seed (0155)", () => {
     expect(metrics.value("catalog_attempts_total", labels)).toBe(1);
   });
 
+  it("keeps the ledger of a listing a settlement wrote when the seed checks it again", async () => {
+    const { cataloger, rows } = setup();
+    await cataloger.seed(`${seller.url}/weather`, "GET");
+    await db.pool.query("UPDATE catalog SET ledger = 100, checked_at = 0");
+    await cataloger.seed(`${seller.url}/weather`, "GET");
+    expect(await rows()).toMatchObject([{ ledger: "100" }]);
+  });
+
   it("asks again with the method the seller's 402 declares, and lists under it", async () => {
     bazaar = POST;
     const { cataloger, rows } = setup();

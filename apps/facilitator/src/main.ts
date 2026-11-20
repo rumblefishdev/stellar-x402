@@ -754,7 +754,7 @@ export async function seedMain(
   const origins = parseHosts(await readFile(path, "utf8"));
   const { databaseUrl } = parseMigrateConfig(env);
   const logger = jsonLogger("info", (line) => process.stderr.write(line));
-  const pool = createPool(databaseUrl, poolErrorLogger(logger), 4);
+  const pool = createPool(databaseUrl, poolErrorLogger(logger));
   try {
     const pending = await pendingMigrations(pool);
     if (pending.length > 0)
