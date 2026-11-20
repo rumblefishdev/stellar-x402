@@ -327,7 +327,8 @@ All made by akot on 2026-11-16.
   - Never exercised on the server: a login as a role other than `postgres` from the `db`
     network, the portal's addresses in the two networks, `no-new-privileges` on its container.
   - The hub's side: the BFF's IAM grant for the secret, and `x402` in `HUB_PRODUCTS`.
-  - Decision 21 stands: no alarm, watchdog or uptime probe for the backend.
+  - Decision 21 stood: no alarm, watchdog or uptime probe for the backend (the probes came on
+    2026-11-20, decision 21).
   - `KEY_ENCRYPTION_KEY` has no backup.
 - **The final review**, 2026-11-18, on the whole branch, ran: `apps/portal` 96 tests,
   `packages/api-keys` 27, `@stellar-x402/deploy` 144, `apps/portal-web` 15, the root typecheck 23
@@ -346,6 +347,18 @@ All made by akot on 2026-11-16.
   `429`, `503` for `502`). `apps/portal` 100 tests and its typecheck, eslint and prettier; the
   production bundle (`pnpm deploy --prod`, as the Dockerfile makes it) imports
   `express-rate-limit`. The facilitator's tests were not run again: nothing of it changed.
+- **The uptime probes**, 2026-11-20, on the branch `lore-0106-portal-uptime` (decision 21):
+  `infra/lambdas/uptime-probe` takes its target from `HEALTH_URL`, `METRIC` and `EXPECT` and
+  refuses a bad one; the Uptime stack makes one function, log group and schedule per target, the
+  facilitator's under the ids it was deployed with (its synth compared before and after: only the
+  schedule's description and the function's two new variables change). `portal_ready` and
+  `hub_ready` in the catalog, the two alarms and groups (both off), the 0027 alarm list and
+  G-metrics, `docs/monitoring.md` (the probes, two sections, the off alarms, the metrics), the
+  runbook's "Monitoring" under the portal's backend, `infra/README.md`. Tests: `infra` 389 (355
+  before), `packages/metrics-catalog` 32; typecheck, eslint and prettier clean. With the probe's
+  headers, from a workstation: the portal's `/health` `{"ready":true}` 200, the hub's
+  `/api/hub/me` a `302` to `/api/` (the hub's backend isn't routed yet). Not deployed; never run
+  from AWS.
 
 ## Design Decisions
 
@@ -452,9 +465,21 @@ All made by akot on 2026-11-16.
 20. **The unit is skipped until its first deploy** (`ConditionPathExists` on `portal.digest`), so
     the playbook can enable it before its credentials exist, and a first deploy that fails
     removes the file again.
-21. **No watchdog, uptime probe or alarm for the backend yet.** The facilitator's are its own
-    (the watchdog names its container, the probe its hostname). To decide with akot: here or a
-    follow-up.
+21. **Uptime probes for the backend and for the hub's, here; the rest later.** Decided by akot on
+    2026-11-20 (it was "no watchdog, uptime probe or alarm yet, here or a follow-up"). The
+    facilitator's probe (0027), parameterised by its URL, its metric and the JSON fields a ready
+    answer holds, runs as two more functions in the Uptime stack: `portal_ready` from
+    `https://x402-portal.sorobanscan.com/health` (`"ready": true`), alarm `portal-uptime` in the
+    group `portalUptime`; and `hub_ready` from `https://sorobanscan.com/api/hub/me` through the
+    explorer's CloudFront (a 200 with `"authenticated": false`: that distribution answers a path
+    it doesn't route with a redirect, or with its HTML as a 200 or a 403, so a status proves
+    nothing), alarm `hub-uptime` in `hubUptime`. Both alarms take `uptime`'s 7 minutes and count a
+    missing point as down. Both groups are off at first (0027 decision 26): `portalUptime` goes on
+    once its probe has published; `hubUptime` once the hub's backend is in the explorer's
+    distribution (the hub's runbook, step 4) and its probe reads 1. The hub's own `Throttles` and
+    `Url5xxCount` alarms are being added in the hub's repo, publishing to this repo's
+    `x402-production-alarms` topic. Later: a watchdog for the backend, metric filters with alarms
+    on its log lines, and a `ConcurrentExecutions` alarm for the hub's Lambda.
 22. **No gate on the backend's hostname while it is tested.** Decided by akot, 2026-11-17. The
     keys it issues are read by no request until 0126 (decision 19), the Discord gates still
     apply, and Cloudflare Access in front of it would stop the page's CORS requests.
