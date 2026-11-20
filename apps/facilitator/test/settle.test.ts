@@ -775,6 +775,20 @@ describe("createSettler", () => {
     );
   });
 
+  it.each([
+    ["exactly at the horizon is recorded", REFUSAL_HORIZON_LEDGERS, "refused"],
+    ["one past it is not", REFUSAL_HORIZON_LEDGERS + 1, undefined],
+  ] as const)("an auth entry %s, with one ledger read (0156)", async (_, ledgersLeft, state) => {
+    const check: Check = async () => ({
+      response: { isValid: false, invalidReason: "invalid_exact_stellar_payload_x", payer },
+    });
+    const latestLedger = vi.fn(async () => EXPIRATION - ledgersLeft);
+    const { settle, store } = setup(landing(), { check, latestLedger });
+    await settle(payload(), requirements);
+    expect((await store.get(key))?.state).toBe(state);
+    expect(latestLedger).toHaveBeenCalledTimes(1);
+  });
+
   it("records the refusal when the ledger can't be read, as before 0156", async () => {
     const check: Check = async () => ({
       response: { isValid: false, invalidReason: "invalid_exact_stellar_payload_x", payer },
