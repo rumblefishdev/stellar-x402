@@ -2,7 +2,8 @@
 id: "0056"
 title: "Stop the channel sequence read at the caller's deadline"
 type: BUG
-status: backlog
+status: active
+owner: okarcz
 milestone: 2
 related_adr: []
 related_tasks: ["0051", "0009"]
@@ -18,6 +19,10 @@ history:
     who: okarcz
     note: >
       Moved to M2 by okarcz in the M1 Payments cleanup: not started, and M1 is closing.
+  - date: "2026-11-20"
+    status: active
+    who: okarcz
+    note: "Started by okarcz: Payments lane, M2."
 ---
 
 # Stop the channel sequence read at the caller's deadline
