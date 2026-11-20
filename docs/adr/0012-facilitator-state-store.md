@@ -50,7 +50,9 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     and `catalog_attempts` carry the network, but `settlement_hashes` (AD-16's lookup by any of a
     settlement's hashes), `leases`, `rate_limits` and the three spend tables don't, so a shared
     database would need it in their keys and queries. A testnet reset wipes only testnet's
-    database, and backups, restores and migrations stay per network.
+    database, and backups, restores and migrations stay per network. The catalog is the exception
+    while it lives in testnet's database and holds both networks (task 0155): a reset takes the
+    seeded mainnet listings with it, and `pnpm seed` lists them again.
     - The API key registry (`api_keys`, task 0105) carries no network either: a key is for the
       callers of the network whose database holds it. Only pubnet requires one, so only pubnet's
       registry is read; testnet's holds only the keys the portal issues for testing until pubnet

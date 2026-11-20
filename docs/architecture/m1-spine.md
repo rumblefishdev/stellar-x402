@@ -332,7 +332,8 @@ graph TD
   - The response uses the upstream discovery list types.
   - Filters: `type`, `payTo`, `network`, `extensions`, `limit`, `offset`. Upstream's client also
     sends `scheme`: `exact` (all T1 settles) matches every entry and any other scheme none, until
-    `upto` is cataloged (0015). A well-formed network we don't serve matches nothing.
+    `upto` is cataloged (0015). The catalog holds both Stellar networks (task 0155): `network`
+    narrows it to one, and a well-formed network that isn't Stellar's matches nothing.
   - `limit` is bounded, with a fixed default (20, at most 100); `offset` at most 1 000 000, and
     `total` is exact.
   - Malformed values are a 400; an empty value counts as absent, `limit=0` gives the total alone,
