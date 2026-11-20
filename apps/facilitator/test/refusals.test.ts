@@ -275,6 +275,28 @@ describe("verifyWithRefusals (0086)", () => {
     expect(await store.get(key)).toMatchObject({ state: "claimed" });
   });
 
+  it("answers from a record that holds the key without the horizon, adding no row (0156)", async () => {
+    const latestLedger = vi.fn(async () => EXPIRATION - REFUSAL_HORIZON_LEDGERS - 1);
+    const { verify, store } = setup(undefined, latestLedger);
+    const p = payload();
+    const { fingerprintOf } = await import("../src/settlement/settle.js");
+    await store.claim({
+      key,
+      network,
+      payer,
+      nonce: "7",
+      fingerprint: fingerprintOf(p, requirements),
+      paymentPayload: p,
+      paymentRequirements: requirements,
+      createdAt: 1_000,
+    });
+    expect((await verify(p, requirements)).invalidMessage).toMatch(
+      /^a settlement of this payment is under way/,
+    );
+    expect(latestLedger).not.toHaveBeenCalled();
+    expect(await store.get(key)).toMatchObject({ state: "claimed" });
+  });
+
   it.each([
     ["fails", { get: () => Promise.reject(new Error("down")) }],
     ["is too slow", { get: () => new Promise<never>(() => {}) }],

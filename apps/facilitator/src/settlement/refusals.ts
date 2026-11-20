@@ -107,7 +107,9 @@ export function verifyWithRefusals(verify: Verify, deps: RefusalDeps): Verify {
     }
     const response = await verify(payload, requirements, trace);
     if (response.isValid || response.invalidReason === undefined) return response;
-    if (identity.expiration !== undefined) {
+    // A record that already answers for the key adds no row (as `/settle`'s reopen), so it
+    // isn't held to the horizon: `refuse` answers from it as before (0156).
+    if (existing === undefined && identity.expiration !== undefined) {
       const left = await ledgersLeft(identity.expiration);
       if (left !== undefined && left > REFUSAL_HORIZON_LEDGERS) {
         logger.info("settlement_refusal_unrecorded", {
