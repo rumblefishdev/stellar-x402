@@ -199,17 +199,22 @@ describe("guardedFetch", () => {
     },
   );
 
-  it("names a seller that refuses the connection a network failure", async () => {
+  it("names a seller that drops the connection a network failure", async () => {
     const { fetch: realFetch } = await vi.importActual<typeof import("undici")>("undici");
     undiciFetch.mockImplementation(realFetch);
+    // Kept listening for the whole test, so no other process can take its port in between.
     const seller = createServer();
+    seller.on("connection", (socket) => socket.destroy());
     await new Promise<void>((done) => seller.listen(0, "127.0.0.1", done));
     const url = `http://127.0.0.1:${(seller.address() as AddressInfo).port}/`;
-    await new Promise((done) => seller.close(done));
     const limits = { timeoutMs: 5_000, maxResponseBytes: 1_000, allowInsecureLocal: true };
-    await expect(
-      guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url),
-    ).rejects.toMatchObject({ code: "network" });
+    try {
+      await expect(
+        guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url),
+      ).rejects.toMatchObject({ code: "network" });
+    } finally {
+      seller.close();
+    }
   });
 
   it.each([

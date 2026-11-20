@@ -255,7 +255,6 @@ describe("cataloger", () => {
 
   it.each([
     ["not a 402", { status: 200 }, "not_402"],
-    ["a redirect, which is not followed (0085)", { status: 302 }, "redirect"],
     ["a 402 without terms", { status: 402, body: {} as PaymentRequired }, "unreadable_402"],
     [
       "a 402 whose tags are not a list (0130)",
@@ -287,8 +286,25 @@ describe("cataloger", () => {
     },
   );
 
+  it("records a seller's redirect as the attempt's reason, not followed (0085)", async () => {
+    const { cataloger, attempts, list } = setup();
+    seller.reply = async () => ({ status: 302 });
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(await attempts()).toEqual([
+      { stage: "seller", outcome: "not_askable", reason: "redirect" },
+    ]);
+    expect(seller.requests).toHaveLength(1);
+    expect(await list()).toEqual([]);
+  });
+
   it("does not ask a private address, an mcp listing, or a seller past the timeout (row 6)", async () => {
     const { cataloger, list, counted } = setup({ sellerTimeoutMs: 100 });
+    await cataloger.onSuccess(
+      record({ info: valid.info }, {}, { url: "https://10.255.255.1/x" }),
+      "settle",
+    );
+    expect(counted("seller", "not_askable", "not_public")).toBe(1);
+    // Over http the scheme is refused first, before the address is looked at.
     await cataloger.onSuccess(
       record({ info: valid.info }, {}, { url: "http://10.255.255.1/x" }),
       "settle",

@@ -46,12 +46,15 @@ const SELLER_FETCH_CODES: Record<SellerFetchCode, ErrorCode> = {
 
 /**
  * The tool error a failure stands for: a seller-fetch refusal takes its tool code and keeps its
- * message and detail. Any other error gives `undefined`: the caller decides what it means.
+ * message; its own code leads the detail, so the log still names the exact cause (`redirect`,
+ * `timeout`, …). Any other error gives `undefined`: the caller decides what it means.
  */
 export function asToolError(error: unknown): ToolError | undefined {
   if (error instanceof ToolError) return error;
-  if (error instanceof SellerFetchError)
-    return new ToolError(SELLER_FETCH_CODES[error.code], error.message, error.detail);
+  if (error instanceof SellerFetchError) {
+    const detail = error.detail ? `${error.code}: ${error.detail}` : error.code;
+    return new ToolError(SELLER_FETCH_CODES[error.code], error.message, detail);
+  }
   return undefined;
 }
 
