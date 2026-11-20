@@ -4,8 +4,8 @@ title: "Search the Bazaar: /discovery/search with ranking"
 type: FEATURE
 status: backlog
 milestone: 2
-related_adr: ["0008", "0012"]
-related_tasks: ["0029", "0063", "0137"]
+related_adr: ["0008", "0012", "0014"]
+related_tasks: ["0029", "0063", "0137", "0134", "0135", "0154"]
 tags: [bazaar, discovery, mcp, priority-medium, effort-large]
 links:
   - ../../../docs/rfp/07-x402-facilitator-bazaar.md
@@ -16,6 +16,12 @@ history:
     note: >
       An RFP requirement with no task until now: the M1 plan leaves search out of Tranche 1, and
       no later task held it.
+  - date: "2026-11-19"
+    status: backlog
+    who: karolkow
+    note: >
+      0134 chose the approach (ADR 0014); the questions left here are listed under
+      Implementation.
 ---
 
 # Search the Bazaar: `/discovery/search` with ranking
@@ -34,13 +40,22 @@ ranked by fit, so that I can find a paid resource without knowing its seller or 
   defers them to "later tranches" (`m1-spine.md`, Deferred).
 - Upstream `@x402/extensions` 2.28 types the request as `SearchDiscoveryResourcesParams`, with a
   natural-language query.
-- ADR 0012 keeps search in the same PostgreSQL: full-text, `pg_trgm`, `pgvector`.
+- [ADR 0014](../../../docs/adr/0014-bazaar-search.md) (task 0134) chose the approach: words and
+  meaning in PostgreSQL, fused by rank, the model in its own container. The quality score and
+  curation are 0154's.
 - 0029 notes that upstream's e2e Bazaar check calls `/discovery/search`.
 
 ## Implementation
 
-- Settle the design with the owner first: ranking signals, keyword and fuzzy search first or
-  vectors, cursor shape, what an empty query returns.
+- Build what ADR 0014 decides. Settle with the owner first what it leaves open: what an empty
+  query returns, the largest `limit` served, the longest query accepted, and whether search gets a
+  rate budget of its own beside `/discovery/*`'s per-IP limit (ADR 0007).
+- Pick the ONNX Runtime library for the model's container (no LGPL dependency), with its thread
+  count set to the container's CPU quota. Measure on the server its memory, the facilitator's
+  timeout for it and pgvector's exact scan (ADR 0014).
+- The model container's deploy path: its image in the deploy scripts, a systemd unit and a
+  healthcheck like the other services, and a place on an internal network (ADR 0011).
+- A threat-model entry for search: ranking by repeated words, load on the model container.
 - The route, its port method and its PostgreSQL adapter.
 - Agree the route's request and response types first: 0137 builds the MCP search tool on them.
 

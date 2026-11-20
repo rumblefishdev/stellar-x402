@@ -15,6 +15,8 @@ export interface McpSeller {
   openStreams: () => number;
   /** Session ids the client ended with a `DELETE`, when the seller hands out sessions. */
   ended: string[];
+  /** The `User-Agent` of each request, in order. */
+  userAgents: string[];
   server: Server;
 }
 
@@ -56,7 +58,9 @@ export async function startMcpSeller(
     url: "",
     openStreams: () => streams.size,
     ended: [],
+    userAgents: [],
     server: createServer((req, res) => {
+      seller.userAgents.push(String(req.headers["user-agent"]));
       void (async () => {
         // A stateful seller's session id, on every answer; the client ends it with a DELETE.
         if (session) {

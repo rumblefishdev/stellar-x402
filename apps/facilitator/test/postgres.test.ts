@@ -961,6 +961,10 @@ describe("PostgreSQL stores", () => {
     );
     expect(await settlements.get(s.key)).toMatchObject({ state: "rejected", reopened: -1 });
     expect(await settlements.reopen(s.key, s.fingerprint, ["unsent"], 5_000)).toBeUndefined();
+    // Nor does a refusal move it to `refused`, which the pruner would delete (0086).
+    expect(
+      await settlements.refuse(s, { errorReason: "invalid_fee" }, ["unsent"], 5_000),
+    ).toMatchObject({ state: "rejected", errorReason: "unsent", reopened: -1 });
     // This release's own claims start at 0, and reopen.
     const t = settlement("2");
     await settlements.claim(t);
@@ -1037,6 +1041,7 @@ describe("PostgreSQL stores", () => {
           "0012_settlement_inner_hash",
           "0013_api_keys",
           "0014_api_key_copies",
+          "0015_settlement_refused",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1070,6 +1075,7 @@ describe("PostgreSQL stores", () => {
         "0012_settlement_inner_hash",
         "0013_api_keys",
         "0014_api_key_copies",
+        "0015_settlement_refused",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

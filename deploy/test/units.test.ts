@@ -121,6 +121,23 @@ describe("the signing helper's unit", () => {
     expect(flag("private-key")).toBe("%d/cloudwatch-agent-key");
   });
 
+  test("the probe writes its textfiles where node_exporter reads them", () => {
+    const dir = read("metrics/compose.yaml").match(
+      /--collector\.textfile\.directory=\/host(\S+)/,
+    )![1]!;
+    expect(read("ansible/playbook.yaml")).toContain(
+      `- { path: ${dir}, owner: root, mode: "0755" }`,
+    );
+    expect(read("libexec/x402-host-probe")).toContain(`: "\${X402_TEXTFILE:=${dir}}"`);
+  });
+
+  test("reads the metrics agent's certificate where the playbook puts it", () => {
+    const dest = read("ansible/playbook.yaml").match(
+      /- name: The metrics agent's certificate\n[\s\S]*?dest: (\S+)/,
+    )![1]!;
+    expect(read("libexec/x402-host-probe")).toContain(`: "\${X402_METRICS_CERT:=${dest}}"`);
+  });
+
   test("reads the one certificate path the probe watches", () => {
     expect(flag("certificate")).toBe("/srv/x402/production/cloudwatch-agent.crt");
     expect(read("libexec/x402-host-probe")).toContain(`: "\${X402_CERT:=${flag("certificate")}}"`);
@@ -189,6 +206,7 @@ describe("the units' output", () => {
     "x402-deploy@.service": "deploy",
     "x402-portal@.service": "portal",
     "x402-portal-deploy@.service": "portal-deploy",
+    "x402-metrics.service": "metrics-agent",
   };
   /** The oneshots that start no container of their own. */
   const deploys = ["x402-deploy@.service", "x402-portal-deploy@.service"];
@@ -215,7 +233,11 @@ describe("the units' output", () => {
   });
 
   test("every docker compose up writes raw lines", () => {
-    for (const file of Object.keys(writers).filter((f) => !deploys.includes(f))) {
+    // The metrics agent's file runs two containers: the prefix says which one wrote a line.
+    const prefixed = ["x402-metrics.service"];
+    for (const file of Object.keys(writers).filter(
+      (f) => !deploys.includes(f) && !prefixed.includes(f),
+    )) {
       const ups = settings(unit(file), "ExecStart").filter((e) => / up /.test(e));
       expect(ups, file).toHaveLength(1);
       expect(ups[0], file).toMatch(/ up --no-log-prefix --no-color /);

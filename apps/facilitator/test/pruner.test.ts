@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogFields, Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SpendStore } from "../src/ports/index.js";
-import { createPruner, type PrunerDeps } from "../src/pruner.js";
+import { REFUSED_HORIZON_MS, createPruner, type PrunerDeps } from "../src/pruner.js";
 import { testDatabase } from "./database.js";
 
 const DAY = 86_400_000;
 const NOW = 100 * DAY;
 const big = 10n ** 15n;
+const LEDGER = 1_000;
 
 const db = testDatabase();
 beforeEach(db.empty);
@@ -27,6 +28,8 @@ function recordingLogger() {
 
 function deps(overrides: Partial<PrunerDeps> = {}): PrunerDeps {
   return {
+    settlements: db.stores().settlements,
+    ledger: { network: "stellar:testnet", latest: async () => LEDGER },
     spend: db.stores().spend,
     rateLimits: db.stores().rateLimits,
     catalogAttempts: db.stores().catalogAttempts,
@@ -90,6 +93,77 @@ describe("pruner", () => {
     await createPruner(deps({ catalogAttempts })).runOnce();
     const { rows } = await db.pool.query("SELECT at FROM catalog_attempts");
     expect(rows).toEqual([{ at: String(NOW - 30 * DAY) }]);
+  });
+
+  const refusedAt = (nonce: string, createdAt: number) => ({
+    key: `stellar:testnet:GPAYER:${nonce}` as const,
+    network: "stellar:testnet" as const,
+    payer: "GPAYER",
+    nonce,
+    fingerprint: `fp-${nonce}`,
+    paymentPayload: { x402Version: 2 } as never,
+    paymentRequirements: { asset: "CASSET" } as never,
+    createdAt,
+  });
+  const FEE = "invalid_exact_stellar_payload_fee_exceeds_maximum";
+  const nonces = async () =>
+    (
+      await db.pool.query<{ nonce: string }>("SELECT nonce FROM settlements ORDER BY nonce")
+    ).rows.map((r) => r.nonce);
+
+  it("prunes refused settlements past their hour, and no other settlement (0086)", async () => {
+    const { settlements } = db.stores();
+    const refusal = { errorReason: FEE };
+    await settlements.refuse(refusedAt("1", NOW - REFUSED_HORIZON_MS - 1), refusal, [], NOW);
+    await settlements.refuse(refusedAt("2", NOW - REFUSED_HORIZON_MS), refusal, [], NOW);
+    await settlements.claim(refusedAt("3", NOW - DAY));
+    await createPruner(deps({ settlements })).runOnce();
+    expect(await nonces()).toEqual(["2", "3"]);
+  });
+
+  it("keeps a refused settlement past its hour until its expiration ledger has closed (0086, #205)", async () => {
+    // Signed for thousands of ledgers and refused for its fee: it can pass every check later.
+    const { settlements } = db.stores();
+    const old = NOW - DAY;
+    await settlements.refuse(
+      refusedAt("1", old),
+      { errorReason: FEE, expirationLedger: LEDGER },
+      [],
+      NOW,
+    );
+    await settlements.refuse(
+      refusedAt("2", old),
+      { errorReason: FEE, expirationLedger: LEDGER + 1 },
+      [],
+      NOW,
+    );
+    await createPruner(deps({ settlements })).runOnce();
+    expect(await nonces()).toEqual(["2"]);
+  });
+
+  it("prunes only refusals without an expiration ledger when the ledger read fails (0086, #205)", async () => {
+    const { settlements } = db.stores();
+    const old = NOW - DAY;
+    await settlements.refuse(refusedAt("1", old), { errorReason: FEE }, [], NOW);
+    await settlements.refuse(
+      refusedAt("2", old),
+      { errorReason: FEE, expirationLedger: 1 },
+      [],
+      NOW,
+    );
+    const { logger, events } = recordingLogger();
+    const metrics = memoryMetrics();
+    const latest = async (): Promise<number> => {
+      throw new Error("rpc down");
+    };
+    await createPruner(
+      deps({ settlements, ledger: { network: "stellar:testnet", latest }, logger, metrics }),
+    ).runOnce();
+    expect(await nonces()).toEqual(["2"]);
+    expect(events).toContainEqual(
+      expect.objectContaining({ level: "warn", event: "store_prune_ledger_failed" }),
+    );
+    expect(metrics.value("store_prune_failures_total", { table: "settlements_refused" })).toBe(1);
   });
 
   it("prunes quiescent spend_scopes rows, keeping those with an open breaker (0024)", async () => {

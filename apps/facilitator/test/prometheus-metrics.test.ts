@@ -7,6 +7,7 @@ import {
   prometheusMetrics,
   type MetricIssue,
 } from "../src/adapters/prometheus-metrics.js";
+import { rpcEndpointName } from "../src/logger.js";
 
 const NET = "stellar:testnet";
 const T = 1_700_000_000_000;
@@ -39,7 +40,12 @@ describe("prometheus adapter", () => {
     const { scrape } = setup();
     const s = scrape();
     for (const result of ["success", "error", "other"])
-      expect(s.get(`settlement_outcomes_total{network="${NET}",result="${result}"}`)).toBe(0);
+      for (const replay of ["true", "false", "other"])
+        expect(
+          s.get(
+            `settlement_outcomes_total{network="${NET}",result="${result}",replay="${replay}"}`,
+          ),
+        ).toBe(0);
     // A process-scoped counter has no network; the union of the sets' dims, `when` ignored.
     const http = [...s.keys()].filter((k) => k.startsWith("http_requests_total{"));
     expect(http).toHaveLength(6 * 12);
@@ -53,18 +59,79 @@ describe("prometheus adapter", () => {
   it("counts through the network child, drops log fields, and writes bad values as other", () => {
     const { m, scrape, issues } = setup();
     const net = m.for({ network: NET });
-    net.increment("settlement_outcomes_total", { result: "success", reason: "x" });
-    net.increment("settlement_outcomes_total", { result: "success" }, 2);
+    net.increment("settlement_outcomes_total", { result: "success", reason: "x", replay: "false" });
+    net.increment("settlement_outcomes_total", { result: "success", replay: "false" }, 2);
     m.increment("http_requests_total", { route: "/nope", status: "200" });
     m.increment("http_requests_total", { route: "/verify" });
     const s = scrape();
-    expect(s.get(`settlement_outcomes_total{network="${NET}",result="success"}`)).toBe(3);
+    expect(
+      s.get(`settlement_outcomes_total{network="${NET}",result="success",replay="false"}`),
+    ).toBe(3);
     expect(s.get('http_requests_total{route="other",status="200"}')).toBe(1);
     expect(s.get('http_requests_total{route="/verify",status="other"}')).toBe(1);
     expect(issues).toEqual([
       { kind: "unknown-value", name: "http_requests_total", label: "route", value: "/nope" },
       { kind: "missing-label", name: "http_requests_total", label: "status" },
     ]);
+  });
+
+  it("writes a field with closed values as a label, and leaves the other fields out", () => {
+    const { m, scrape, issues } = setup();
+    const net = m.for({ network: NET });
+    net.increment("signer_failures_total", { reason: "sealed", step: "sign" });
+    net.increment("signer_failures_total", { reason: "a new failure", step: "check" });
+    // `reason` has no closed values here: it stays in the app line.
+    net.increment("settlement_outcomes_total", { result: "error", reason: "x", replay: "true" });
+    const s = scrape();
+    expect(s.get(`signer_failures_total{network="${NET}",reason="sealed",step="sign"}`)).toBe(1);
+    expect(s.get(`signer_failures_total{network="${NET}",reason="other",step="check"}`)).toBe(1);
+    // Zero series for every closed field value too.
+    expect(s.get(`signer_failures_total{network="${NET}",reason="denied",step="check"}`)).toBe(0);
+    expect(s.get(`settlement_outcomes_total{network="${NET}",result="error",replay="true"}`)).toBe(
+      1,
+    );
+    expect([...s.keys()].some((k) => k.includes('reason="x"'))).toBe(false);
+    expect(issues).toEqual([
+      {
+        kind: "unknown-value",
+        name: "signer_failures_total",
+        label: "reason",
+        value: "a new failure",
+      },
+    ]);
+  });
+
+  it("labels a gauge with its field, the RPC by its index, and leaves numbers out", () => {
+    const { m, scrape } = setup();
+    const net = m.for({ network: NET });
+    net.registerGauge("rpc_on_fallback", () => ({
+      value: 1,
+      labels: { rpc: rpcEndpointName("https://rpc.example", 1) },
+    }));
+    net.registerGauge("pool_queued", () => ({ value: 2, labels: { channels: 5, busy: 3 } }));
+    const s = scrape();
+    expect(s.get(`rpc_on_fallback{network="${NET}",rpc="1"}`)).toBe(1);
+    expect(s.get(`pool_queued{network="${NET}"}`)).toBe(2);
+  });
+
+  it("keeps one stamp per gauge registration when its labels change", () => {
+    // After a failover `rpc` reads another index: the old index's stamp must go, or its age rule
+    // would fire while the gauge reads fine.
+    const { m, scrape, tick } = setup();
+    let index = 0;
+    m.for({ network: NET }).registerGauge("rpc_on_fallback", () => ({
+      value: index === 0 ? 0 : 1,
+      labels: { rpc: rpcEndpointName("https://rpc.example", index) },
+    }));
+    scrape();
+    index = 1;
+    tick(60_000);
+    const s = scrape();
+    const stamps = [...s.keys()].filter((k) => k.startsWith("rpc_on_fallback_last_read"));
+    expect(stamps).toEqual([
+      `rpc_on_fallback_last_read_timestamp_seconds{network="${NET}",rpc="1"}`,
+    ]);
+    expect(s.get(stamps[0]!)).toBe((T + 60_000) / 1000);
   });
 
   it("counts a line only when a when on a label that is no dim holds", () => {
@@ -80,9 +147,12 @@ describe("prometheus adapter", () => {
     net.increment("spend_budget_nearing_total", { budget: "asset" });
     expect(scrape().get(series)).toBe(2);
     // A when on a dim still counts every value, written as the label.
-    net.increment("settlement_refused_after_verify_total", { stage: "check" });
+    const reason = "settle_exact_stellar_fee_exceeds_maximum";
+    net.increment("settlement_refused_after_verify_total", { stage: "check", reason });
     expect(
-      scrape().get(`settlement_refused_after_verify_total{network="${NET}",stage="check"}`),
+      scrape().get(
+        `settlement_refused_after_verify_total{network="${NET}",stage="check",reason="${reason}"}`,
+      ),
     ).toBe(1);
   });
 
@@ -107,9 +177,11 @@ describe("prometheus adapter", () => {
     net.registerGauge("pool_queued", () => {
       throw new Error("read failed");
     });
-    net.increment("settlement_outcomes_total", { result: "nope" });
+    net.increment("settlement_outcomes_total", { result: "nope", replay: "false" });
     const text = m.render();
-    expect(text).toContain(`settlement_outcomes_total{network="${NET}",result="other"} 1`);
+    expect(text).toContain(
+      `settlement_outcomes_total{network="${NET}",result="other",replay="false"} 1`,
+    );
     expect(text).not.toContain("pool_queued{");
   });
 

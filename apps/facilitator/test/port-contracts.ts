@@ -536,6 +536,216 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
       });
     });
 
+    describe("refuse (0086)", () => {
+      const UNSENT = ["unsent_a"];
+      const FEE = { errorReason: "invalid_fee", errorMessage: "too high", errorDetail: "our_code" };
+
+      it("inserts a refused record with the checks' reason and message, no hash, never reopening", async () => {
+        const s = settlement("1");
+        const record = {
+          ...s,
+          state: "refused",
+          hashes: [],
+          version: 0,
+          reopened: 0,
+          errorReason: "invalid_fee",
+          errorMessage: "too high",
+          errorDetail: "our_code",
+          createdAt: 1_000,
+          updatedAt: 2_000,
+        };
+        expect(await store.refuse(s, FEE, UNSENT, 2_000)).toEqual(record);
+        expect(await store.get(s.key)).toEqual(record);
+        // Final: no transition, no reopen, no hash, and a claim finds it.
+        expect(
+          await store.transition(s.key, "refused", { state: "success", updatedAt: 3_000 }),
+        ).toBeUndefined();
+        expect(await store.reopen(s.key, s.fingerprint, ["invalid_fee"], 3_000)).toBeUndefined();
+        expect(await store.addHash(s.key, "h1", LEASE, 3_000)).toBe(false);
+        expect(await store.claim(s)).toEqual({ claimed: false, existing: record });
+        expect(await store.listNonFinal("stellar:testnet")).toEqual([]);
+      });
+
+      it("keeps the message empty when the checks gave none", async () => {
+        const s = settlement("1");
+        const record = await store.refuse(s, { errorReason: "invalid_x" }, UNSENT, 2_000);
+        expect(record).not.toHaveProperty("errorMessage");
+        expect(record).not.toHaveProperty("errorDetail");
+      });
+
+      it("takes no payer and asset slot, and never waits for one", async () => {
+        const open = settlement("1");
+        await store.claim(open);
+        // Another key of the same payer and asset is settling: a claim would be busy.
+        expect(await store.refuse(settlement("2"), FEE, UNSENT, 2_000)).toMatchObject({
+          state: "refused",
+        });
+        await store.transition(open.key, "claimed", { state: "success", updatedAt: 3_000 });
+        expect(await store.claim(settlement("3"))).toMatchObject({ claimed: true });
+      });
+
+      it("moves a reopenable rejected record of the same payment to refused, once", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        await store.transition(s.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 2_000,
+        });
+        expect(await store.refuse(s, FEE, UNSENT, 3_000)).toMatchObject({
+          state: "refused",
+          errorReason: "invalid_fee",
+          errorMessage: "too high",
+          version: 1,
+          reopened: 0,
+          createdAt: 1_000,
+          updatedAt: 3_000,
+        });
+        expect(await store.reopen(s.key, s.fingerprint, UNSENT, 4_000)).toBeUndefined();
+      });
+
+      it("leaves any other record as it is: open, sent, another reason or another payload", async () => {
+        const open = settlement("1");
+        await store.claim(open);
+        const sent = settlement("2");
+        await store.claim(sent);
+        await store.addHash(sent.key, "h2", LEASE, 1_500);
+        await store.transition(sent.key, "signed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 2_000,
+        });
+        const other = settlement("3");
+        await store.claim(other);
+        await store.transition(other.key, "claimed", {
+          state: "rejected",
+          errorReason: "settle_exact_stellar_refused",
+          updatedAt: 2_000,
+        });
+        const unsent = settlement("4");
+        await store.claim(unsent);
+        await store.transition(unsent.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 2_000,
+        });
+        for (const [s, state] of [
+          [open, "claimed"],
+          [sent, "rejected"],
+          [other, "rejected"],
+        ] as const) {
+          const before = await store.get(s.key);
+          expect(await store.refuse(s, FEE, UNSENT, 3_000)).toEqual(before);
+          expect(before?.state).toBe(state);
+        }
+        const before = await store.get(unsent.key);
+        expect(
+          await store.refuse({ ...unsent, fingerprint: "fp-other" }, FEE, UNSENT, 3_000),
+        ).toEqual(before);
+      });
+
+      it("lets exactly one of a refuse and a reopen of the same record win", async () => {
+        for (const nonce of ["1", "2", "3", "4", "5"]) {
+          const s = settlement(nonce);
+          await store.claim(s);
+          await store.transition(s.key, "claimed", {
+            state: "rejected",
+            errorReason: "unsent_a",
+            updatedAt: 2_000,
+          });
+          const [refused, reopened] = await Promise.all([
+            store.refuse(s, FEE, UNSENT, 3_000),
+            store.reopen(s.key, s.fingerprint, UNSENT, 3_000),
+          ]);
+          const record = await store.get(s.key);
+          if (record?.state === "refused") {
+            expect(reopened).toBeUndefined();
+          } else {
+            expect(record?.state).toBe("claimed");
+            expect(reopened).toMatchObject({ state: "claimed" });
+            expect(refused).toMatchObject({ state: "claimed" });
+          }
+          // Free the slot for the next payment of the same payer and asset.
+          if (record?.state === "claimed")
+            await store.transition(s.key, "claimed", {
+              state: "rejected",
+              errorReason: "x",
+              updatedAt: 4_000,
+            });
+        }
+      });
+
+      it("is never a transition's target: only refuse writes it", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        expect(
+          await store.transition(s.key, "claimed", {
+            state: "refused",
+            errorReason: "invalid_fee",
+            updatedAt: 2_000,
+          }),
+        ).toBeUndefined();
+        expect(await store.get(s.key)).toMatchObject({ state: "claimed" });
+      });
+
+      it("prunes only refused records created before the cutoff, in batches", async () => {
+        for (const nonce of ["1", "2", "3"])
+          await store.refuse({ ...settlement(nonce), createdAt: 1_000 }, FEE, UNSENT, 1_000);
+        await store.refuse({ ...settlement("4"), createdAt: 9_000 }, FEE, UNSENT, 9_000);
+        const kept = settlement("5");
+        await store.claim(kept);
+        await store.transition(kept.key, "claimed", {
+          state: "rejected",
+          errorReason: "invalid_like",
+          updatedAt: 2_000,
+        });
+        expect(await store.pruneRefusals(5_000, undefined, 2)).toBe(2);
+        expect(await store.pruneRefusals(5_000, undefined, 2)).toBe(1);
+        expect(await store.pruneRefusals(5_000, undefined, 2)).toBe(0);
+        expect(await store.get(settlement("4").key)).toMatchObject({ state: "refused" });
+        expect(await store.get(kept.key)).toMatchObject({ state: "rejected" });
+      });
+
+      it("keeps a refused record until its expiration ledger has closed on its network", async () => {
+        const at = (nonce: string, expirationLedger: number) =>
+          store.refuse(
+            { ...settlement(nonce), createdAt: 1_000 },
+            { ...FEE, expirationLedger },
+            UNSENT,
+            1_000,
+          );
+        await at("1", 99);
+        await at("2", 100);
+        await at("3", 101);
+        const testnet = { network: "stellar:testnet" as const, latest: 100 };
+        // No ledger read: only records without an expiration go.
+        expect(await store.pruneRefusals(5_000, undefined, 10)).toBe(0);
+        // Another network's ledger counts for nothing here.
+        expect(
+          await store.pruneRefusals(5_000, { ...testnet, network: "stellar:pubnet" }, 10),
+        ).toBe(0);
+        // Not before the hour either.
+        expect(await store.pruneRefusals(1_000, testnet, 10)).toBe(0);
+        expect(await store.pruneRefusals(5_000, testnet, 10)).toBe(2);
+        expect(await store.get(settlement("3").key)).toMatchObject({ state: "refused" });
+        expect(await store.pruneRefusals(5_000, { ...testnet, latest: 101 }, 10)).toBe(1);
+      });
+
+      it("keeps the expiration ledger when it moves a rejected record to refused", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        await store.transition(s.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 2_000,
+        });
+        await store.refuse(s, { ...FEE, expirationLedger: 200 }, UNSENT, 3_000);
+        const testnet = { network: "stellar:testnet" as const, latest: 199 };
+        expect(await store.pruneRefusals(5_000, testnet, 10)).toBe(0);
+        expect(await store.pruneRefusals(5_000, { ...testnet, latest: 200 }, 10)).toBe(1);
+      });
+    });
+
     it("keeps a fee at the int64 maximum exactly", async () => {
       const { key } = settlement("1");
       await store.claim(settlement("1"));

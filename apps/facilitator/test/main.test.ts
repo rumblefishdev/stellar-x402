@@ -616,9 +616,10 @@ describe("main()", () => {
       const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
       const prune = vi.spyOn(app.stores.spend, "prune");
       try {
-        // A tick comes within a minute, ±10%.
+        // A tick comes within a minute, ±10%. It reads the latest ledger before any table, a
+        // real request to the RPC that fake timers don't wait for (0156).
         await vi.advanceTimersByTimeAsync(66_000);
-        expect(prune).toHaveBeenCalled();
+        await vi.waitFor(() => expect(prune).toHaveBeenCalled());
       } finally {
         await app.close();
       }

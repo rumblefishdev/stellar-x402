@@ -13,6 +13,7 @@ import type { Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
+import { StoreUnavailableError } from "../settlement/refusals.js";
 import type { Settle } from "../settlement/settle.js";
 import { TRUSTLINE_REASONS } from "../settlement/trustline.js";
 import {
@@ -254,6 +255,17 @@ export function createApp({
     try {
       response = await verify(request.paymentPayload, request.paymentRequirements, trace);
     } catch (error) {
+      // The settlement store didn't answer (0086): a refusal it couldn't record would invite a
+      // second signature, so there is no verdict, and the same payment may come again.
+      if (error instanceof StoreUnavailableError) {
+        logger.warn("verify_store_unavailable", {
+          network: request.paymentRequirements.network,
+          error,
+        });
+        res.setHeader("Retry-After", `${RPC_UNAVAILABLE_RETRY_AFTER_S}`);
+        res.status(503).json({ error: "store_unavailable" });
+        return;
+      }
       // `FallbackRpc` turns its own timeouts into `RpcUnavailableError` once every URL failed.
       const noAnswer =
         error instanceof UpstreamTimeoutError || error instanceof RpcUnavailableError;

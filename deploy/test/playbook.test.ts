@@ -122,6 +122,17 @@ describe("the playbook", () => {
     );
   });
 
+  test("restarts a running metrics agent when its config or certificate changed", () => {
+    for (const name of [
+      "The metrics agent's compose file and config",
+      "The metrics agent's certificate",
+    ])
+      expect(task(name), name).toContain("notify: Restart the metrics agent if it runs");
+    expect(PLAYBOOK).toContain(
+      "ansible.builtin.command: systemctl try-restart x402-metrics.service",
+    );
+  });
+
   test("starts only the watchdog's, the probe's and the rotation's timers", () => {
     const started = [...TASKS.values()].filter((t) => /state: started/.test(t));
     const units = started.flatMap((t) => [
@@ -221,6 +232,12 @@ describe("check-agent-certificate.sh", () => {
   const committed = `${DEPLOY}/ansible/files/cloudwatch-agent-${ENV}.crt`;
   test.skipIf(!existsSync(committed))("passes the committed certificate", () => {
     const r = run(committed);
+    expect([r.status, r.stderr]).toEqual([0, ""]);
+  });
+
+  const metrics = `${DEPLOY}/ansible/files/metrics-agent-${ENV}.crt`;
+  test.skipIf(!existsSync(metrics))("passes the committed metrics agent's certificate", () => {
+    const r = run(metrics, `x402-metrics-agent-${ENV}`);
     expect([r.status, r.stderr]).toEqual([0, ""]);
   });
 });

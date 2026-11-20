@@ -54,6 +54,7 @@ import { SETTLE_REASONS } from "../src/settlement/reasons.js";
 import {
   LeaseLostError,
   PayerNotAuthorizedError,
+  REFUSAL_HORIZON_LEDGERS,
   createSettler,
   expectTransfer,
   fingerprintOf,
@@ -711,7 +712,7 @@ describe("createSettler", () => {
     expect(await store.listNonFinal(network)).toEqual([]);
   });
 
-  it("answers a failed check with its reason, without claiming", async () => {
+  it("answers a failed check with its reason and records it refused, without claiming (0086)", async () => {
     const check: Check = async () => ({
       response: {
         isValid: false,
@@ -720,14 +721,84 @@ describe("createSettler", () => {
         payer,
       },
     });
-    const { settle, submit } = setup(landing(), { check });
+    const { settle, submit, store } = setup(landing(), { check });
     expect((await settle(payload(), requirements)).response).toMatchObject({
       success: false,
       errorReason: "invalid_exact_stellar_payload_wrong_amount",
-      errorMessage: "what the check found",
+      errorMessage: `${untilExpiry.errorMessage}; what the check found`,
+      extra: untilExpiry.extra,
       payer,
     });
     expect(submit).not.toHaveBeenCalled();
+    expect(await store.get(key)).toMatchObject({
+      state: "refused",
+      errorReason: "invalid_exact_stellar_payload_wrong_amount",
+      errorMessage: "what the check found",
+      hashes: [],
+      reopened: 0,
+    });
+    // It holds no slot: no record is left open.
+    expect(await store.listNonFinal(network)).toEqual([]);
+  });
+
+  it("records nothing for an auth entry past the horizon, and still gives the ended advice (0156)", async () => {
+    const check: Check = async () => ({
+      response: {
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+        invalidMessage: "what the check found",
+        payer,
+      },
+    });
+    const ledgersLeft = REFUSAL_HORIZON_LEDGERS + 1;
+    const { settle, submit, store, lines } = setup(landing(), {
+      check,
+      latestLedger: async () => EXPIRATION - ledgersLeft,
+    });
+    lines.length = 0;
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      success: false,
+      errorReason: "invalid_exact_stellar_payload_wrong_amount",
+      errorMessage: `${untilExpiry.errorMessage}; what the check found`,
+      extra: untilExpiry.extra,
+      payer,
+    });
+    expect(submit).not.toHaveBeenCalled();
+    expect(await store.get(key)).toBeUndefined();
+    expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+      expect.objectContaining({
+        event: "settlement_refusal_unrecorded",
+        settlementKey: key,
+        expirationLedger: EXPIRATION,
+        ledgersLeft,
+      }),
+    );
+  });
+
+  it.each([
+    ["exactly at the horizon is recorded", REFUSAL_HORIZON_LEDGERS, "refused"],
+    ["one past it is not", REFUSAL_HORIZON_LEDGERS + 1, undefined],
+  ] as const)("an auth entry %s, with one ledger read (0156)", async (_, ledgersLeft, state) => {
+    const check: Check = async () => ({
+      response: { isValid: false, invalidReason: "invalid_exact_stellar_payload_x", payer },
+    });
+    const latestLedger = vi.fn(async () => EXPIRATION - ledgersLeft);
+    const { settle, store } = setup(landing(), { check, latestLedger });
+    await settle(payload(), requirements);
+    expect((await store.get(key))?.state).toBe(state);
+    expect(latestLedger).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the refusal when the ledger can't be read, as before 0156", async () => {
+    const check: Check = async () => ({
+      response: { isValid: false, invalidReason: "invalid_exact_stellar_payload_x", payer },
+    });
+    const { settle, store } = setup(landing(), {
+      check,
+      latestLedger: () => Promise.reject(new Error("down")),
+    });
+    await settle(payload(), requirements);
+    expect(await store.get(key)).toMatchObject({ state: "refused" });
   });
 
   it("answers settlement_pending with the hash when the pool reports pending, and stays open", async () => {
@@ -1144,6 +1215,7 @@ describe("createSettler", () => {
       errorReason: "invalid_exact_stellar_payload_wrong_recipient",
       transaction: "",
       network,
+      ...untilExpiry,
     });
     // As the route sends it: `payer` is left out, not a number.
     expect(JSON.parse(JSON.stringify(response))).not.toHaveProperty("payer");
@@ -2728,7 +2800,7 @@ describe("createSettler", () => {
       expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
     });
 
-    it("answers the checks' refusal and leaves the record when the payment no longer passes them", async () => {
+    it("answers the checks' refusal and moves the record to refused when the payment no longer passes them (0086)", async () => {
       let failing = false;
       const check = vi.fn<Check>(async (p, r) =>
         failing
@@ -2749,13 +2821,19 @@ describe("createSettler", () => {
         success: false,
         errorReason: "invalid_exact_stellar_payload_simulation_failed",
       });
-      expect(settled).toMatchObject({ key, replay: true });
+      expect(settled).toMatchObject({ key });
       expect(submit).toHaveBeenCalledTimes(1);
       expect(await store.get(key)).toMatchObject({
-        state: "rejected",
-        errorReason: SETTLE_REASONS.noChannelInTime,
+        state: "refused",
+        errorReason: "invalid_exact_stellar_payload_simulation_failed",
         reopened: 0,
       });
+      // It passes again, but never reopens.
+      failing = false;
+      expect((await settle(payload(), requirements)).response).toMatchObject({
+        errorReason: "invalid_exact_stellar_payload_simulation_failed",
+      });
+      expect(submit).toHaveBeenCalledTimes(1);
     });
 
     it("never reopens a record with a hash, and answers it as stored", async () => {
@@ -3063,7 +3141,7 @@ describe("an answer that ended a payment (0082)", () => {
     expect((await settle(payload(), requirements)).response).toMatchObject(expected);
   });
 
-  it("answers the checks' refusal of a reopen as nothing sent, and a later repeat settles", async () => {
+  it("records the checks' refusal of a reopen as refused, so a later repeat never settles (0086)", async () => {
     const check = vi.fn(passing);
     let calls = 0;
     const { settle, store } = setup(
@@ -3084,16 +3162,20 @@ describe("an answer that ended a payment (0082)", () => {
     });
     const refused = await settle(payload(), requirements);
     // The checks' message stays last: a client reads the archived entries at its end (0066).
-    expect(refused.response).toMatchObject({
+    const expected = {
       errorReason: "invalid_exact_stellar_payload_fee_exceeds_maximum",
-      errorMessage:
-        `nothing was sent: repeat the same payment while the latest ledger is at most ` +
-        `${EXPIRATION - 2}; once the network is past ledger ${EXPIRATION}, sign a new payment ` +
-        `instead; lists 1 archived entry to restore: AAAA`,
-      extra: { retryable: true, expirationLedger: EXPIRATION },
+      errorMessage: `${untilExpiry.errorMessage}; lists 1 archived entry to restore: AAAA`,
+      extra: untilExpiry.extra,
+    };
+    expect(refused.response).toMatchObject(expected);
+    expect(await store.get(key)).toMatchObject({
+      state: "refused",
+      errorReason: "invalid_exact_stellar_payload_fee_exceeds_maximum",
+      reopened: 0,
     });
-    expect(await store.get(key)).toMatchObject({ errorReason: SETTLE_REASONS.noChannels });
-    expect((await settle(payload(), requirements)).response).toMatchObject({ success: true });
+    // Fees dropped: the checks would pass, but the payment is answered from its record.
+    expect((await settle(payload(), requirements)).response).toMatchObject(expected);
+    expect(check).toHaveBeenCalledTimes(2);
   });
 
   it("adds no advice when the checks refuse a reopen because another transaction used the nonce (0141)", async () => {
@@ -3155,16 +3237,18 @@ describe("an answer that ended a payment (0082)", () => {
     expect(response.errorMessage).toBeUndefined();
   });
 
-  it("leaves a first payment the checks refused as it was, with no ledger read", async () => {
+  it("gives a first payment the checks refused the ended advice, with one ledger read (0086)", async () => {
     const latestLedger = vi.fn(async () => CURRENT);
     const check: Check = async () => ({
       response: { isValid: false, invalidReason: "invalid_exact_stellar_payload_x", payer },
     });
     const { settle } = setup(landing(), { check, latestLedger });
     const { response } = await settle(payload(), requirements);
-    expect(response).toMatchObject({ errorReason: "invalid_exact_stellar_payload_x" });
-    expect(response).not.toHaveProperty("extra");
-    expect(latestLedger).not.toHaveBeenCalled();
+    expect(response).toMatchObject({
+      errorReason: "invalid_exact_stellar_payload_x",
+      ...untilExpiry,
+    });
+    expect(latestLedger).toHaveBeenCalledTimes(1);
   });
 
   it("reads the latest ledger once for one answer", async () => {
@@ -3184,6 +3268,64 @@ describe("an answer that ended a payment (0082)", () => {
     expect(response).toMatchObject({ errorReason });
     expect(response).not.toHaveProperty("extra");
     expect(latestLedger).not.toHaveBeenCalled();
+  });
+});
+
+describe("a check refusal (0086)", () => {
+  const FEE = "invalid_exact_stellar_payload_fee_exceeds_maximum";
+  const feeSpike = () => {
+    let spike = true;
+    const check = vi.fn<Check>(async (p, r) =>
+      spike
+        ? { response: { isValid: false, invalidReason: FEE, invalidMessage: "too high", payer } }
+        : passing(p, r),
+    );
+    return { check, drop: () => (spike = false) };
+  };
+
+  it("never settles the refused payment once fees drop, while a new signature settles", async () => {
+    const { check, drop } = feeSpike();
+    const { settle, submit, store } = setup(landing(), { check });
+    const first = await settle(payload(), requirements);
+    expect(first.response).toMatchObject({ errorReason: FEE, ...{ extra: untilExpiry.extra } });
+    drop();
+    // The seller asked for a new signature: P2, another nonce, settles.
+    const p2 = payload([authEntry(payer, "8")]);
+    expect((await settle(p2, requirements)).response).toMatchObject({ success: true });
+    // The retry queue sends P1 again: it is answered from its record and never submitted.
+    const again = await settle(payload(), requirements);
+    expect(again.response).toMatchObject({
+      success: false,
+      errorReason: FEE,
+      errorMessage: `${untilExpiry.errorMessage}; too high`,
+    });
+    expect(again.replay).toBe(true);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(await store.get(key)).toMatchObject({ state: "refused", errorReason: FEE });
+  });
+
+  it("answers another payload with the refused key nonce_already_used, as AD-6 does", async () => {
+    const { check, drop } = feeSpike();
+    const { settle, submit } = setup(landing(), { check });
+    await settle(payload(), requirements);
+    drop();
+    const other = { ...requirements, extra: { merchant: "another" } };
+    expect((await settle({ ...payload(), accepted: other }, other)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.nonceUsed,
+    });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("throws, for the route's 500, when the refusal can't be recorded", async () => {
+    const { check } = feeSpike();
+    const real = db.stores().settlements;
+    const store = Object.assign(Object.create(real) as typeof real, {
+      refuse: async () => {
+        throw new Error("store down");
+      },
+    });
+    const { settle } = setup(landing(), { check, store });
+    await expect(settle(payload(), requirements)).rejects.toThrow("store down");
   });
 });
 

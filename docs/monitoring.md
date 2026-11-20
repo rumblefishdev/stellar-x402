@@ -715,7 +715,8 @@ the AWS metrics the alarms read. What each one measures and where it comes from 
 [G-metrics](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
 set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Logs Insights or in
 the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
-lacks.
+lacks. The Dimensions column is CloudWatch's. In Prometheus (0139) a series also carries each field
+the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_total`'s `replay`.
 
 | Metric                                      | Namespace          | Kind, unit     | Dimensions                                               | Alarms                                                                                                        |
 | ------------------------------------------- | ------------------ | -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -757,6 +758,8 @@ lacks.
 | `settlement_oldest_open_seconds`            | `x402-facilitator` | gauge, Seconds | `network`                                                | [gauges-silent](#gauges-silent), [pending](#pending)                                                          |
 | `pool_queued`                               | `x402-facilitator` | gauge, Count   | `network`                                                | [gauges-silent](#gauges-silent), [queue-waiting](#queue-waiting)                                              |
 | `pool_quarantined`                          | `x402-facilitator` | gauge, Count   | `network`                                                | [channel-quarantined](#channel-quarantined), [gauges-silent](#gauges-silent)                                  |
+| `pool_channels`                             | `x402-facilitator` | gauge, Count   | `network`                                                | none (registered at the 0139 switch)                                                                          |
+| `pool_busy`                                 | `x402-facilitator` | gauge, Count   | `network`                                                | none (registered at the 0139 switch)                                                                          |
 | `rpc_on_fallback`                           | `x402-facilitator` | gauge, None    | `network`                                                | [gauges-silent](#gauges-silent), [rpc-on-fallback](#rpc-on-fallback)                                          |
 | `rpc_stalled_seconds`                       | `x402-facilitator` | gauge, Seconds | `network`                                                | [gauges-silent](#gauges-silent), [rpc-stalled](#rpc-stalled)                                                  |
 | `balance_reading_age_seconds`               | `x402-facilitator` | gauge, Seconds | `network`                                                | [balance-stale](#balance-stale), [gauges-silent](#gauges-silent)                                              |

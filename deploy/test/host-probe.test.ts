@@ -6,8 +6,10 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -31,6 +33,8 @@ const dir = mkdtempSync(join(tmpdir(), "x402-probe-"));
 const fakes = join(dir, "bin");
 const stamps = join(dir, "last-ok");
 const cert = join(dir, "agent.crt");
+// The metrics agent's, with another end date, so each labelled sample is checked against its file.
+const metricsCert = join(dir, "metrics-agent.crt");
 const credentials = join(dir, "credentials");
 // A unix socket path holds at most 108 bytes; relative to the cwd keeps it short anywhere.
 const socket = relative(process.cwd(), join(dir, "bao.sock"));
@@ -92,6 +96,27 @@ exec ${realDate} "$@"`,
     ],
     { stdio: "ignore" },
   );
+  execFileSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "ec",
+      "-pkeyopt",
+      "ec_paramgen_curve:P-256",
+      "-nodes",
+      "-keyout",
+      "/dev/null",
+      "-days",
+      "200",
+      "-subj",
+      "/CN=x402-metrics-agent-test",
+      "-out",
+      metricsCert,
+    ],
+    { stdio: "ignore" },
+  );
   const end = execFileSync("openssl", ["x509", "-noout", "-enddate", "-in", cert]).toString();
   certEnd = Math.floor(Date.parse(end.replace("notAfter=", "")) / 1000);
   writeFileSync(credentials, "[AmazonCloudWatchAgent]\naws_access_key_id = x\n");
@@ -105,6 +130,8 @@ afterAll(async () => {
 
 interface Run {
   values: Record<string, number>;
+  /** node_exporter's textfiles after the run, by file name. */
+  textfiles: Record<string, string>;
   lines: string[];
   objects: Record<string, unknown>[];
   stdout: string;
@@ -112,7 +139,11 @@ interface Run {
   status: number | null;
 }
 // Async: the fake OpenBao answers on this process's event loop, which spawnSync would block.
-async function probe(env: Record<string, string> = {}, args: string[] = []): Promise<Run> {
+async function probe(
+  env: Record<string, string> = {},
+  args: string[] = [],
+  textfileDir = mkdtempSync(join(dir, "textfile-")),
+): Promise<Run> {
   const out = join(dir, `emf-${Math.random().toString(36).slice(2)}.log`);
   writeFileSync(out, "");
   const child = spawn("sh", [PROBE, ...args], {
@@ -123,6 +154,8 @@ async function probe(env: Record<string, string> = {}, args: string[] = []): Pro
       X402_STAMPS: stamps,
       X402_CERT: cert,
       X402_CREDENTIALS: credentials,
+      X402_TEXTFILE: textfileDir,
+      X402_METRICS_CERT: metricsCert,
       FAKE_PG_ID: "pg",
       FAKE_PSQL: "0 42",
       ...env,
@@ -140,7 +173,15 @@ async function probe(env: Record<string, string> = {}, args: string[] = []): Pro
     const name = metricOf(o).Name;
     values[name] = o[name] as number;
   }
-  return { values, lines, objects, stdout, stderr, status };
+  let textfiles: Record<string, string> = {};
+  try {
+    textfiles = Object.fromEntries(
+      readdirSync(textfileDir).map((f) => [f, readFileSync(join(textfileDir, f), "utf8")]),
+    );
+  } catch {
+    /* a run whose directory doesn't exist */
+  }
+  return { values, textfiles, lines, objects, stdout, stderr, status };
 }
 type Aws = {
   Timestamp: number;
@@ -318,6 +359,79 @@ describe.skipIf(process.platform !== "linux")("x402-host-probe", () => {
     test("refuses to run outside systemd", async () => {
       const r = await probe({}, ["stopped"]);
       expect([r.status, r.lines]).toEqual([2, []]);
+    });
+  });
+
+  describe("node_exporter's textfiles", () => {
+    /** A textfile's samples, keyed by `name{labels}`. */
+    const samples = (text: string) =>
+      Object.fromEntries(
+        text
+          .split("\n")
+          .filter((l) => l && !l.startsWith("#"))
+          .map((l) => [l.slice(0, l.lastIndexOf(" ")), Number(l.slice(l.lastIndexOf(" ") + 1))]),
+      );
+
+    test("a run writes its gauges with the EMF values, each certificate by name", async () => {
+      const r = await probe();
+      expect(Object.keys(r.textfiles).sort()).toEqual([
+        "facilitator_failures_total.prom",
+        "host-probe.prom",
+        "watchdog_restarts_total.prom",
+      ]);
+      const s = samples(r.textfiles["host-probe.prom"]!);
+      for (const name of PROBE_NAMES.filter((n) => n !== "certificate_days_left"))
+        expect(s[name], name).toBe(r.values[name]);
+      const days = r.values["certificate_days_left"];
+      expect(s['certificate_days_left{certificate="cloudwatch-agent"}']).toBe(days);
+      // 365 against 200 days, made a moment apart: each sample read its own file.
+      const gap = days! - s['certificate_days_left{certificate="metrics-agent"}']!;
+      expect(gap === 164 || gap === 165, `gap ${gap}`).toBe(true);
+      expect(s["certificate_days_left"]).toBeUndefined();
+    });
+
+    test("each counter starts at 0 and keeps its total across runs", async () => {
+      const t = mkdtempSync(join(dir, "textfile-"));
+      const total = (r: Run, name: string) => samples(r.textfiles[`${name}.prom`]!)[name];
+      let r = await probe({}, [], t);
+      expect([total(r, "watchdog_restarts_total"), total(r, "facilitator_failures_total")]).toEqual(
+        [0, 0],
+      );
+      expect(r.textfiles["watchdog_restarts_total.prom"]).toMatch(
+        /^# TYPE watchdog_restarts_total counter\n/,
+      );
+      await probe({}, ["count", "watchdog_restarts_total"], t);
+      await probe({}, ["count", "watchdog_restarts_total"], t);
+      await probe({ SERVICE_RESULT: "exit-code" }, ["stopped"], t);
+      r = await probe({}, [], t);
+      expect([total(r, "watchdog_restarts_total"), total(r, "facilitator_failures_total")]).toEqual(
+        [2, 1],
+      );
+      // A clean stop counts nothing.
+      r = await probe({ SERVICE_RESULT: "success" }, ["stopped"], t);
+      expect(total(r, "facilitator_failures_total")).toBe(1);
+      expect(Object.keys(r.textfiles).every((f) => f.endsWith(".prom"))).toBe(true);
+    });
+
+    test("rewrites every counter file on each run, keeping its total", async () => {
+      // ADR 0011's age rule reads every textfile: an event-only file would go stale.
+      const t = mkdtempSync(join(dir, "textfile-"));
+      await probe({}, [], t);
+      await probe({}, ["count", "watchdog_restarts_total"], t);
+      const file = join(t, "watchdog_restarts_total.prom");
+      utimesSync(file, 1_000, 1_000);
+      const r = await probe({}, [], t);
+      expect(statSync(file).mtimeMs).toBeGreaterThan(1_000_000);
+      expect(samples(r.textfiles["watchdog_restarts_total.prom"]!)["watchdog_restarts_total"]).toBe(
+        1,
+      );
+    });
+
+    test("a directory it can't write fails the run, and the EMF lines still go out", async () => {
+      const r = await probe({}, [], join(dir, "no-such-dir"));
+      expect(r.status).toBe(1);
+      expect(r.lines).toHaveLength(PROBE_NAMES.length);
+      expect(r.stderr).toMatch(/can't write host-probe\.prom/);
     });
   });
 

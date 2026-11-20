@@ -47,6 +47,7 @@ export const FILES: readonly FileRow[] = [
   { path: `${ENV}/portal.log`, group: "app", stream: "portal", emf: false },
   { path: `${ENV}/portal-deploy.log`, group: "app", stream: "portal-deploy", emf: false },
   { path: "openbao/openbao.log", group: "app", stream: "openbao", emf: false },
+  { path: "metrics/agent.log", group: "app", stream: "metrics-agent", emf: false },
   { path: "host/metrics.log", group: "metrics", stream: "host", filter: "include-emf", emf: true },
 ];
 

@@ -9,8 +9,8 @@ related_adr: ["0011"]
 related_tasks: ["0138", "0027", "0089", "0109", "0118", "0125", "0127"]
 tags: [monitoring, alarms, cost, priority-medium, effort-large, platform]
 links:
-  - ../../../docs/monitoring.md
-  - ../../../docs/adr/0011-facilitator-hosting.md
+  - ../../../../docs/monitoring.md
+  - ../../../../docs/adr/0011-facilitator-hosting.md
 history:
   - date: "2026-11-12"
     status: backlog
@@ -23,6 +23,13 @@ history:
     note: >
       Started with the monitoring VM, bought on 2026-11-17 (CPX12 in Helsinki). The decision is
       the ADR 0011 amendment in PR #186.
+  - date: "2026-11-19"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Step 4: the log-only fields of 21 metrics become labels through the catalog's
+      `fieldValues`, the rest stay in app lines, and Adam's three points from #200 are recorded
+      ([S-log-only-fields](notes/S-log-only-fields.md)).
 ---
 
 # Carry out the monitoring decision for the facilitator, with every alarm fired again
@@ -46,7 +53,7 @@ losing an alarm that protects money or a payment.
 ## Implementation Plan
 
 - Change the metrics, logs and alarms as 0138 decided, behind the typed metric catalog
-  ([order](0138_RESEARCH_monitoring-cost-and-grafana-decision/notes/S-decision-draft.md#order-0139)).
+  ([order](../../archive/0138_RESEARCH_monitoring-cost-and-grafana-decision/notes/S-decision-draft.md#order-0139)).
 - Switch in one change: the rules go on, and the EMF adapter and the old CloudWatch alarms go
   off. No period runs both (decided 2026-11-17 in 0138). Every rule is drilled right after the
   switch, and one that fails its drill is fixed forward.
