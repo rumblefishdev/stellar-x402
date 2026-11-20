@@ -62,6 +62,8 @@ must not look like a copy of one.
 | 10 | The method is the file's; without one, GET, then once more with the method the seller's 402 declares (measured: 103 of 784 listings in a sample need the second request) | agent | beyond it | no standard | | |
 | 11 | The seller's file is read up to 512 KiB, twice the largest measured (219,455 B) | agent | beyond it | no standard | | |
 | 12 | The seed asks each host more slowly than the 30-a-minute check budget, so checks after real payments keep their share; the run report lists every `payTo` seen on more than one host | agent | beyond it | no standard | | |
+| 13 | The seed is an operator command, `pnpm seed <hosts file>`, like `pnpm keys`; the hosts file is read from the path given and stays outside git | owner, 2026-11-20 | matches | no standard | | |
+| 14 | A seeded listing carries no mark of its own; whether anyone paid through us comes from settlements, in the ranking of task 0154 | owner, 2026-11-20 | matches | the bazaar spec has no such field (`specs/extensions/bazaar.md`) | | |
 
 ## Implementation
 
@@ -72,8 +74,8 @@ must not look like a copy of one.
   existing seller check (`apps/facilitator/src/catalog/seller-check.ts`), so a seeded listing
   passes the same gates as one from a settlement.
 - Name our robot in the `User-Agent` of every seller request (`packages/seller-fetch`).
-- Decide in a grilling before code: script or endpoint, a mark for listings not yet paid through
-  us, and where the host list lives at run time.
+- `catalog.ledger` and `catalog_attempts.payer` allow no value, since a seeded listing has no
+  settlement (`apps/facilitator/src/adapters/postgres-schema.ts`).
 
 ## Acceptance Criteria
 
