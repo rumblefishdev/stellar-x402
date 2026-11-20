@@ -33,7 +33,8 @@ export interface CatalogEntry {
 export interface CatalogQuery {
   type?: string;
   payTo?: string;
-  network?: StellarNetwork;
+  /** A CAIP-2 id; one that isn't Stellar's matches nothing. */
+  network?: string;
   /** An extension key the resource must carry, e.g. `bazaar`. */
   extensions?: string;
   limit: number;
