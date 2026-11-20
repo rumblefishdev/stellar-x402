@@ -2,7 +2,7 @@
 id: "0086"
 title: "Keep a payment the checks refused from settling after its payer signed again"
 type: BUG
-status: active
+status: completed
 owner: okarcz
 milestone: 2
 related_adr: ["0006"]
@@ -31,6 +31,16 @@ history:
     note: >
       Scope widened from the fee refusal to every check refusal that can pass later (okarcz);
       title and acceptance criteria follow. Breaker refusals in /verify spawned as 0153.
+  - date: "2026-11-20"
+    status: completed
+    who: okarcz
+    note: >
+      PR #205 rebase-merged (b5d7fd7f..4426745c, 7 commits), approved by stkrolikiewicz on its
+      tip after 1 issue and 6 notes, all applied (decisions 14-17). Every check refusal of a
+      payload with a key is a final `refused` record in /verify and /settle; migration
+      0015_settlement_refused. 1195 tests passed after the review fixes (2026-11-19); CI
+      green on the rebased tip. Six /settle tests changed on purpose. Testnet: a refusal recorded and
+      answered again without the checks.
 ---
 
 # Keep a payment the checks refused from settling after its payer signed again
@@ -64,15 +74,38 @@ passes once fees drop. If its payer signed a second payment meanwhile, both can 
 
 ## Acceptance Criteria
 
-- [ ] Given a payment the checks refused (fee, low balance, missing trustline, ledger gap, or any
+- [x] Given a payment the checks refused (fee, low balance, missing trustline, ledger gap, or any
       other reason) in `/verify` or `/settle`, when the same payment is sent again after the reason
       no longer holds, then it doesn't settle through the facilitator
-- [ ] Given that refusal, when the seller reads the answer, then it says what to do without
+- [x] Given that refusal, when the seller reads the answer, then it says what to do without
       inviting a second signature that can land next to the first
-- [ ] Given a `/verify` refusal the store can't record, when the seller reads the answer, then it
+- [x] Given a `/verify` refusal the store can't record, when the seller reads the answer, then it
       is a 503 that invites the same payment again, not a new signature
-- [ ] Given a refusal record past its auth entry's expiry, when the pruner runs, then the record
+- [x] Given a refusal record past its auth entry's expiry, when the pruner runs, then the record
       is deleted and no other settlement record is
+
+## Implementation Notes
+
+- PR #205: `refused` state and `refuse`/`pruneRefusals` in the store (`ports/settlement-store.ts`,
+  `adapters/postgres.ts`, `adapters/rules.ts`); `/verify`'s wrapper `settlement/refusals.ts`;
+  `/settle` records the checks' refusal before the claim (`settlement/settle.ts`); the pruner's
+  `settlements_refused` table (`pruner.ts`); migration `0015_settlement_refused`.
+- Tests by criterion: AC1 `settle.test.ts` "records the checks' refusal of a reopen as refused, so
+  a later repeat never settles" and `refusals.test.ts` "answers the same payment from its record
+  without the checks"; AC2 the "until expiry" advice in both; AC3 `verify-route.test.ts` "answers
+  503 store_unavailable"; AC4 `pruner.test.ts` and the port contract's `refuse (0086)` cases.
+- Testnet (before the review fixes): a refused payment stored a `refused` record, a facilitator
+  that would accept it answered the same payment from the record without the checks, and a new
+  payment of the client passed. Nothing was submitted.
+
+## Issues Encountered
+
+- **Repeat lost `extra.reason`**: the testnet run showed a repeat without upstream's reason; fixed
+  by the `error_detail` column (decision 8).
+- **Six existing `/settle` tests changed**: they expected a check refusal to record nothing.
+  Intentional, not a regression.
+- **Migration number taken**: 0106 merged `0014_api_key_copies` while #205 was open; the rebase
+  renumbered ours to `0015_settlement_refused`.
 
 ## Design Decisions
 
