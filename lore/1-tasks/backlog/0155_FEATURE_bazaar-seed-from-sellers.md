@@ -52,11 +52,16 @@ must not look like a copy of one.
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | The catalog takes every reachable Stellar seller; a payment through us is one more signal, not the condition | owner, 2026-11-19 | matches | no standard | | |
 | 2 | Listings come only from the seller's own `/.well-known/x402` and its unpaid 402, through the same seller check a settlement triggers; no other catalog is read | owner, 2026-11-19 | matches | upstream proposal PR #2646 (`/.well-known/x402`) | | |
-| 3 | Host names come from the list kept outside the repo; the seller's `robots.txt` is honored | owner, 2026-11-20 | matches | no standard | | |
+| 3 | Host names come from the list kept outside the repo. `robots.txt` is not read: the seller's `/.well-known/x402` and the unpaid 402 are protocol endpoints a seller publishes for payment clients, not content a crawler collects | owner, 2026-11-20 | changes it: the task honored `robots.txt` | RFC 9309 §1: robots.txt is not access authorization | | |
 | 4 | One run now; a periodic refresh is a later decision | owner, 2026-11-19 | matches | no standard | | |
 | 5 | Only free checks: the facilitator never pays for a test call | owner, 2026-11-19 | matches | no standard | | |
 | 6 | One catalog holds both networks' listings, each row with its network; the seed runs once now for mainnet and testnet sellers alike, although the facilitator settles only on testnet | owner, 2026-11-20 | beyond it; settles the catalog-database point ADR 0012 left to 0126 (`docs/adr/0012-facilitator-state-store.md:65-70`) | no standard; the bazaar spec leaves storage to the implementation (`specs/extensions/bazaar.md`) | | |
 | 7 | No removal mechanism until the first seller asks to be removed | owner, 2026-11-20 | changes it: the task asked for removal on request | no standard | | |
+| 8 | Every request to a seller names our robot: `User-Agent: stellar-x402-bazaar/1 (+<docs URL>)`, so a seller can tell it apart and block it by name | owner, 2026-11-20 | beyond it | RFC 9309 §2.2.1 product token | | |
+| 9 | Only resource URLs on the host that serves the file are asked; others are counted and skipped | agent | beyond it | no standard | | |
+| 10 | The method is the file's; without one, GET, then once more with the method the seller's 402 declares (measured: 103 of 784 listings in a sample need the second request) | agent | beyond it | no standard | | |
+| 11 | The seller's file is read up to 512 KiB, twice the largest measured (219,455 B) | agent | beyond it | no standard | | |
+| 12 | The seed asks each host more slowly than the 30-a-minute check budget, so checks after real payments keep their share; the run report lists every `payTo` seen on more than one host | agent | beyond it | no standard | | |
 
 ## Implementation
 
@@ -66,7 +71,7 @@ must not look like a copy of one.
 - Run the seed: for each host, read its `/.well-known/x402`, then send each resource through the
   existing seller check (`apps/facilitator/src/catalog/seller-check.ts`), so a seeded listing
   passes the same gates as one from a settlement.
-- Honor `robots.txt` before the first request to a host.
+- Name our robot in the `User-Agent` of every seller request (`packages/seller-fetch`).
 - Decide in a grilling before code: script or endpoint, a mark for listings not yet paid through
   us, and where the host list lives at run time.
 
@@ -76,7 +81,7 @@ must not look like a copy of one.
 - [ ] Given the host list, when the seed runs, then every listing it adds comes from the seller's
       own file and its 402, and passes the same gates as a listing from a settlement
 - [ ] No request goes to another x402 catalog during the seed
-- [ ] A host whose `robots.txt` disallows us gets no listing
+- [ ] Every request to a seller carries the `stellar-x402-bazaar` User-Agent
 - [ ] Discovery lists both networks' listings, and `?network=` narrows them to one
 - [ ] The run reports listings added, hosts and `payTo` accounts, and every refused URL with its
       reason
