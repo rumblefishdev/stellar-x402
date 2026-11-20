@@ -54,6 +54,7 @@ import { SETTLE_REASONS } from "../src/settlement/reasons.js";
 import {
   LeaseLostError,
   PayerNotAuthorizedError,
+  REFUSAL_HORIZON_LEDGERS,
   createSettler,
   expectTransfer,
   fingerprintOf,
@@ -738,6 +739,52 @@ describe("createSettler", () => {
     });
     // It holds no slot: no record is left open.
     expect(await store.listNonFinal(network)).toEqual([]);
+  });
+
+  it("records nothing for an auth entry past the horizon, and still gives the ended advice (0156)", async () => {
+    const check: Check = async () => ({
+      response: {
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+        invalidMessage: "what the check found",
+        payer,
+      },
+    });
+    const ledgersLeft = REFUSAL_HORIZON_LEDGERS + 1;
+    const { settle, submit, store, lines } = setup(landing(), {
+      check,
+      latestLedger: async () => EXPIRATION - ledgersLeft,
+    });
+    lines.length = 0;
+    expect((await settle(payload(), requirements)).response).toMatchObject({
+      success: false,
+      errorReason: "invalid_exact_stellar_payload_wrong_amount",
+      errorMessage: `${untilExpiry.errorMessage}; what the check found`,
+      extra: untilExpiry.extra,
+      payer,
+    });
+    expect(submit).not.toHaveBeenCalled();
+    expect(await store.get(key)).toBeUndefined();
+    expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+      expect.objectContaining({
+        event: "settlement_refusal_unrecorded",
+        settlementKey: key,
+        expirationLedger: EXPIRATION,
+        ledgersLeft,
+      }),
+    );
+  });
+
+  it("records the refusal when the ledger can't be read, as before 0156", async () => {
+    const check: Check = async () => ({
+      response: { isValid: false, invalidReason: "invalid_exact_stellar_payload_x", payer },
+    });
+    const { settle, store } = setup(landing(), {
+      check,
+      latestLedger: () => Promise.reject(new Error("down")),
+    });
+    await settle(payload(), requirements);
+    expect(await store.get(key)).toMatchObject({ state: "refused" });
   });
 
   it("answers settlement_pending with the hash when the pool reports pending, and stays open", async () => {
