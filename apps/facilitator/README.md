@@ -812,7 +812,7 @@ catalog:
    `#` comments are skipped, and a host named twice is asked once. Keep it outside the repository.
 2. For each host it reads `https://<host>/.well-known/x402` (at most 512 KiB) and keeps the
    resource URLs on that host, with GET or POST. Other hosts' URLs, other methods and entries with
-   no readable URL are counted and skipped.
+   no readable URL are skipped, each named in the report with its reason.
 3. Each URL gets one unpaid request, by the file's method or GET. Its 402 names the listing's
    method, example and Stellar accounts; each account then gets the check a payment would start,
    with the declared method, so a seeded listing passes the same gates. It has no `ledger` and its
@@ -824,6 +824,18 @@ catalog:
 `robots.txt` is not read: the file and the 402 are what the seller publishes for payment clients.
 Every request says `User-Agent: stellar-x402-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
 so a seller can block it by name. The report goes to stdout: a tab-separated line per URL and
-account (URL, method, network, `payTo`, outcome, reason, detail), a line per host, the totals, and
-each `payTo` seen on more than one host. As with `pnpm keys`, it runs the built `dist/seed.js`
-against the database `DATABASE_URL` names, after `pnpm migrate`.
+account (URL, method, network, `payTo`, outcome, reason, detail), a line per skipped entry
+(outcome `skipped`), a line per host, the totals, and each `payTo` seen on more than one host. As
+with `pnpm keys`, it runs the built `dist/seed.js` against the database `DATABASE_URL` names, after
+`pnpm migrate`.
+
+On the server it runs inside the running `facilitator` container, the only one that reaches both
+the sellers and the database (the `migrate` services have no internet). The hosts file, kept by the
+operator outside the repository, goes in on stdin and the report comes out on stdout:
+
+```sh
+sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator \
+  node dist/seed.js /dev/stdin < seed-hosts.txt > seed-report.tsv
+```
+
+A testnet reset empties the catalog, seeded mainnet listings included (ADR 0012): run it again.

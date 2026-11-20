@@ -53,13 +53,11 @@ describe("the seller's /.well-known/x402 (0155 decisions 9, 10)", () => {
         { url: "https://seller.example/d", method: "GET" },
         { url: "https://seller.example/e", method: "GET" },
       ],
-      offHost: 0,
-      otherMethod: 0,
-      unreadable: 0,
+      skipped: [],
     });
   });
 
-  it("counts and skips URLs on another host and methods other than GET and POST", () => {
+  it("skips URLs on another host and methods other than GET and POST, naming each", () => {
     const file = {
       resources: [
         "https://other.example/a",
@@ -70,17 +68,23 @@ describe("the seller's /.well-known/x402 (0155 decisions 9, 10)", () => {
     expect(fileResources(origin, file)).toMatchObject({
       ok: true,
       resources: [{ url: "https://seller.example/c", method: "GET" }],
-      offHost: 1,
-      otherMethod: 1,
+      skipped: [
+        { entry: "https://other.example/a", method: "GET", reason: "off_host" },
+        { entry: "https://seller.example/b", method: "DELETE", reason: "other_method" },
+      ],
     });
   });
 
-  it("counts every entry it can't read a URL from (decision 15)", () => {
+  it("names every entry it can't read a URL from (decision 15)", () => {
     const file = { resources: [{ url: 5 }, "http://[bad", {}, "https://seller.example/ok"] };
     expect(fileResources(origin, file)).toMatchObject({
       ok: true,
       resources: [{ url: "https://seller.example/ok" }],
-      unreadable: 3,
+      skipped: [
+        { entry: '{"url":5}', method: "GET", reason: "unreadable" },
+        { entry: "http://[bad", method: "GET", reason: "unreadable" },
+        { entry: "{}", method: "GET", reason: "unreadable" },
+      ],
     });
   });
 
@@ -141,7 +145,10 @@ describe("seedHosts (0155)", () => {
     seller.reply = async (request) => ({ status: request.url === "/b" ? 404 : 402 });
     const { cataloger, wait, store } = setup();
     const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
-    expect(report).toMatchObject({ origin: seller.url, file: "ok", listed: 2, offHost: 1 });
+    expect(report).toMatchObject({ origin: seller.url, file: "ok", listed: 2 });
+    expect(report!.skipped).toEqual([
+      { entry: "https://other.example/c", method: "GET", reason: "off_host" },
+    ]);
     expect(report!.results).toMatchObject([
       { url: `${seller.url}/a`, outcome: "refreshed" },
       { url: `${seller.url}/b`, outcome: "not_askable", reason: "not_402" },
@@ -179,9 +186,7 @@ describe("the seed's report (0155 decision 12)", () => {
         origin,
         file: "ok",
         listed: 1,
-        offHost: 0,
-        otherMethod: 0,
-        unreadable: 0,
+        skipped: [],
         results: [
           {
             url: `${origin}/1`,
@@ -203,9 +208,7 @@ describe("the seed's report (0155 decision 12)", () => {
         origin: "https://a.example",
         file: "ok",
         listed: 1,
-        offHost: 0,
-        otherMethod: 0,
-        unreadable: 0,
+        skipped: [],
         results: [
           {
             url: "https://a.example/1",
@@ -233,9 +236,7 @@ describe("the seed's report (0155 decision 12)", () => {
         origin: "https://a.example",
         file: "ok",
         listed: 2,
-        offHost: 0,
-        otherMethod: 0,
-        unreadable: 0,
+        skipped: [],
         results: [
           result("https://a.example/1", "GSHARED"),
           { url: "https://a.example/2", method: "GET", outcome: "not_askable", reason: "not_402" },
@@ -245,18 +246,14 @@ describe("the seed's report (0155 decision 12)", () => {
         origin: "https://b.example",
         file: "ok",
         listed: 1,
-        offHost: 0,
-        otherMethod: 0,
-        unreadable: 0,
+        skipped: [{ entry: "https://x.example/1", method: "GET", reason: "off_host" }],
         results: [result("https://b.example/1", "GSHARED")],
       },
       {
         origin: "https://c.example",
         file: "status 404",
         listed: 0,
-        offHost: 0,
-        otherMethod: 0,
-        unreadable: 0,
+        skipped: [],
         results: [],
       },
     ]);
@@ -264,8 +261,9 @@ describe("the seed's report (0155 decision 12)", () => {
       "https://a.example/1\tGET\tstellar:pubnet\tGSHARED\trefreshed\t\t",
       "https://a.example/2\tGET\t\t\tnot_askable\tnot_402\t",
       "https://b.example/1\tGET\tstellar:pubnet\tGSHARED\trefreshed\t\t",
+      "https://x.example/1\tGET\t\t\tskipped\toff_host\t",
       "host https://a.example: file ok, 2 listed, 0 on another host, 0 other methods, 0 unreadable, 1 written",
-      "host https://b.example: file ok, 1 listed, 0 on another host, 0 other methods, 0 unreadable, 1 written",
+      "host https://b.example: file ok, 1 listed, 1 on another host, 0 other methods, 0 unreadable, 1 written",
       "host https://c.example: file status 404, 0 listed, 0 on another host, 0 other methods, 0 unreadable, 0 written",
       "total: 2 written, 2 hosts with a listing, 1 payTo",
       "payTo GSHARED on 2 hosts: https://a.example, https://b.example",

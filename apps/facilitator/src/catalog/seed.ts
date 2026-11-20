@@ -31,17 +31,18 @@ export function parseHosts(text: string): string[] {
     .filter((origin, i, origins) => origins.indexOf(origin) === i);
 }
 
+/**
+ * An entry of the seller's file the seed doesn't ask, named in the report: a URL on another host
+ * than the file's (decision 9), a method other than GET or POST, or no URL that parses.
+ */
+export interface Skipped {
+  entry: string;
+  method: string;
+  reason: "off_host" | "other_method" | "unreadable";
+}
+
 export type FileResources =
-  | {
-      ok: true;
-      resources: { url: string; method: string }[];
-      /** URLs on another host than the file's, skipped (decision 9). */
-      offHost: number;
-      /** URLs with a method other than GET or POST, skipped. */
-      otherMethod: number;
-      /** Entries with no URL that parses, skipped. */
-      unreadable: number;
-    }
+  | { ok: true; resources: { url: string; method: string }[]; skipped: Skipped[] }
   | { ok: false; reason: "no_resources" };
 
 /**
@@ -56,9 +57,7 @@ export function fileResources(origin: string, file: unknown): FileResources {
   const host = new URL(origin).host;
   const seen = new Set<string>();
   const resources: { url: string; method: string }[] = [];
-  let offHost = 0;
-  let otherMethod = 0;
-  let unreadable = 0;
+  const skipped: Skipped[] = [];
   for (const item of listed) {
     let written: unknown;
     let method = "GET";
@@ -72,23 +71,24 @@ export function fileResources(origin: string, file: unknown): FileResources {
       if (typeof fields.method === "string") method = fields.method.toUpperCase();
     }
     if (typeof written !== "string" || !URL.canParse(written, origin)) {
-      unreadable++;
+      const entry = typeof item === "string" ? item : JSON.stringify(item);
+      skipped.push({ entry: String(entry).slice(0, 200), method, reason: "unreadable" });
       continue;
     }
     const url = new URL(written, origin);
     if (url.host !== host) {
-      offHost++;
+      skipped.push({ entry: url.href, method, reason: "off_host" });
       continue;
     }
     if (!METHODS.includes(method)) {
-      otherMethod++;
+      skipped.push({ entry: url.href, method, reason: "other_method" });
       continue;
     }
     if (seen.has(`${method} ${url.href}`)) continue;
     seen.add(`${method} ${url.href}`);
     resources.push({ url: url.href, method });
   }
-  return { ok: true, resources, offHost, otherMethod, unreadable };
+  return { ok: true, resources, skipped };
 }
 
 /** How seeding one host ended: its file, then a result per listing. */
@@ -98,9 +98,7 @@ export interface HostReport {
   file: string;
   /** URLs on the file's own host, each asked. */
   listed: number;
-  offHost: number;
-  otherMethod: number;
-  unreadable: number;
+  skipped: Skipped[];
   results: SeedResult[];
 }
 
@@ -137,9 +135,7 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
     origin,
     file: "ok",
     listed: 0,
-    offHost: 0,
-    otherMethod: 0,
-    unreadable: 0,
+    skipped: [],
     results: [],
   };
   let file: unknown;
@@ -158,9 +154,7 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
     return report;
   }
   report.listed = found.resources.length;
-  report.offHost = found.offHost;
-  report.otherMethod = found.otherMethod;
-  report.unreadable = found.unreadable;
+  report.skipped = found.skipped;
   const wait = deps.wait ?? sleep;
   for (const [i, { url, method }] of found.resources.entries()) {
     const results = await cataloger.seed(url, method);
@@ -183,7 +177,7 @@ export async function seedHosts(
 
 /**
  * The run's report for the operator: a tab-separated line per result (URL, method, network, payTo,
- * outcome, reason, detail), a line per host, the totals, and each `payTo` seen on more than one
+ * outcome, reason, detail) and per skipped entry (outcome `skipped`), a line per host, the totals, and each `payTo` seen on more than one
  * host (decision 12), since a host can name another seller's account (ADR 0008).
  */
 export function reportLines(reports: HostReport[]): string[] {
@@ -195,14 +189,19 @@ export function reportLines(reports: HostReport[]): string[] {
           .map((field) => printable(field ?? ""))
           .join("\t"),
       );
+  for (const { skipped } of reports)
+    for (const { entry, method, reason } of skipped)
+      lines.push([entry, method, "", "", "skipped", reason, ""].map(printable).join("\t"));
   const written = (r: SeedResult) => r.outcome === "refreshed";
   const hostsOf = new Map<string, Set<string>>();
   for (const report of reports) {
     const count = report.results.filter(written).length;
+    const skips = (reason: Skipped["reason"]) =>
+      report.skipped.filter((skip) => skip.reason === reason).length;
     lines.push(
       `host ${report.origin}: file ${report.file}, ${report.listed} listed, ` +
-        `${report.offHost} on another host, ${report.otherMethod} other methods, ` +
-        `${report.unreadable} unreadable, ${count} written`,
+        `${skips("off_host")} on another host, ${skips("other_method")} other methods, ` +
+        `${skips("unreadable")} unreadable, ${count} written`,
     );
     for (const r of report.results) {
       if (r.payTo === undefined) continue;
