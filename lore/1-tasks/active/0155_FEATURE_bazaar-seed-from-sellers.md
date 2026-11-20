@@ -98,7 +98,9 @@ but the task as first written could not run and was larger than needed.
 - Run the seed: for each host, read its `/.well-known/x402`, then send each resource through the
   existing seller check (`apps/facilitator/src/catalog/seller-check.ts`), so a seeded listing
   passes the same gates as one from a settlement.
-- Name our robot in the `User-Agent` of every seller request (`packages/seller-fetch`).
+- Name our robot in the `User-Agent` of every request the facilitator's seller check sends
+  (`apps/facilitator/src/catalog/seller-check.ts`); the payer's local MCP server, which shares
+  `packages/seller-fetch`, keeps its own requests unnamed.
 - `catalog.ledger` and `catalog_attempts.payer` allow no value, since a seeded listing has no
   settlement (`apps/facilitator/src/adapters/postgres-schema.ts`).
 
