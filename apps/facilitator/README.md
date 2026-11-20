@@ -764,10 +764,11 @@ stellar-cli restores one entry per call, and takes the parts of a key rather tha
 `{ x402Version: 2, items, pagination: { limit, offset, total } }`, in a stable order with no
 ranking. `total` counts every entry the filters match.
 
-- Filters: `type`, `payTo`, `network`, `extensions` and `scheme`, alone or combined. A
-  well-formed network we don't serve, such as `eip155:8453` or the other Stellar network, any
-  `scheme` but `exact` and any `extensions` but `bazaar` give an empty page. Every entry has
-  `bazaar`.
+- Filters: `type`, `payTo`, `network`, `extensions` and `scheme`, alone or combined. The catalog
+  holds both Stellar networks, whichever one this facilitator settles on (task 0155): without
+  `network` a page lists both, and `network` narrows it to one. A well-formed network that isn't
+  Stellar's, such as `eip155:8453`, any `scheme` but `exact` and any `extensions` but `bazaar` give
+  an empty page. Every entry has `bazaar`.
 - `limit`: 20 by default, at most 100. A larger one is clamped, and `pagination.limit` echoes the
   limit used. `limit=0` gives `total` alone.
 - `offset`: at most 1 000 000, so every entry can be paged to.
