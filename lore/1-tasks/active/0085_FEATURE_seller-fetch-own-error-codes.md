@@ -2,7 +2,8 @@
 id: "0085"
 title: "Give seller-fetch its own error codes, translated by the MCP"
 type: FEATURE
-status: backlog
+status: active
+owner: bstruzyk
 milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0063", "0037", "0075"]
@@ -15,6 +16,12 @@ history:
     note: >
       Spawned from 0063 (decision row 35): seller-fetch kept the MCP's error vocabulary when it
       moved out of packages/mcp. Starts after 0063's PRs are merged.
+  - date: "2026-11-20"
+    status: active
+    who: bstruzyk
+    note: >
+      Started: seller-fetch names each refusal's cause, asToolError maps the new codes to today's
+      MCP codes, and the facilitator's attempt reasons take them.
 ---
 
 # Give seller-fetch its own error codes, translated by the MCP
