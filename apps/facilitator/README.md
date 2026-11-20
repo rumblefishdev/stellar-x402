@@ -444,7 +444,12 @@ payment never settles through us once it would pass: fees drop, the payer tops u
 trustline. Its `invalidMessage` starts with what to do: `this payment will not settle here, but
 its auth entry may still land in ledger N: sign a new payment once that ledger has closed`, and
 `extra.expirationLedger` is N. The same payment sent again gets the recorded answer without the
-checks. While a settlement of the same payment is under way, a refusal starts with `a settlement
+checks. A payload whose auth entry expires more than 720 ledgers (about an hour) after the latest
+ledger isn't recorded (task 0156): its expiration comes from the payload alone, before any
+signature check, and the record is kept until it. Its refusal starts with `this payment may still
+settle until ledger N: sign a new payment once that ledger has closed`, logged as
+`settlement_refusal_unrecorded`. When the latest ledger can't be read within 1 s, the refusal is
+recorded. While a settlement of the same payment is under way, a refusal starts with `a settlement
 of this payment is under way: send this payment to /settle for its outcome before signing a new
 one`. When the settlement store doesn't answer the lookup within 2 s, `/verify` runs the checks as
 usual, logged as `verify_store_lookup_failed`. When it doesn't record a refusal within 2 s,
