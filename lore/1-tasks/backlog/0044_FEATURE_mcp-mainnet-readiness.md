@@ -35,7 +35,8 @@ is decided with the owner (options and a recommendation) before it is built.
 - **Several assets.** The CLI hard-codes testnet USDC (`apps/mcp-local/src/config.ts`); mainnet
   USDC has another contract, and sellers accept others (EURC, XLM).
 - **Networks.** Only `stellar:testnet` is registered and the signer is bound to it; mainnet needs a
-  configured network and passphrase.
+  configured network and passphrase. `list_resources` lists the network it pays on unless the agent names
+  another (`PAY_NETWORK`, task 0155), so the setting replaces that constant too.
 - **RPC URL.** `@x402/stellar` 2.31 requires an RPC URL for mainnet (`getRpcUrl` throws without
   one; testnet has a default). The CLI has no setting for it.
 - **Choosing how to pay (W349 A).** Today the library pays the first offer our filter leaves. Add
