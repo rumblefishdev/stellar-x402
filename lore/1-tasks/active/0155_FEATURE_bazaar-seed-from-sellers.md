@@ -35,6 +35,23 @@ Every listing is read **directly from the seller**: its own `/.well-known/x402` 
 unpaid 402. No listing, field or ranking is taken from another x402 catalog, and the catalog
 must not look like a copy of one.
 
+## Premise
+
+A fresh review (2026-11-20) attacked the task from its goal and the code. Verdict: the goal holds,
+but the task as first written could not run and was larger than needed.
+
+- It could not run: every seeded seller is on mainnet, and the facilitator serves testnet only and
+  refuses to start on mainnet (`apps/facilitator/src/config.ts:373-376`); discovery returns only
+  the network it settles on (`apps/facilitator/src/http/discovery.ts:87-104`). Put to the owner:
+  one catalog for both networks (decision 6).
+- Simpler: a seed is not a path of its own but one more trigger of the seller check a payment
+  already starts, so a seeded listing passes the same gates.
+- Deleted or deferred: removal on request (decision 7), reading `robots.txt` (decision 3), a mark
+  for listings not yet paid through us (decision 14).
+- Changed in the code, not asked: `catalog.ledger` and `catalog_attempts.payer` allow no value, a
+  seeded check is paced below the per-host budget, and a seller's file is read only for its own
+  host.
+
 ## Context
 
 - ADR 0008 lists a seller only after its first paid call through us and indexes nothing else
