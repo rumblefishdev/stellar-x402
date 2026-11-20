@@ -13,6 +13,13 @@ import type { Logger } from "../logger.js";
  */
 const SESSION_END_MS = 2_000;
 
+/**
+ * Our robot's name on every request to a seller (0155 decision 8): a product token as RFC 9309
+ * §2.2.1 spells it, so a seller can tell our checks apart in its logs and block them by name.
+ */
+export const SELLER_USER_AGENT =
+  "stellar-x402-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)";
+
 /** Why a seller gave no usable answer; `detail` is for logs and the attempt's row only. */
 export type SellerAnswer =
   | { ok: true; paymentRequired: PaymentRequired }
@@ -35,7 +42,10 @@ export async function askSeller(
   try {
     response = await guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(request.url, {
       method: request.method,
-      headers: request.body === undefined ? undefined : { "content-type": "application/json" },
+      headers:
+        request.body === undefined
+          ? { "user-agent": SELLER_USER_AGENT }
+          : { "user-agent": SELLER_USER_AGENT, "content-type": "application/json" },
       body: request.body,
     });
   } catch (error) {
@@ -79,6 +89,7 @@ export async function askMcpSeller(
   const options = { signal: deadline };
   const transport = new StreamableHTTPClientTransport(new URL(url), {
     fetch: (input, init) => fetch(input, init),
+    requestInit: { headers: { "user-agent": SELLER_USER_AGENT } },
   });
   try {
     await mcp.connect(transport, options);
