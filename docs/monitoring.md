@@ -729,9 +729,10 @@ threshold and this page's section. Until the switch nothing on the VM loads it.
 
 ### gauge-stale
 
-A facilitator gauge's `_last_read_timestamp_seconds` is over 15 minutes old, or missing for a
-network since the start, while the process runs. The `gauge` label names it; find its read error
-in the app logs (`metric_issue`, `read-failed`).
+A facilitator gauge has had no successful read for 15 minutes, or none for a network since the
+start, while the process runs: its `_last_read_timestamp_seconds` is over 10 minutes old, or
+missing, for the rule's 5. The `gauge` label names it; find its read error in the app logs
+(`metric_issue`, `read-failed`).
 
 ### textfile-stale
 

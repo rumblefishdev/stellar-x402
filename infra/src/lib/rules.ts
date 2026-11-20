@@ -296,11 +296,12 @@ export function serverRules(c: EnvironmentConfig): Rule[] {
 
   // Each gauge's stamp moves at each successful read; a read that keeps throwing stops it while
   // the process runs (0138, "What doesn't carry over"). A stamp exists only after the first good
-  // read, so each network has its absent() too (Adam's review of #200).
+  // read, so each network has its absent() too (Adam's review of #200). 10 minutes old plus the
+  // rule's 5 is gauges-silent's 15; the 5 keep a starting process's absent() quiet.
   const gauges = Object.values(watchedGauges(c));
   const stale = gauges.map((g) => {
     const stamp = `${g}_last_read_timestamp_seconds{${PROJECT}}`;
-    const old = `label_replace(time() - ${stamp} > 900, "gauge", "${g}", "", "")`;
+    const old = `label_replace(time() - ${stamp} > 600, "gauge", "${g}", "", "")`;
     const none = c.networks.map(
       (n) =>
         `label_replace(absent(${g}_last_read_timestamp_seconds{${PROJECT},network="${n}"}), "gauge", "${g}", "", "")`,
