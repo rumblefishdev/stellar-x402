@@ -1,4 +1,3 @@
-import { isStellarNetwork } from "@stellar-x402/config";
 import type { DiscoveryResourcesResponse } from "@x402/extensions/bazaar";
 import type { RequestHandler } from "express";
 import { z } from "zod";
@@ -69,7 +68,7 @@ const QUERY = z.object({
 
 /**
  * What the route does with a request. `empty` is a well-formed query nothing in the catalog can
- * match: a network that isn't Stellar's, a scheme we never settle or an extension we never
+ * match: a scheme we never settle or an extension we never
  * catalog. `ignored` names unknown parameters.
  */
 export type DiscoveryQuery =
@@ -83,9 +82,9 @@ export type DiscoveryQuery =
  * used. Unknown parameters are ignored rather than refused: upstream's client sends whatever its
  * version knows, and a 400 would fail every call it makes once upstream adds a filter. An empty
  * value counts as absent, since that client sends `?type=` for `type: ""`. A misspelled known
- * param (`type[]`, `payto`) is refused whatever its value, naming it as sent. `network` narrows
- * the catalog, which holds both Stellar networks whatever network this facilitator settles on
- * (0155). `extensions=bazaar` is not passed on: every entry has it, and its GIN lookup scans the
+ * param (`type[]`, `payto`) is refused whatever its value, naming it as sent. `network` is a filter
+ * like `payTo`: the catalog holds both Stellar networks whatever network this facilitator settles
+ * on (0155), and another network's id matches nothing. `extensions=bazaar` is not passed on: every entry has it, and its GIN lookup scans the
  * whole table.
  */
 export function parseDiscoveryQuery(raw: Record<string, unknown>): DiscoveryQuery {
@@ -94,18 +93,15 @@ export function parseDiscoveryQuery(raw: Record<string, unknown>): DiscoveryQuer
   const given = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== ""));
   const parsed = QUERY.safeParse(given);
   if (!parsed.success) return { kind: "invalid", param: String(parsed.error.issues[0]!.path[0]) };
-  const { scheme, network, extensions, limit: asked, offset = 0, ...filters } = parsed.data;
+  const { scheme, extensions, limit: asked, offset = 0, ...filters } = parsed.data;
   const limit = Math.min(asked ?? DISCOVERY_LIMIT.default, DISCOVERY_LIMIT.max);
   const ignored = Object.keys(raw).filter((param) => !KNOWN_PARAMS.includes(param));
   if (
-    (network !== undefined && !isStellarNetwork(network)) ||
     (scheme !== undefined && !CATALOGED_SCHEMES.includes(scheme)) ||
     (extensions !== undefined && !CATALOGED_EXTENSIONS.includes(extensions))
   )
     return { kind: "empty", limit, offset, ignored };
-  const query: CatalogQuery = { ...filters, limit, offset };
-  if (network !== undefined && isStellarNetwork(network)) query.network = network;
-  return { kind: "query", query, limit, offset, ignored };
+  return { kind: "query", query: { ...filters, limit, offset }, limit, offset, ignored };
 }
 
 /**

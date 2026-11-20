@@ -36,7 +36,11 @@ describe("parseDiscoveryQuery", () => {
     ["a limit of 256 digits, clamped", { limit: "9".repeat(256) }, { kind: "query", limit: 100 }],
     ["an offset past 100 000 entries", { offset: "100000" }, { kind: "query", offset: 100_000 }],
     ["the deepest offset", { offset: String(MAX_OFFSET) }, { kind: "query", offset: MAX_OFFSET }],
-    ["another CAIP-2 network", { network: "eip155:8453" }, { kind: "empty", limit: 20 }],
+    [
+      "another CAIP-2 network, as a filter that matches nothing",
+      { network: "eip155:8453" },
+      { kind: "query", query: { network: "eip155:8453", limit: 20, offset: 0 } },
+    ],
     [
       "the other Stellar network, as a filter",
       { network: OTHER },
@@ -304,7 +308,7 @@ describe("GET /discovery/resources", () => {
 
   it("answers a query nothing can match without the store", async () => {
     const spy = vi.spyOn(stores.catalog, "list");
-    for (const query of ["scheme=upto", "network=eip155:8453", "extensions=sign-in-with-x"]) {
+    for (const query of ["scheme=upto", "extensions=sign-in-with-x"]) {
       const { response, body } = await list(query);
       expect(response.status, query).toBe(200);
       expect(body.items, query).toEqual([]);

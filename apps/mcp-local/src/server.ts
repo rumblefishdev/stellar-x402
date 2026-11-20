@@ -53,7 +53,7 @@ export function createServer(config: ServerConfig): McpServer {
     async (params) => {
       let page: z.infer<typeof PAGE>;
       try {
-        const query = { network: PAY_NETWORK, ...params };
+        const query = { ...params, network: params.network ?? PAY_NETWORK };
         page = PAGE.parse(await deadline(catalog.listResources(query), timeoutMs));
       } catch (error) {
         log(`list_resources: ${String(error)}`);
