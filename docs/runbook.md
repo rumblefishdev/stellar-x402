@@ -991,8 +991,10 @@ agent's own log is `/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agen
 | `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`                                |
 | `metrics/agent.log`               | `x402-metrics`                                | `metrics-agent` in `app`                           |
 
-`x402-logrotate.timer` rotates a file past 100 MB every 10 minutes and keeps 10: `*.log.1` as it
-was, the older ones compressed. A rotation during an AWS outage loses the app lines the agent
+`x402-logrotate.timer` runs every 10 minutes and rotates each file once a day, empty or not, or
+sooner once past 100 MB; it keeps 10, `*.log.1` as it was and the older ones compressed, and
+deletes any older than 30 days. So no line stays on the server past the 30 days the hub's privacy
+policy states, the facilitator's (whose lines name a pubnet caller) and the portal's alike (0106). A rotation during an AWS outage loses the app lines the agent
 hadn't sent yet from CloudWatch, never from the server: they are in `*.log.1` (ADR 0011).
 
 **The units' first move to files** (0027), after the admin step, in the window of The playbook's

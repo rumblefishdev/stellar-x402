@@ -101,8 +101,8 @@ To find an event in Logs Insights, on `/x402/production/app`:
 fields @timestamp, @message | filter event = "rpc_failover" | sort @timestamp desc | limit 50
 ```
 
-On the server, the same lines, the rotated files included (10 of 100 MB, compressed after the
-first): `sudo zgrep -h '"event":"rpc_failover"' /var/log/x402/production/facilitator.log*`. The
+On the server, the same lines, the rotated files included (10, each a day or up to 100 MB, none
+past 30 days, compressed after the first): `sudo zgrep -h '"event":"rpc_failover"' /var/log/x402/production/facilitator.log*`. The
 file also holds the metric lines, which the agent ships apart; leave them out of a `tail` with
 `sudo grep -v '^{"_aws":' /var/log/x402/production/facilitator.log | tail -n 50`.
 
@@ -668,7 +668,8 @@ fails. When it expires, no log or metric line reaches CloudWatch.
    `stats count() by @logStream, event | sort count() desc | limit 10` (only the facilitator's
    lines have an `event`; the other streams are its own Postgres, tunnel, OpenBao and deploy). The
    metrics group, whose lines have no `event`: `stats count() by @logStream`.
-2. Then its cause. `x402-logrotate.timer` keeps the files on the server to 10 × 100 MB each.
+2. Then its cause. `x402-logrotate.timer` keeps the files on the server to 10 rotations of a day
+   or 100 MB each.
 
 ## Protocol
 

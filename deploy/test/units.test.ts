@@ -34,18 +34,24 @@ describe("the rotation", () => {
     }
   });
 
-  test("copies and truncates, bounded in size and count, its own state elsewhere", () => {
+  test("copies and truncates, bounded in size, count and age, its own state elsewhere", () => {
     for (const directive of [
       "copytruncate",
-      "size 100M",
+      "daily",
+      "maxsize 100M",
       "rotate 10",
+      "maxage 30",
       "compress",
       "delaycompress",
       "missingok",
-      "notifempty",
+      "ifempty",
     ])
       expect(conf).toMatch(new RegExp(`^\\s+${directive}$`, "m"));
     expect(conf).not.toMatch(/^\s+(create|su|postrotate)\b/m);
+    // The hub's privacy policy keeps log lines up to 30 days (0106). `size` would override
+    // `daily`, and maxage is read only when a file rotates: a quiet file must still rotate daily,
+    // empty or not, so its old rotations go.
+    expect(conf).not.toMatch(/^\s+(size|notifempty|weekly|monthly|yearly)\b/m);
     const service = unit("x402-logrotate.service");
     expect(settings(service, "ExecStart")).toEqual([
       "/usr/sbin/logrotate --state /var/lib/x402-logrotate/status /etc/x402/logrotate.conf",
