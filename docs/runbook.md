@@ -1555,7 +1555,7 @@ call.
 One JSON object per line in `/var/log/x402/production/portal.log`, shipped as `portal` in
 `/x402/production/app`. A call is named by its token's `jti` and `act`, a key by its `key_id`,
 the first 12 hex digits of its SHA-256; never a key, a token, a secret or a Discord id. No alarm
-watches them yet.
+reads them yet: what watches the backend is the uptime probe on its `/health` (Monitoring, below).
 
 | Event                                                           | Level | Means, and what to do                                                                                                                                                                     |
 | --------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1635,10 +1635,42 @@ sudo FACILITATOR_IMAGE=unused docker compose exec -T postgres-testnet psql -U po
 Trying it touches real keys: a revoke holds back a new key until the next calendar month, so try
 revoke last, or with a second Discord account.
 
+### Monitoring
+
+An uptime probe in AWS, `x402-production-portal-uptime-probe`, reads
+`https://x402-portal.sorobanscan.com/health` through Cloudflare every minute and publishes
+`portal_ready` (1 for a 200 with `{"ready":true}`) to `x402-watch`; its alarm is `portal-uptime`
+(7 minutes in a row, a missing point counted as down), in the group `portalUptime`. A second probe,
+`x402-production-hub-uptime-probe`, reads the hub's `https://sorobanscan.com/api/hub/me` through
+the explorer's CloudFront, the whole path a member's browser takes, and publishes `hub_ready` (1
+for a 200 with `{"authenticated":false}`); its alarm is `hub-uptime`, in `hubUptime`. Both come
+with the Uptime stack (`infra/`, 0106 decision 21); what each alarm means and what to do is in
+[monitoring, Uptime](monitoring.md#uptime).
+
+Both groups are off when the probes are first deployed, since an alarm made before its probe has
+data pages at once:
+
+- **`portalUptime`**, once the portal's probe has published for a few minutes: from `infra/`,
+  `make deploy-production-uptime`, then `make check-series GROUP=portalUptime` until it passes,
+  then `"portalUptime": true` in `infra/envs/production.json`, `make deploy-production-alarms` and
+  `make fire-test` (infra/README.md, Alarm groups).
+- **`hubUptime`**, once the hub's backend is routed in the explorer's distribution (the hub's
+  runbook, step 4) and the probe reads 1: until then the distribution answers `/api/hub/me` with
+  a `302` to `/api/`, which the probe reads as down. The same steps, with `GROUP=hubUptime`; first
+  check the probe's last lines say `"ready":1` (`/aws/lambda/x402-production-hub-uptime-probe`).
+
+The hub's own alarms, on its Lambda's `Throttles` and `Url5xxCount`, are being added in its repo
+(`rumblefishdev/sorobanscan-api-portal`), publishing to this repo's `x402-production-alarms` topic,
+so they reach `#stellar-x402-bot` beside these. Later, not built: a watchdog for this backend,
+metric filters with alarms on its log lines (`startup_failed`, `hub_call_failed`,
+`hub_key_copy_unreadable`), and an alarm on the hub's Lambda nearing its concurrency
+(`ConcurrentExecutions`), which `Throttles` sees only once it is reached.
+
 ### What this backend lacks
 
-- A watchdog and an alarm: Docker marks a hung backend `unhealthy` and nothing restarts it, and
-  no probe watches its hostname. Its logs ship (`portal` in `app`).
+- A watchdog: Docker marks a hung backend `unhealthy` and nothing restarts it; the probe above
+  sees it, and a person restarts it. Its logs ship (`portal` in `app`), and no metric filter or
+  alarm reads them yet.
 - The page's own publish, `aws s3 sync` to the explorer's bucket, and the page's Basic Auth
   (0106 decisions 1 and 6): both are the explorer's distribution's.
 - A gate on the backend's hostname: there is none, on purpose. Every route but `/health` needs

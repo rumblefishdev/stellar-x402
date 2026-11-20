@@ -20,7 +20,7 @@ by name, so each one deploys alone.
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | `X402-production-Telemetry` | IAM Roles Anywhere trust anchor (the ClickHouse project's client CA), profile, the logging role, `/x402/production/app` and `/x402/production/metrics` (30 days, kept on a stack delete, not on a failed create's rollback)                                                                                     | Rarely: IAM on a shared account            |
 | `X402-production-Alarms`    | SNS topic `x402-production-alarms`, Amazon Q Developer (Chatbot) to `#stellar-x402-bot`, the alarms of the groups that are on                                                                                                                                                                                   | Thresholds, groups going on                |
-| `X402-production-Uptime`    | `x402-production-uptime-probe`: reads `/health` every minute, publishes `ready` to `x402-watch`                                                                                                                                                                                                                 | The probe's code                           |
+| `X402-production-Uptime`    | Three probes, one code, each every minute to `x402-watch`: `x402-production-uptime-probe` the facilitator's `/health` (`ready`), `-portal-uptime-probe` the portal backend's (`portal_ready`), `-hub-uptime-probe` the API hub's `/api/hub/me` through the explorer's CloudFront (`hub_ready`)                  | The probe's code                           |
 | `X402-production-Watch`     | `x402-production-watch`: every 5 minutes reads each network's fee account through RPC with `checkFacilitatorBalance` and publishes `spendable_stroops`, and each network's protocol from Horizon (`protocol_version`, `protocol_supported_version`), to `x402-watch`; the theft and secret-read sections follow | The check's code, the RPC and Horizon URLs |
 
 The logging role trusts only `CN=x402-cloudwatch-agent-production` from that CA, and only on
@@ -97,6 +97,8 @@ exists with its actions off (decision 26).
 | Group           | Alarms                                                                                                                                         | On when                                                                                                 |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `uptime`        | `uptime`, `uptime-flapping`                                                                                                                    | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37)               |
+| `portalUptime`  | `portal-uptime`                                                                                                                                | The portal's probe's `portal_ready` has data, as `uptime` (0106 decision 21)                            |
+| `hubUptime`     | `hub-uptime`                                                                                                                                   | The hub's backend is routed in the explorer's distribution, and its probe reads 1 (0106, 21)            |
 | `telemetry`     | `emf-validation`, `emf-parsing`                                                                                                                | On                                                                                                      |
 | `facilitator`   | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                                                             | The facilitator's metric lines reach CloudWatch (#113)                                                  |
 | `channelHeld`   | `channel-held`                                                                                                                                 | 0089 emits its gauge                                                                                    |
@@ -164,4 +166,9 @@ CloudWatch aggregating a gauge's `Values` array as samples, which `queue-waiting
   on 2026-11-04 showed two of their parts: `FILL` returns 0 for a series never written, so a
   Silence alarm fires on one, and `gauges-silent`'s expression returns 1 while one gauge is
   missing. Each alarm is still fired once on purpose (AC).
-- That requests from AWS reach `/health` through Cloudflare: the probe's first runs.
+- That requests from AWS reach `/health` through Cloudflare: the probe's first runs. The same for
+  the portal's backend and the hub's `/api/hub/me`: with the probes' headers
+  (`User-Agent: x402-uptime-probe`, `Accept: application/json`) both gave the expected answers
+  from a workstation on 2026-11-20 (the hub's a `302`, not routed yet), not from AWS. A
+  Cloudflare 1010 (Browser Integrity Check, 0106 decision 32) would show in the portal probe's
+  log as `status 403`.
