@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { StoreUnavailableError, verifyWithRefusals } from "../src/settlement/refusals.js";
 import { SETTLE_REASONS } from "../src/settlement/reasons.js";
+import { REFUSAL_HORIZON_LEDGERS } from "../src/settlement/settle.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 
@@ -97,12 +98,16 @@ describe("verifyWithRefusals (0086)", () => {
   beforeEach(db.empty);
   const lines: string[] = [];
 
-  const setup = (store = db.stores().settlements) => {
+  const setup = (
+    store = db.stores().settlements,
+    latestLedger: () => Promise<number> = async () => 1_000,
+  ) => {
     const inner = vi.fn<Verify>(async () => feeRefusal);
     const verify = verifyWithRefusals(inner, {
       network,
       store,
       logger: jsonLogger("debug", (line) => lines.push(line)),
+      latestLedger,
       now: () => 5_000,
       storeTimeoutMs: 200,
     });
@@ -204,6 +209,47 @@ describe("verifyWithRefusals (0086)", () => {
     await verify(payload(), requirements);
     expect(await store.pruneRefusals(1e12, { network, latest: EXPIRATION - 1 }, 10)).toBe(0);
     expect(await store.pruneRefusals(1e12, { network, latest: EXPIRATION }, 10)).toBe(1);
+  });
+
+  it("records nothing for an auth entry past the horizon, and says to wait for its ledger (0156)", async () => {
+    const { verify, store } = setup(
+      undefined,
+      async () => EXPIRATION - REFUSAL_HORIZON_LEDGERS - 1,
+    );
+    lines.length = 0;
+    expect(await verify(payload(), requirements)).toEqual({
+      ...feeRefusal,
+      invalidMessage:
+        `this payment may still settle until ledger ${EXPIRATION}: sign a new payment once ` +
+        `that ledger has closed; too high`,
+      extra: { expirationLedger: EXPIRATION },
+    });
+    expect(await store.get(key)).toBeUndefined();
+    expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+      expect.objectContaining({
+        event: "settlement_refusal_unrecorded",
+        settlementKey: key,
+        expirationLedger: EXPIRATION,
+        ledgersLeft: REFUSAL_HORIZON_LEDGERS + 1,
+      }),
+    );
+  });
+
+  it("records an auth entry exactly at the horizon (0156)", async () => {
+    const { verify, store } = setup(undefined, async () => EXPIRATION - REFUSAL_HORIZON_LEDGERS);
+    expect((await verify(payload(), requirements)).invalidMessage).toBe(`${advice}; too high`);
+    expect(await store.get(key)).toMatchObject({ state: "refused" });
+  });
+
+  it.each([
+    ["fails", () => Promise.reject(new Error("down"))],
+    ["is too slow", () => new Promise<never>(() => {})],
+  ])("records the refusal when the ledger read %s, as before 0156", async (_, latestLedger) => {
+    const { verify, store } = setup(undefined, latestLedger);
+    lines.length = 0;
+    expect((await verify(payload(), requirements)).invalidMessage).toBe(`${advice}; too high`);
+    expect(await store.get(key)).toMatchObject({ state: "refused" });
+    expect(lines.join("")).toContain("latest_ledger_failed");
   });
 
   it("says a settlement is under way when one of the same payment holds the key (#205)", async () => {
