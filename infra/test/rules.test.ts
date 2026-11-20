@@ -57,8 +57,11 @@ test("every Event row is a branch of one rule, and the rule sets no check of its
   expect(events[0]!.annotations.description).toContain('eq $labels.check "http-500"');
 });
 
-test("every selector is x402's", () => {
-  for (const r of buildRules(allOn()).rules)
+test("every selector is x402's, and so is every alert", () => {
+  for (const r of buildRules(allOn()).rules) {
     for (const m of r.expr.matchAll(/\b([a-z_]+)\{([^}]*)\}/g))
       expect(m[2], `${r.alert}: ${m[1]}`).toContain('project="x402"');
+    // An aggregation drops the series' label, so the rule sets it for the VM's routes.
+    expect(r.labels.project, r.alert).toBe("x402");
+  }
 });

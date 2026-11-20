@@ -4,7 +4,8 @@
 // pubnet adds alert instances, not rules. Every Event row becomes one branch of a single rule. The
 // rules the CloudWatch shapes can't express (liveness, the gauges' stamps, the textfiles' ages,
 // the agent) are `serverRules`. Every series is the agent's, so every selector has
-// `project="x402"` (deploy/metrics/prometheus.yml, `external_labels`).
+// `project="x402"` (deploy/metrics/prometheus.yml, `external_labels`), and every rule sets it as a
+// label too: an aggregation drops it, and the VM's routes tell projects apart by it.
 import type { StellarNetwork } from "@stellar-x402/config";
 import { byName, type MetricName } from "@stellar-x402/metrics-catalog";
 import { addAvailabilityAlarms } from "./alarms/availability.js";
@@ -33,14 +34,19 @@ export interface Rule {
   readonly expr: string;
   readonly for?: string;
   /** No `check` on the Event rule: a rule's label overrides the one its branches set. */
-  readonly labels: { readonly check?: string; readonly shape: Shape | "server" };
+  readonly labels: {
+    readonly check?: string;
+    readonly shape: Shape | "server";
+    readonly project: typeof PROJECT_NAME;
+  };
   readonly annotations: { readonly description: string };
 }
 
 /** Why a row makes no rule: it stays in CloudWatch, or a server rule replaces it. */
 export type Skip = { readonly check: string; readonly why: string };
 
-const PROJECT = 'project="x402"';
+const PROJECT_NAME = "x402";
+const PROJECT = `project="${PROJECT_NAME}"`;
 
 /**
  * Rows on a server-side metric that stay in CloudWatch all the same (ADR 0011, "Alerts"): the log
@@ -166,7 +172,7 @@ export class RuleSet implements Alarms {
     return {
       alert: "x402-event",
       expr: entries.map(([, e]) => e.expr).join(" or "),
-      labels: { shape: "event" },
+      labels: { shape: "event", project: PROJECT_NAME },
       annotations: { description: `${text}{{ end }}` },
     };
   }
@@ -223,7 +229,7 @@ export class RuleSet implements Alarms {
       alert,
       expr,
       ...extra,
-      labels: { check, shape },
+      labels: { check, shape, project: PROJECT_NAME },
       annotations: {
         description: anyNetwork(describe(base, spec.description, shape), spec.network),
       },
@@ -269,7 +275,7 @@ export function serverRules(c: EnvironmentConfig): Rule[] {
       alert: `x402-${check}`,
       expr,
       ...(wait && { for: minutes(wait) }),
-      labels: { check, shape: "server" },
+      labels: { check, shape: "server", project: PROJECT_NAME },
       annotations: { description: describe(check, d) },
     });
   };
