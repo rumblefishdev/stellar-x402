@@ -5,8 +5,10 @@ import { createHandler, scheduledAt, stellarRpc } from "../src/watch/handler.js"
 
 const FEE = "GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP";
 const RPC = "https://soroban-testnet.stellar.org";
+const HEALTH = "https://x402-facilitator.sorobanscan.com/health";
 const env = {
   WATCH_TARGETS: JSON.stringify([{ network: "stellar:testnet", feeAccount: FEE, rpcUrl: RPC }]),
+  WATCH_HEALTH_URL: HEALTH,
 };
 const NOW = new Date("2026-11-06T09:42:17Z");
 
@@ -94,17 +96,21 @@ describe("createHandler", () => {
       log: () => {},
       fetchText: async (url) => {
         fetched.push(url);
+        if (url === HEALTH) return JSON.stringify({ commit: "b".repeat(40) });
+        if (url.endsWith("package.json")) return '{"dependencies":{"@x402/stellar":"~2.31.0"}}';
+        if (url.includes("registry.npmjs.org")) return '{"version":"2.31.0"}';
         return url.endsWith("upstream.ts") ? `"${"a".repeat(40)}"` : "same";
       },
     });
     await handler({ scheduledTime: "2026-11-06T10:00:00Z" });
     expect(fetched).toEqual([]);
     await handler({ scheduledTime: "2026-11-06T08:00:00Z" });
-    expect(fetched).toHaveLength(9);
+    expect(fetched).toHaveLength(12);
     expect(published.sort()).toEqual([
       "spendable_stroops",
       "spendable_stroops",
       "upstream_files_changed",
+      "upstream_library_behind",
     ]);
   });
 
@@ -176,6 +182,12 @@ describe("createHandler", () => {
       "protocol_version",
       "protocol_supported_version",
     ]);
+  });
+
+  test("refuses to start without the /health URL the library section reads", () => {
+    expect(() =>
+      createHandler({ env: { WATCH_TARGETS: env.WATCH_TARGETS }, publish: async () => {} }),
+    ).toThrow(/WATCH_HEALTH_URL/);
   });
 
   test("refuses to start without its targets", () => {

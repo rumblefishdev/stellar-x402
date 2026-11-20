@@ -44,19 +44,35 @@ channel while production is behind.
 - Production's `/health` names its commit (`5d2e26ba` on 2026-11-16); `uptime.url` in
   `infra/envs/production.json` already holds that URL.
 
+## Premise
+
+A fresh review of the goal alone, 2026-11-16: the premise holds, with caveats.
+
+- Real: production ran `@x402/stellar` 2.28.0 (commit `5d2e26ba`) while npm and `develop` had
+  2.31.0; 2.29.0 came out on 2026-10-28, so production had been behind for about three weeks.
+- With a release about once a week and deploys by hand, the alarm sits in ALARM most of the time,
+  and CloudWatch notifies only on a change of state: a second release, or a read that breaks, while
+  it is in ALARM sends nothing. Decisions 8 and 9 accept that, and the owner kept them after this review (2026-11-16): the
+  failed read still shows once a deploy should have brought the alarm back to OK.
+- A patch release (2.31.1) keeps it in ALARM until the range is raised to `~2.31.1`: production
+  does run 2.31.0 then. 0 patch releases of `@x402/stellar` since 2026-05-01.
+- Other categories weighed: a dependency bot (a PR per release, no alarm), and "merged but not
+  deployed" as its own check against `develop`.
+
 ## Decisions so far
 
 | # | What is done | From | vs the task | Who does the same (checked) | Code | Test |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | The version compared is the one production runs: the commit from `/health`, then `apps/facilitator/package.json` at that commit, so a bump merged but not deployed still pages | the owner's decision, 2026-11-16 | as the task says | no standard | | |
-| 2 | Its own alarm and metric, not a fifth entry in `upstream_files_changed`: production is behind for most of the time, which would hide spec changes behind one ALARM state | the owner's decision, 2026-11-16 | as the task says | no standard | | |
-| 3 | The alarm is named `upstream-library-behind`, in the `upstream` group beside `upstream-changed` and `upstream-silent` | the owner's decision, 2026-11-16 | as the task says | no standard | | |
-| 4 | One plain question: is the `@x402/stellar` version production asks for (its `package.json` range, without the `~`) the one npm calls `latest`? 1 when they differ, 0 when equal; no minor count, no major rule | the owner's decision, 2026-11-16 | changes it: the task said minors behind | no standard | | |
-| 5 | A `/health` with no `commit` fails the read loudly (`watch_section_failed`), never falls back to develop | the owner's decision, 2026-11-16 | beyond it | no standard | | |
-| 6 | The version is read with a plain match on `~X.Y.Z`, the shape AD-14 sets; any other shape fails the read | the owner's decision, 2026-11-16 | beyond it | no standard | | |
-| 7 | Once a day, in the 08:00 UTC run with the upstream section, on a one-day alarm period | the owner's decision, 2026-11-16 | beyond it | no standard | | |
-| 8 | No point that day reads as behind: `upstream-library-behind` means "production not confirmed on npm's latest", so a read that breaks (a range shape, a moved file, a source down) pages within a day; no separate silence alarm for it. Built as `FILL(m, 1) >= 1` over the day, the factory's silence shape, not `treatMissingData` alone (the Prices API's 0222: a breaching-only alarm missed a 3-hour halt, `infra/src/lib/alarms/factory.ts:195`) | the owner's decision, 2026-11-16; the alarm's shape agent, from the factory's note | beyond it | the `uptime` alarm reads a missing point as down (`infra/lambdas/uptime-probe/probe.mjs`) | | |
-| 9 | `upstream-changed` takes the same rule: no point that day reads as changed, and `upstream-silent` is removed, so the `upstream` group has one rule for a missing read and two alarms | the owner's decision, 2026-11-16 | changes 0029's decision 17 | no standard | | |
+| 1 | The version compared is the one production runs: the commit from `/health`, then `apps/facilitator/package.json` at that commit, so a bump merged but not deployed still pages | the owner's decision, 2026-11-16 | as the task says | no standard | `infra/src/watch/library.ts` | `watch-library.test.ts`: 1 when production asks for another |
+| 2 | Its own alarm and metric, not a fifth entry in `upstream_files_changed`: production is behind for most of the time, which would hide spec changes behind one ALARM state | the owner's decision, 2026-11-16 | as the task says | no standard | `infra/src/lib/alarms/upstream.ts`, metrics-catalog | `alarms.test.ts`: the upstream group |
+| 3 | The alarm is named `upstream-library-behind`, in the `upstream` group beside `upstream-changed` | the owner's decision, 2026-11-16 | as the task says | no standard | `infra/src/lib/alarms/upstream.ts` | `alarms.test.ts`: the upstream group |
+| 4 | One plain question: is the `@x402/stellar` version production asks for (its `package.json` range, without the `~`) the one npm calls `latest`? 1 when they differ, 0 when equal; no minor count, no major rule | the owner's decision, 2026-11-16 | changes it: the task said minors behind | no standard | `infra/src/watch/library.ts` | `watch-library.test.ts`: 1 / 0 |
+| 5 | A `/health` with no `commit` fails the read loudly (`watch_section_failed`), never falls back to develop | the owner's decision, 2026-11-16 | beyond it | no standard | `infra/src/watch/library.ts` | `watch-library.test.ts`: names no commit |
+| 6 | The version is read with a plain match on `~X.Y.Z`, the shape AD-14 sets; any other shape fails the read | the owner's decision, 2026-11-16 | beyond it | no standard | `infra/src/watch/library.ts` | `watch-library.test.ts`: another shape |
+| 7 | Once a day, in the 08:00 UTC run with the upstream section, on a one-day alarm period | the owner's decision, 2026-11-16 | beyond it | no standard | `infra/src/watch/handler.ts` | `watch-handler.test.ts`: once a day, at 08:00 UTC |
+| 8 | No point that day reads as behind: `upstream-library-behind` means "production not confirmed on npm's latest", so a read that breaks (a range shape, a moved file, a source down) pages within a day; no separate silence alarm for it. Built as `FILL(m, 1) >= 1` over the day, the factory's silence shape, not `treatMissingData` alone (the Prices API's 0222: a breaching-only alarm missed a 3-hour halt, `infra/src/lib/alarms/factory.ts:195`) | the owner's decision, 2026-11-16; the alarm's shape agent, from the factory's note | beyond it | the `uptime` alarm reads a missing point as down (`infra/lambdas/uptime-probe/probe.mjs`) | `infra/src/lib/alarms/upstream.ts` | `alarms.test.ts`: fills a missing point with 1 |
+| 9 | `upstream-changed` takes the same rule: no point that day reads as changed, and `upstream-silent` is removed, so the `upstream` group has one rule for a missing read and two alarms | the owner's decision, 2026-11-16 | changes 0029's decision 17 | no standard | `infra/src/lib/alarms/upstream.ts` | `alarms.test.ts`: fills a missing point with 1 |
+| 10 | Both upstream alarms read whole UTC days (`WallClockWindow`, UTC), not CloudWatch's default sliding 24 hours: a one-day, one-period alarm is evaluated every minute on a window not aligned to the clock, so at 08:00 it loses yesterday's point before today's lands and would fire and clear every morning. A day's result reaches the channel after 00:00 UTC | the owner's decision, 2026-11-16, after the #191 reviews | beyond it | AWS, "Alarm evaluation window", recommends it for daily jobs | `infra/src/lib/alarms/upstream.ts` | `alarms.test.ts`: reads whole UTC days |
 
 ## Not yet decided
 
@@ -66,6 +82,19 @@ channel while production is behind.
 
 - Opening PRs for new versions (a dependency bot); other dependencies than `@x402/*`.
 - Turning the alarm on: 0026's criterion for the `upstream` group, with the next production deploy.
+
+## Implementation Notes
+
+- One read section, `infra/src/watch/library.ts`, beside the upstream one: three GETs (`/health`, the
+  facilitator's `package.json` at that commit on GitHub, npm's `latest`) under the protocol
+  section's 30 s deadline, one point, `watch_library` in the log. The handler runs it in the
+  08:00 UTC run and refuses to start without `WATCH_HEALTH_URL`, which the Watch stack sets from
+  `uptime.url`.
+- `upstream-silent` removed; both upstream alarms are `FILL(m, 1) >= 1` over one day, breaching
+  when no series exists.
+- Run once against production, GitHub and npm on 2026-11-16: `commit 5d2e26ba`, production
+  `2.28.0`, latest `2.31.0`, value 1. `check-series GROUP=upstream` lists both series, both
+  missing until the Watch deploy.
 
 ## Acceptance Criteria
 

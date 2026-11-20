@@ -2,7 +2,9 @@
 // with fakes: lambdas/watch/index.mjs only builds the CloudWatch client and passes it in.
 import { rpc } from "@stellar/stellar-sdk";
 import { type BalanceDeps, runBalance } from "./balance.js";
+import { HEALTH_ENV, runLibrary } from "./library.js";
 import { runProtocol } from "./protocol.js";
+import { isHttpsUrl } from "../lib/https-url.js";
 import { PROTOCOL_ENV, TARGETS_ENV, parseProtocolTargets, parseTargets } from "./targets.js";
 import { type UpstreamDeps, fetchText, isUpstreamRun, runUpstream } from "./upstream.js";
 
@@ -30,7 +32,7 @@ export interface HandlerDeps {
   readonly rpcFor?: BalanceDeps["rpcFor"];
   /** Horizon's root, for the protocol section; `globalThis.fetch` by default. */
   readonly fetch?: (url: string, init: RequestInit) => Promise<Response>;
-  /** Upstream x402's files, for the upstream section; a plain GET by default. */
+  /** Upstream x402's files, and the library section's three reads; a plain GET by default. */
   readonly fetchText?: UpstreamDeps["fetchText"];
   readonly now?: () => Date;
 }
@@ -38,7 +40,7 @@ export interface HandlerDeps {
 /**
  * The Lambda handler: reads its targets and builds one RPC client per URL once, at the start, so
  * a warm container reuses its connections. Each run reads the balance and protocol sections at
- * once, and the run at 08:00 UTC the upstream section too: upstream changes far slower. One that
+ * once, and the run at 08:00 UTC the upstream and library sections too: upstream changes far slower. One that
  * fails doesn't stop the others from publishing, and the run then throws for `watch-errors`. It
  * resolves to nothing: the runtime serializes a handler's result as JSON, and the sections' results hold
  * bigints, so returning them failed every run with "Unable to stringify response body".
@@ -46,6 +48,9 @@ export interface HandlerDeps {
 export function createHandler(deps: HandlerDeps): (event?: WatchEvent | null) => Promise<void> {
   const targets = parseTargets(deps.env[TARGETS_ENV]);
   const protocolTargets = parseProtocolTargets(deps.env[PROTOCOL_ENV]);
+  const healthUrl = deps.env[HEALTH_ENV];
+  if (!isHttpsUrl(healthUrl)) throw new Error(`${HEALTH_ENV} must be an https:// URL`);
+  const read = deps.fetchText ?? fetchText;
   const build = deps.rpcFor ?? stellarRpc;
   const clients = new Map(targets.map((t) => [t.rpcUrl, build(t.rpcUrl)]));
   const now = deps.now ?? (() => new Date());
@@ -68,7 +73,10 @@ export function createHandler(deps: HandlerDeps): (event?: WatchEvent | null) =>
         at,
       }),
       ...(isUpstreamRun(at)
-        ? [runUpstream({ fetchText: deps.fetchText ?? fetchText, publish: deps.publish, log, at })]
+        ? [
+            runUpstream({ fetchText: read, publish: deps.publish, log, at }),
+            runLibrary({ healthUrl, fetchText: read, publish: deps.publish, log, at }),
+          ]
         : []),
     ]);
     const failed = sections.flatMap((s) =>

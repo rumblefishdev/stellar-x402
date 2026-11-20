@@ -122,16 +122,18 @@ a check that can't publish (decision 64).
 
 ## Upstream
 
-From the off-server check, once a day at 08:00 UTC (task 0029). It reads the gate's pin from this
-repo's `develop` and compares four upstream x402 files there with upstream `main`: the x402 spec,
-the Stellar `exact` scheme, the suite's Stellar routes and the discovery spec. It is the
-`upstream` group, on once `make check-series GROUP=upstream` passes, in the 3 hours after a
-08:00 UTC run: before the first point `upstream-silent` would fire on nothing.
+From the off-server check, once a day at 08:00 UTC (tasks 0029, 0147). It reads the gate's pin from
+this repo's `develop` and compares four upstream x402 files there with upstream `main`: the x402
+spec, the Stellar `exact` scheme, the suite's Stellar routes and the discovery spec. It also reads
+the `@x402/stellar` production asks for, from the commit `/health` names, and npm's `latest`. It
+is the `upstream` group, on once `make check-series GROUP=upstream` passes, in the 3 hours after a
+08:00 UTC run: both alarms read a day with no point as a breach, so before the first point they
+fire.
 
 | Alarm | Signal | Shape | Fires when | Missing data |
 | --- | --- | --- | --- | --- |
-| `upstream-changed` | `upstream_files_changed` | Level, `Maximum`, 1 of 1 one-day period | One of the four files differs from the pin; it clears once the pin moves | Ignore: `upstream-silent` |
-| `upstream-silent` | `upstream_files_changed` | Level, `SampleCount` below 1, 2 of 2 one-day periods | No point for two days: the daily read fails, and `watch-errors` (2 of 3 five-minute runs) can't see a once-a-day failure | Breaching: no point is what it is for |
+| `upstream-changed` | `upstream_files_changed` | Metric math `FILL(m, 1)`, `Maximum`, 1 of 1 one-day period, whole UTC days | One of the four files differs from the pin, or the day's read published nothing; it clears once the pin moves | Breaching: a series never written, which `FILL` can't see |
+| `upstream-library-behind` | `upstream_library_behind` | Metric math `FILL(m, 1)`, `Maximum`, 1 of 1 one-day period, whole UTC days | Production asks for another `@x402/stellar` than npm's `latest`, or the day's read published nothing; it clears once a deploy brings production there | As above |
 
 ## Protocol
 
