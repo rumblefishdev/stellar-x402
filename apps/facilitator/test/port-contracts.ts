@@ -1780,6 +1780,20 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       resourceUrl: url,
     });
 
+    it("stores an entry no settlement wrote, as the seed does (0155)", async () => {
+      const url = "https://seller.example.com/seeded";
+      const entry = { key: key(url), resource: resource(url) };
+      expect(
+        await store.upsert({
+          keyVersion: CATALOG_KEY_VERSION,
+          ledger: null,
+          checkedAt: 1,
+          ...entry,
+        }),
+      ).toBe("inserted");
+      expect(await store.get(key(url))).toMatchObject({ resource: url });
+    });
+
     it("replaces the stored entry by key, its accepts included (0063 row 7)", async () => {
       const url = "https://seller.example.com/data";
       await upsert({ key: key(url), resource: resource(url, { description: "old" }) });
@@ -1942,6 +1956,10 @@ export function catalogAttemptStoreContract(make: Make<CatalogAttemptStore>) {
       stage: "payment",
       outcome: "rejected",
       ...overrides,
+    });
+
+    it("records an attempt with no payer, as the seed's checks are (0155)", async () => {
+      await expect(attempts.record(attempt(1, { payer: undefined }))).resolves.toBeUndefined();
     });
 
     it("prunes attempts before a time in batches, keeping later ones", async () => {

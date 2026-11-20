@@ -15,8 +15,8 @@ export interface CatalogEntry {
   key: CatalogKey;
   /** `CATALOG_KEY_VERSION` of the rules that built `key`; stored so a rule change can be migrated. */
   keyVersion: number;
-  /** Ledger of the settlement whose check wrote the entry. */
-  ledger: number;
+  /** Ledger of the settlement whose check wrote the entry; `null` when the seed wrote it (0155). */
+  ledger: number | null;
   /**
    * When the check that read the entry from the seller started, app clock in ms: it orders writes,
    * so of two checks of one key the one that started later is kept (0063).
@@ -57,8 +57,8 @@ export interface CatalogStore {
   /**
    * Idempotent by key. Replaces the stored entry, `accepts` included, unless the stored one came
    * from a check that started later (`checkedAt`). Rejects an offer the upstream
-   * `PaymentRequirements` schema refuses, and a `ledger` or `checkedAt` that isn't a non-negative
-   * integer.
+   * `PaymentRequirements` schema refuses, and a `ledger` (unless `null`) or `checkedAt` that isn't a
+   * non-negative integer.
    */
   upsert(entry: CatalogEntry): Promise<UpsertOutcome>;
   /**
@@ -101,7 +101,8 @@ export interface CatalogAttempt {
   at: number;
   network: string;
   payTo: string;
-  payer: string;
+  /** Who paid; absent on a seed's check (0155). */
+  payer?: string;
   /** The settlement's last transaction hash. */
   transaction?: string;
   /** The payment's `resource.url`, as sent. */
