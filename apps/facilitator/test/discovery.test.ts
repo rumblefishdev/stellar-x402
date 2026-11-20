@@ -16,8 +16,10 @@ import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
 
-/** The network `parseConfig` defaults to, and so the one the route below serves. */
+/** The network `parseConfig` defaults to: the one the route below settles on. */
 const SERVED = STELLAR_NETWORKS.testnet;
+/** The catalog holds both networks (0155), so it lists this one too, though nothing settles on it. */
+const OTHER = STELLAR_NETWORKS.pubnet;
 
 describe("parseDiscoveryQuery", () => {
   it.each([
@@ -35,11 +37,15 @@ describe("parseDiscoveryQuery", () => {
     ["an offset past 100 000 entries", { offset: "100000" }, { kind: "query", offset: 100_000 }],
     ["the deepest offset", { offset: String(MAX_OFFSET) }, { kind: "query", offset: MAX_OFFSET }],
     ["another CAIP-2 network", { network: "eip155:8453" }, { kind: "empty", limit: 20 }],
-    ["another Stellar network", { network: STELLAR_NETWORKS.pubnet }, { kind: "empty" }],
     [
-      "the network we serve, as no filter",
+      "the other Stellar network, as a filter",
+      { network: OTHER },
+      { kind: "query", query: { network: OTHER, limit: 20, offset: 0 } },
+    ],
+    [
+      "the network we settle on, as a filter",
       { network: SERVED },
-      { kind: "query", query: { limit: 20, offset: 0 } },
+      { kind: "query", query: { network: SERVED, limit: 20, offset: 0 } },
     ],
     ["the scheme we settle", { scheme: "exact" }, { kind: "query" }],
     ["a scheme we never settle", { scheme: "upto" }, { kind: "empty" }],
@@ -54,7 +60,7 @@ describe("parseDiscoveryQuery", () => {
     ["a name a separator away", { pay_to: "GB" }, { kind: "query", ignored: ["pay_to"] }],
     ["a name a letter away", { types: "http" }, { kind: "query", ignored: ["types"] }],
   ])("accepts %s", (_name, raw, expected) => {
-    expect(parseDiscoveryQuery(raw, SERVED)).toMatchObject(expected);
+    expect(parseDiscoveryQuery(raw)).toMatchObject(expected);
   });
 
   it.each([
@@ -86,26 +92,24 @@ describe("parseDiscoveryQuery", () => {
     ["a value over 256 characters", { extensions: "x".repeat(257) }, "extensions"],
     ["a network that isn't CAIP-2", { network: "pubnet" }, "network"],
   ])("refuses %s, naming the param", (_name, raw, param) => {
-    expect(parseDiscoveryQuery(raw, SERVED)).toEqual({ kind: "invalid", param });
+    expect(parseDiscoveryQuery(raw)).toEqual({ kind: "invalid", param });
   });
 
   it("hands the store only the filters that narrow the catalog, typed", () => {
-    const parsed = parseDiscoveryQuery(
-      {
-        type: "http",
-        payTo: "GB",
-        network: SERVED,
-        extensions: "bazaar",
-        scheme: "exact",
-        foo: "1",
-      },
-      SERVED,
-    );
+    const parsed = parseDiscoveryQuery({
+      type: "http",
+      payTo: "GB",
+      network: SERVED,
+      extensions: "bazaar",
+      scheme: "exact",
+      foo: "1",
+    });
     expect(parsed).toEqual({
       kind: "query",
       query: {
         type: "http",
         payTo: "GB",
+        network: SERVED,
         limit: DISCOVERY_LIMIT.default,
         offset: 0,
       },
@@ -117,14 +121,16 @@ describe("parseDiscoveryQuery", () => {
 });
 
 const N = 30;
+/** Entries on the other network, after the first N. */
+const M = 4;
 
 /**
- * Entry i, each on the served network with `extensions.bazaar`, as the cataloger writes them: mcp
- * when i % 4 is 0, payTo GB when odd.
+ * Entry i, on the network we settle on for i < N and on the other one after, with
+ * `extensions.bazaar`, as the cataloger writes them: mcp when i % 4 is 0, payTo GB when odd.
  */
 async function seed(stores: Stores) {
-  for (let i = 0; i < N; i++) {
-    const network = SERVED;
+  for (let i = 0; i < N + M; i++) {
+    const network = i < N ? SERVED : OTHER;
     const payTo = i % 2 ? "GB" : "GA";
     const resourceUrl = `https://seller.example.com/${i}`;
     await stores.catalog.upsert({
@@ -155,7 +161,7 @@ async function seed(stores: Stores) {
 }
 
 const matching = (match: (i: number) => boolean) =>
-  Array.from({ length: N }, (_, i) => i).filter(match).length;
+  Array.from({ length: N + M }, (_, i) => i).filter(match).length;
 
 describe("GET /discovery/resources", () => {
   const db = testDatabase();
@@ -207,7 +213,7 @@ describe("GET /discovery/resources", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect(body.x402Version).toBe(2);
-    expect(body.pagination).toEqual({ limit: DISCOVERY_LIMIT.default, offset: 0, total: N });
+    expect(body.pagination).toEqual({ limit: DISCOVERY_LIMIT.default, offset: 0, total: N + M });
     expect(body.items).toHaveLength(DISCOVERY_LIMIT.default);
     expect(body.items[0]).toMatchObject({
       resource: "https://seller.example.com/0",
@@ -221,15 +227,15 @@ describe("GET /discovery/resources", () => {
     ["type=mcp", matching((i) => i % 4 === 0)],
     ["payTo=GB", matching((i) => i % 2 === 1)],
     [`network=${SERVED}`, N],
-    ["extensions=bazaar", N],
+    [`network=${OTHER}`, M],
+    ["extensions=bazaar", N + M],
     [
       `type=mcp&payTo=GA&network=${SERVED}&extensions=bazaar`,
-      matching((i) => i % 4 === 0 && i % 2 === 0),
+      matching((i) => i < N && i % 4 === 0 && i % 2 === 0),
     ],
     ["extensions=sign-in-with-x", 0],
-    ["scheme=exact", N],
+    ["scheme=exact", N + M],
     ["scheme=upto", 0],
-    [`network=${STELLAR_NETWORKS.pubnet}`, 0],
     ["network=eip155:8453", 0],
   ])("filters on %s", async (query, total) => {
     const { response, body } = await list(`${query}&limit=100`);
@@ -245,14 +251,14 @@ describe("GET /discovery/resources", () => {
     expect(urls).toEqual(Array.from({ length: 14 }, (_, i) => `https://seller.example.com/${i}`));
     expect((await list("offset=500")).body).toMatchObject({
       items: [],
-      pagination: { limit: 20, offset: 500, total: N },
+      pagination: { limit: 20, offset: 500, total: N + M },
     });
   });
 
   it("reads an empty value as absent, and limit=0 as the total alone", async () => {
     const { response, body } = await list("type=&payTo=&limit=0");
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ items: [], pagination: { limit: 0, offset: 0, total: N } });
+    expect(body).toMatchObject({ items: [], pagination: { limit: 0, offset: 0, total: N + M } });
   });
 
   it("clamps a limit above the max and reports the limit it used", async () => {
@@ -280,7 +286,7 @@ describe("GET /discovery/resources", () => {
     const before = metrics.value("discovery_unknown_params_total");
     const { response, body } = await list("foo=1");
     expect(response.status).toBe(200);
-    expect(body.pagination.total).toBe(N);
+    expect(body.pagination.total).toBe(N + M);
     expect(lines.map((line) => JSON.parse(line))).toContainEqual(
       expect.objectContaining({ event: "discovery_unknown_params", params: ["foo"] }),
     );
@@ -298,12 +304,7 @@ describe("GET /discovery/resources", () => {
 
   it("answers a query nothing can match without the store", async () => {
     const spy = vi.spyOn(stores.catalog, "list");
-    for (const query of [
-      "scheme=upto",
-      "network=eip155:8453",
-      `network=${STELLAR_NETWORKS.pubnet}`,
-      "extensions=sign-in-with-x",
-    ]) {
+    for (const query of ["scheme=upto", "network=eip155:8453", "extensions=sign-in-with-x"]) {
       const { response, body } = await list(query);
       expect(response.status, query).toBe(200);
       expect(body.items, query).toEqual([]);
@@ -331,7 +332,7 @@ describe("GET /discovery/resources", () => {
     expect(page.pagination).toEqual({ limit: 3, offset: 0, total: matching((i) => i % 4 === 0) });
     // It sends `?type=` for an empty string, and `limit: 0` is in its type.
     const count = await client.extensions.bazaar.listResources({ type: "", limit: 0 });
-    expect(count).toMatchObject({ items: [], pagination: { limit: 0, total: N } });
+    expect(count).toMatchObject({ items: [], pagination: { limit: 0, total: N + M } });
     await expect(client.extensions.bazaar.listResources({ limit: -1 })).rejects.toThrow(/400/);
   });
 });

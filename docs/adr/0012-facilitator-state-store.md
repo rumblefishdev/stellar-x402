@@ -8,7 +8,8 @@
   (task 0032: a pool for listings; task 0064: no memory store, tests run on PostgreSQL) and
   2026-10-27 (task 0067: online migrations) and 2026-10-29 (task 0077: one facilitator for both
   networks, still with a database per network) and 2026-11-16 (task 0105: a pool for the API key
-  registry's reads) and 2026-11-18 (task 0106: the portal's sealed key copies and its role)
+  registry's reads) and 2026-11-18 (task 0106: the portal's sealed key copies and its role) and
+  2026-11-20 (task 0155: one catalog for both networks)
 
 ## Context
 
@@ -62,9 +63,11 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
       facilitator connects as the database's owner and never reads the copies, so they are
       closed to it by the encryption, not by grants.
     - Each network's spend budgets count only its own fees, paid from its own fee account.
-    - Still open, decided with the code in 0126: which database holds the catalog, since
-      `/discovery/resources` without a `network` filter lists both networks with an exact
-      `total` and an `offset` up to 1 000 000, and the IP rate limiter's counters. Since 0105
+    - The catalog is one table for both networks, each listing with its network, whatever
+      network the process settles on (task 0155): `/discovery/resources` without a `network`
+      filter lists both, and `network` narrows it. Still open, decided with the code in 0126:
+      which database holds that table once one process serves both networks, and the IP rate
+      limiter's counters. Since 0105
       `/verify` and `/settle` count a request after its body named the network, so their counters
       can sit in that network's database; `/discovery/*` and a body that names no network still
       count before any network is known.
