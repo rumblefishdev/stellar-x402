@@ -809,7 +809,8 @@ payment through us (task 0155). It reads every listing from the seller itself, n
 catalog:
 
 1. The hosts file has one host a line (`api.seller.example`, or a whole origin); blank lines and
-   `#` comments are skipped, and a host named twice is asked once. Keep it outside the repository.
+   `#` comments are skipped, and a host named twice is asked once. A line that isn't a host stops
+   the command before any request, naming the line. Keep the file outside the repository.
 2. For each host it reads `https://<host>/.well-known/x402` (at most 512 KiB) and keeps the
    resource URLs on that host, with GET or POST. Other hosts' URLs, other methods and entries with
    no readable URL are skipped, each named in the report with its reason.
@@ -839,4 +840,7 @@ sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator \
   node dist/seed.js /dev/stdin < seed-hosts.txt > seed-report.tsv
 ```
 
-A testnet reset empties the catalog, seeded mainnet listings included (ADR 0012): run it again.
+The report is printed once, at the end, and a large host takes tens of minutes at the seed's pace.
+Run it in `tmux` on the server, so a dropped SSH session doesn't lose the report, and not during a
+deploy, which recreates the container and stops the seed. A testnet reset empties the catalog,
+seeded mainnet listings included (ADR 0012): run it again.

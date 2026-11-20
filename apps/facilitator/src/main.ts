@@ -752,7 +752,9 @@ export async function seedMain(
 ): Promise<void> {
   const [path, ...rest] = argv;
   if (path === undefined || rest.length > 0) throw new SeedError("usage: pnpm seed <hosts file>");
-  const origins = parseHosts(await readFile(path, "utf8"));
+  const { origins, invalid } = parseHosts(await readFile(path, "utf8"));
+  if (invalid.length > 0)
+    throw new SeedError(`the hosts file has lines that aren't hosts: ${invalid.join(", ")}`);
   const { databaseUrl } = parseMigrateConfig(env);
   const logger = jsonLogger("info", (line) => process.stderr.write(line));
   const pool = createPool(databaseUrl, poolErrorLogger(logger));

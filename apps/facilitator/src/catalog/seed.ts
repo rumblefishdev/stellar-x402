@@ -19,16 +19,25 @@ const FILE_TIMEOUT_MS = 10_000;
 /** The only methods a check sends: real listings use these two alone (ADR 0008). */
 const METHODS = ["GET", "POST"];
 
-/** The hosts file (decision 13): a host or a whole origin a line; blank lines and `#` skipped. */
-export function parseHosts(text: string): string[] {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("#"))
-    .map((line) => (line.includes("://") ? line : `https://${line}`))
-    .filter((line) => URL.canParse(line))
-    .map((line) => new URL(line).origin)
-    .filter((origin, i, origins) => origins.indexOf(origin) === i);
+/**
+ * The hosts file (decision 13): a host or a whole origin a line; blank lines and `#` skipped. A
+ * line that isn't a host is returned in `invalid`, for the command to refuse the file.
+ */
+export function parseHosts(text: string): { origins: string[]; invalid: string[] } {
+  const origins: string[] = [];
+  const invalid: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const url = line.includes("://") ? line : `https://${line}`;
+    if (!URL.canParse(url)) {
+      invalid.push(line);
+      continue;
+    }
+    const origin = new URL(url).origin;
+    if (!origins.includes(origin)) origins.push(origin);
+  }
+  return { origins, invalid };
 }
 
 /**
@@ -71,8 +80,9 @@ export function fileResources(origin: string, file: unknown): FileResources {
       if (typeof fields.method === "string") method = fields.method.toUpperCase();
     }
     if (typeof written !== "string" || !URL.canParse(written, origin)) {
-      const entry = typeof item === "string" ? item : JSON.stringify(item);
-      skipped.push({ entry: String(entry).slice(0, 200), method, reason: "unreadable" });
+      // Named by its kind, not printed: a seller's entry can nest too deep to stringify.
+      const entry = typeof item === "string" ? item.slice(0, 200) : kindOf(item);
+      skipped.push({ entry, method, reason: "unreadable" });
       continue;
     }
     const url = new URL(written, origin);
@@ -89,6 +99,13 @@ export function fileResources(origin: string, file: unknown): FileResources {
     resources.push({ url: url.href, method });
   }
   return { ok: true, resources, skipped };
+}
+
+function kindOf(item: unknown): string {
+  if (Array.isArray(item)) return "an array";
+  if (item === null) return "null";
+  if (typeof item === "object") return "an object";
+  return `a ${typeof item}`;
 }
 
 /** How seeding one host ended: its file, then a result per listing. */
@@ -208,13 +225,16 @@ export function reportLines(reports: HostReport[]): string[] {
       hostsOf.set(r.payTo, hosts);
     }
   }
-  const total = reports.flatMap((report) => report.results).filter(written).length;
+  const all = reports.flatMap((report) => report.results).filter(written);
+  const added = all.filter((r) => r.reason === "inserted").length;
+  const updated = all.filter((r) => r.reason === "updated").length;
   const withListing = reports.filter((report) => report.results.some(written)).length;
   const accounts = new Set(
     reports.flatMap((report) => report.results.filter(written).map((r) => r.payTo)),
   );
   lines.push(
-    `total: ${total} written, ${withListing} hosts with a listing, ${accounts.size} payTo`,
+    `total: ${all.length} written (${added} added, ${updated} updated), ` +
+      `${withListing} hosts with a listing, ${accounts.size} payTo`,
   );
   for (const [payTo, hosts] of hostsOf)
     if (hosts.size > 1)

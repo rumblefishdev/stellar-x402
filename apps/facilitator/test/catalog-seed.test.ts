@@ -41,7 +41,7 @@ afterEach(() => {
   seller.server.close();
 });
 
-function setup() {
+function setup(now?: () => number) {
   const stores = db.stores();
   const metrics = memoryMetrics();
   const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -52,6 +52,7 @@ function setup() {
     metrics,
     logger,
     listLocal: true,
+    now,
   });
   const rows = async () =>
     (
@@ -98,6 +99,22 @@ describe("cataloger.seed (0155)", () => {
     await db.pool.query("UPDATE catalog SET ledger = 100, checked_at = 0");
     await cataloger.seed(`${seller.url}/weather`, "GET");
     expect(await rows()).toMatchObject([{ ledger: "100" }]);
+  });
+
+  it("dates a listing confirmed by the first 402 at that request, not at the check's turn", async () => {
+    accepts = [offer(), offer({ network: "stellar:pubnet", payTo: "GPUBNET" })];
+    let clock = 1_000_000;
+    const { cataloger } = setup(() => (clock += 1_000));
+    await cataloger.seed(`${seller.url}/weather`, "GET");
+    const dated = await db.pool.query<{ checked_at: string; last: string }>(
+      `SELECT checked_at, resource->>'lastUpdated' AS last FROM catalog ORDER BY seq`,
+    );
+    const asked = dated.rows[0]!.checked_at;
+    expect(dated.rows.map((row) => row.checked_at)).toEqual([asked, asked]);
+    expect(dated.rows.map((row) => row.last)).toEqual([
+      new Date(Number(asked)).toISOString(),
+      new Date(Number(asked)).toISOString(),
+    ]);
   });
 
   it("asks again with the method the seller's 402 declares, and lists under it", async () => {

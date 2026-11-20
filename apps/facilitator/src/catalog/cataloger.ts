@@ -35,8 +35,11 @@ interface SellerCheck {
   /** The settlement's ledger, kept on the entry; `null` for a seed (0155). */
   ledger: number | null;
   compared: Omit<CatalogAttempt, "stage" | "outcome">;
-  /** The seller's 402 when it was already asked with this listing's method (the seed's, 0155). */
-  answer?: PaymentRequired;
+  /**
+   * The seller's 402 when it was already asked with this listing's method (the seed's, 0155), and
+   * when it was asked: the listing was confirmed then, not when the check reads it.
+   */
+  answer?: { paymentRequired: PaymentRequired; at: number };
 }
 
 export interface CatalogerDeps {
@@ -329,10 +332,10 @@ export function createCataloger({
     // What the attempt knew so far (key, copy, answer), for a row if a later step throws.
     let known: Omit<CatalogAttempt, "stage" | "outcome"> = compared;
     try {
-      const checkedAt = now();
+      const checkedAt = given ? given.at : now();
       // An MCP listing is checked with an MCP client (row 5), an HTTP one with one request.
       let answer: SellerAnswer;
-      if (given) answer = { ok: true, paymentRequired: given };
+      if (given) answer = { ok: true, paymentRequired: given.paymentRequired };
       else if (input.type === "mcp")
         answer = await askMcpSeller(
           url,
@@ -389,7 +392,10 @@ export function createCataloger({
         ledger,
         checkedAt,
         // The time of the seller's answer (0063): when the listing was last confirmed.
-        resource: { ...listing.entry.resource, lastUpdated: new Date(now()).toISOString() },
+        resource: {
+          ...listing.entry.resource,
+          lastUpdated: new Date(given ? given.at : now()).toISOString(),
+        },
       };
       const written = { ...asked, key: entry.key, contentHash: contentHash(entry.resource) };
 
@@ -458,6 +464,7 @@ export function createCataloger({
       const fields = { url, origin: "seed" };
       let requests = 1;
       try {
+        const askedAt = now();
         const probe = await askSeller(bazaarLib.sellerRequest(url, { method }), sellerLimits);
         if (!probe.ok) {
           const { reason, detail } = probe;
@@ -495,7 +502,7 @@ export function createCataloger({
             key,
             ledger: null,
             compared: { at: now(), network, payTo, url, key },
-            answer: answered ? probe.paymentRequired : undefined,
+            answer: answered ? { paymentRequired: probe.paymentRequired, at: askedAt } : undefined,
           });
           const { outcome, reason, detail } = ended;
           results.push({ url, method: key.method, network, payTo, outcome, reason, detail });

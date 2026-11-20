@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { PaymentRequirements } from "@x402/core/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCataloger } from "../src/catalog/cataloger.js";
@@ -9,6 +12,7 @@ import {
   seedHosts,
 } from "../src/catalog/seed.js";
 import { SELLER_USER_AGENT } from "../src/catalog/seller-check.js";
+import { SeedError, seedMain } from "../src/main.js";
 import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
@@ -17,15 +21,31 @@ import { startSeller, type Seller } from "./seller.js";
 describe("the hosts file (0155 decision 13)", () => {
   it("reads one host a line, skipping blank lines and # comments", () => {
     const text = "a.example\n\n  # from the owner's list\n b.example \nhttp://127.0.0.1:8080\n";
-    expect(parseHosts(text)).toEqual([
-      "https://a.example",
-      "https://b.example",
-      "http://127.0.0.1:8080",
-    ]);
+    expect(parseHosts(text)).toEqual({
+      origins: ["https://a.example", "https://b.example", "http://127.0.0.1:8080"],
+      invalid: [],
+    });
   });
 
   it("asks a host once, however often the file names it", () => {
-    expect(parseHosts("a.example\nhttps://a.example\na.example/\n")).toEqual(["https://a.example"]);
+    expect(parseHosts("a.example\nhttps://a.example\na.example/\n").origins).toEqual([
+      "https://a.example",
+    ]);
+  });
+
+  it("refuses a hosts file with a line that isn't a host, before asking anyone", async () => {
+    const path = join(await mkdtemp(join(tmpdir(), "seed-")), "hosts.txt");
+    await writeFile(path, "a.example\nhost:abc\n");
+    await expect(seedMain([path], {})).rejects.toThrow(
+      new SeedError("the hosts file has lines that aren't hosts: host:abc"),
+    );
+  });
+
+  it("names every line that isn't a host, so a typo never vanishes", () => {
+    expect(parseHosts("a.example\napi.seller .example\nhost:abc\n")).toEqual({
+      origins: ["https://a.example"],
+      invalid: ["api.seller .example", "host:abc"],
+    });
   });
 });
 
@@ -81,10 +101,18 @@ describe("the seller's /.well-known/x402 (0155 decisions 9, 10)", () => {
       ok: true,
       resources: [{ url: "https://seller.example/ok" }],
       skipped: [
-        { entry: '{"url":5}', method: "GET", reason: "unreadable" },
+        { entry: "an object", method: "GET", reason: "unreadable" },
         { entry: "http://[bad", method: "GET", reason: "unreadable" },
-        { entry: "{}", method: "GET", reason: "unreadable" },
+        { entry: "an object", method: "GET", reason: "unreadable" },
       ],
+    });
+  });
+
+  it("names an entry nested too deep to print without failing on it", () => {
+    const deep = JSON.parse(`[${"[".repeat(100_000)}${"]".repeat(100_000)}]`);
+    expect(fileResources(origin, { resources: deep })).toMatchObject({
+      ok: true,
+      skipped: [{ entry: "an array", reason: "unreadable" }],
     });
   });
 
@@ -224,12 +252,13 @@ describe("the seed's report (0155 decision 12)", () => {
   });
 
   it("prints a line per result, then totals and every payTo on more than one host", () => {
-    const result = (url: string, payTo: string, outcome = "refreshed") => ({
+    const result = (url: string, payTo: string, reason = "inserted") => ({
       url,
       method: "GET",
       network: "stellar:pubnet",
       payTo,
-      outcome,
+      outcome: "refreshed",
+      reason,
     });
     const lines = reportLines([
       {
@@ -247,7 +276,7 @@ describe("the seed's report (0155 decision 12)", () => {
         file: "ok",
         listed: 1,
         skipped: [{ entry: "https://x.example/1", method: "GET", reason: "off_host" }],
-        results: [result("https://b.example/1", "GSHARED")],
+        results: [result("https://b.example/1", "GSHARED", "updated")],
       },
       {
         origin: "https://c.example",
@@ -258,14 +287,14 @@ describe("the seed's report (0155 decision 12)", () => {
       },
     ]);
     expect(lines).toEqual([
-      "https://a.example/1\tGET\tstellar:pubnet\tGSHARED\trefreshed\t\t",
+      "https://a.example/1\tGET\tstellar:pubnet\tGSHARED\trefreshed\tinserted\t",
       "https://a.example/2\tGET\t\t\tnot_askable\tnot_402\t",
-      "https://b.example/1\tGET\tstellar:pubnet\tGSHARED\trefreshed\t\t",
+      "https://b.example/1\tGET\tstellar:pubnet\tGSHARED\trefreshed\tupdated\t",
       "https://x.example/1\tGET\t\t\tskipped\toff_host\t",
       "host https://a.example: file ok, 2 listed, 0 on another host, 0 other methods, 0 unreadable, 1 written",
       "host https://b.example: file ok, 1 listed, 1 on another host, 0 other methods, 0 unreadable, 1 written",
       "host https://c.example: file status 404, 0 listed, 0 on another host, 0 other methods, 0 unreadable, 0 written",
-      "total: 2 written, 2 hosts with a listing, 1 payTo",
+      "total: 2 written (1 added, 1 updated), 2 hosts with a listing, 1 payTo",
       "payTo GSHARED on 2 hosts: https://a.example, https://b.example",
     ]);
   });
