@@ -512,10 +512,22 @@ approved by akot the same day with the design.
 33. **Decision 22 stands, for another reason.** No page calls the backend any more, so CORS is
     gone; every route but `/health` needs the hub's token, which is the gate.
 34. **The month's cap is read, then acted on, without a lock.** `issue` reads the account's keys
-    and then writes a new one, so two issues for one account with a revoke landing between them
-    could give the account a second key in one month. Bounded: the registry still holds one
-    active key per account, and the use stays with the account, not the key. Left as it is.
-    Claude's, from the build; not yet seen by akot.
+    and then writes a new one, so an issue whose read went stale while a revoke landed gives the
+    account one more key in that month. Bounded: up to one extra key per stale issue, never two
+    active keys (the partial unique index `api_keys_one_active`), no quota gained (the use is
+    the account's, not the key's, 0107), and only by the account itself, through Discord round
+    trips it runs in parallel. A lock, `pg_advisory_xact_lock` on the owner (no new grants), is
+    deferred to a ban, decided in 0107 before 0126 (decision 35). Claude's, from the build;
+    approved on 2026-11-20.
+    Fixed beside it on 2026-11-20 (branch `lore-0106-revoke-copy-and-logs`): a revoke deletes the
+    copies of the owner's revoked keys only (`AND state = 'revoked'`). Its delete is a second
+    statement after the `UPDATE`, and in READ COMMITTED it saw an issue that committed in between,
+    as one can when the revoke found no active key and so held no lock: the new key stayed active
+    with its copy gone (`showable: false`, `reveal` `409`). The in-memory store revokes first and
+    deletes the same. `packages/api-keys` 27 tests and `apps/portal` 100 pass; the two new
+    PostgreSQL tests in `apps/facilitator/test/postgres.test.ts` (the interleaving forced, and a
+    copy the operator's script left still deleted) were written but not run: no database that
+    day.
 35. **A revoke by the operator's script is not a ban.** `pnpm keys revoke` (0105) holds back a
     new key only until the month's end, as any revoke does: the cap reads `revoked_at` in
     `api_keys`, whoever set it, and nothing in the registry blocks an owner. Whether pubnet needs
@@ -528,3 +540,16 @@ approved by akot the same day with the design.
     is a `502`, as Prices answers a control plane that failed: the hub calls again at once after
     a `503` only. Prices answers a timeout with a `503`; here a timeout is a failure like any
     other, a `502`. Changes decisions 26 and 27.
+37. **The server keeps no log line past 30 days.** `deploy/logrotate/x402-logs.conf` rotates each
+    file daily, empty or not (`ifempty`), or sooner past 100 MB (`maxsize`), keeps 10 and deletes
+    any older than 30 days (`maxage 30`), with `copytruncate` as before. The hub's privacy policy
+    keeps log lines up to 30 days, and both services' files need it: the portal's lines name a key
+    (`key_id`), the facilitator's their caller (`discord:<id>` on pubnet). By size alone a quiet
+    file never rotated, and logrotate reads `maxage` only when a file rotates, so `maxage 30`
+    alone, as approved on 2026-11-20, would have changed nothing; the daily rotation was added in
+    the build and agreed the same day, for akot to confirm. The facilitator's quiet files now keep
+    about 10 days on the server (CloudWatch keeps 30). Checked with logrotate 3.22 on a scratch
+    tree: a line written once is gone after ten daily runs (it stayed with `notifempty` or with
+    `size 100M`), a rotation 40 days old goes at the next rotation, a file past 100 MB rotates the
+    same day. `@stellar-x402/deploy` 153 tests; ADR 0011, the runbook and `docs/monitoring.md`
+    say the same.
