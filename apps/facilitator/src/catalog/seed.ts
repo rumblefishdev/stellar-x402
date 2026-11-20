@@ -174,7 +174,8 @@ export function reportLines(reports: HostReport[]): string[] {
     for (const r of results)
       lines.push(
         [r.url, r.method, r.network, r.payTo, r.outcome, r.reason, r.detail]
-          .map((field) => (field ?? "").replace(/[\t\n]/g, " "))
+          // A seller's text can carry terminal escapes: no control character is printed.
+          .map((field) => (field ?? "").replace(/\p{Cc}/gu, " "))
           .join("\t"),
       );
   const written = (r: SeedResult) => r.outcome === "refreshed";

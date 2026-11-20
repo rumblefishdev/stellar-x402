@@ -158,6 +158,28 @@ describe("seedHosts (0155)", () => {
 });
 
 describe("the seed's report (0155 decision 12)", () => {
+  it("prints a seller's text with no control character, so it can't drive the terminal", () => {
+    const [line] = reportLines([
+      {
+        origin: "https://a.example",
+        file: "ok",
+        listed: 1,
+        offHost: 0,
+        otherMethod: 0,
+        results: [
+          {
+            url: "https://a.example/1",
+            method: "GET",
+            outcome: "not_askable",
+            reason: "not_402",
+            detail: "status 404\u001b[2J\u0007\tok\n",
+          },
+        ],
+      },
+    ]);
+    expect(line).toBe("https://a.example/1\tGET\t\t\tnot_askable\tnot_402\tstatus 404 [2J  ok ");
+  });
+
   it("prints a line per result, then totals and every payTo on more than one host", () => {
     const result = (url: string, payTo: string, outcome = "refreshed") => ({
       url,
