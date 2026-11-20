@@ -20,7 +20,11 @@ const SESSION_END_MS = 2_000;
 export const SELLER_USER_AGENT =
   "stellar-x402-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)";
 
-/** Why a seller gave no usable answer; `detail` is for logs and the attempt's row only. */
+/**
+ * Why a seller gave no usable answer: the seller-fetch guard's cause (`not_https`, `not_public`,
+ * `redirect`, `timeout`, …) or what its answer lacked. `detail` is for logs and the attempt's row
+ * only.
+ */
 export type SellerAnswer =
   | { ok: true; paymentRequired: PaymentRequired }
   | {
@@ -141,7 +145,7 @@ export async function askMcpSeller(
     }
     if (deadline.aborted) {
       const detail = `no answer within ${limits.timeoutMs} ms`;
-      return { ok: false, reason: "upstream_error", detail };
+      return { ok: false, reason: "timeout", detail };
     }
     // Not an MCP server, or one that answered the call with a protocol error.
     return { ok: false, reason: "mcp_error", detail: String(error) };

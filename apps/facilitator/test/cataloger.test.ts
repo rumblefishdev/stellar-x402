@@ -255,6 +255,7 @@ describe("cataloger", () => {
 
   it.each([
     ["not a 402", { status: 200 }, "not_402"],
+    ["a redirect, which is not followed (0085)", { status: 302 }, "redirect"],
     ["a 402 without terms", { status: 402, body: {} as PaymentRequired }, "unreadable_402"],
     [
       "a 402 whose tags are not a list (0130)",
@@ -292,7 +293,7 @@ describe("cataloger", () => {
       record({ info: valid.info }, {}, { url: "http://10.255.255.1/x" }),
       "settle",
     );
-    expect(counted("seller", "not_askable", "unsafe_url")).toBe(1);
+    expect(counted("seller", "not_askable", "not_https")).toBe(1);
 
     // Upstream's default resource URL names the tool, not the server that has it.
     const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };
@@ -301,7 +302,7 @@ describe("cataloger", () => {
 
     seller.reply = () => new Promise(() => {});
     await cataloger.onSuccess(record(valid), "settle");
-    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(counted("seller", "not_askable", "timeout")).toBe(1);
     expect(await list()).toEqual([]);
   });
 
@@ -679,7 +680,7 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     mcp.server.close();
     clock.now += MINUTE;
     await cataloger.onSuccess(paid(), "settle");
-    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(counted("seller", "not_askable", "network")).toBe(1);
     expect(await list()).toEqual([]);
   });
 
@@ -738,7 +739,7 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     const started = performance.now();
     await cataloger.onSuccess(paid(), "settle");
     expect(performance.now() - started).toBeLessThan(5_000);
-    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(counted("seller", "not_askable", "timeout")).toBe(1);
     expect(await list()).toEqual([]);
   });
 
