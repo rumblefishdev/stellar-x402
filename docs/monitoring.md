@@ -83,6 +83,8 @@ once, by the task that turns it on.
 | `backup-age`         | `backups`       | 0026, once the first pgBackRest backup is made                                         |
 | `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
 | `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
+| `hub-uptime`         | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
+| `portal-uptime`      | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
 | `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
 | `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
 | `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
@@ -140,6 +142,26 @@ The uptime probe, a Lambda in the Uptime stack, reads
 `ready` (1 or 0) to `x402-watch`. Its log is `/aws/lambda/x402-production-uptime-probe`, and each
 line says what it read (`reason`).
 
+The same code runs twice more, a function and a schedule each, so that one probe failing can't
+silence another (0106 decision 21). Each publishes 1 only for a 200 whose JSON holds what its
+target answers when it can serve:
+
+| Function                              | Reads                                                                                         | Ready when               | Metric         | Alarm, group                          |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------ | -------------- | ------------------------------------- |
+| `x402-production-uptime-probe`        | `https://x402-facilitator.sorobanscan.com/health`                                             | `"ready": true`          | `ready`        | `uptime`, `uptime-flapping`           |
+| `x402-production-portal-uptime-probe` | `https://x402-portal.sorobanscan.com/health`, the portal's backend                            | `"ready": true`          | `portal_ready` | `portal-uptime`, `portalUptime` (off) |
+| `x402-production-hub-uptime-probe`    | `https://sorobanscan.com/api/hub/me`, the API hub's backend through the explorer's CloudFront | `"authenticated": false` | `hub_ready`    | `hub-uptime`, `hubUptime` (off)       |
+
+The hub's probe reads the whole path a member's browser takes, the distribution included. A
+status proves nothing there: the distribution answers a path it doesn't route with a redirect
+(`/api/hub/me` gives a `302` to `/api/` until the hub's backend is routed, so the probe reads 0
+today), or with the explorer's page as a 200 or a 403. Without a session the hub's `/me` answers
+`{"authenticated": false}`, which nothing else on the distribution does. Each function's log is
+`/aws/lambda/<function>`, and each line names the URL, the metric and the `reason`. The hub's own
+alarms, on its Lambda's `Throttles` and `Url5xxCount`, are being added in its repo
+(`rumblefishdev/sorobanscan-api-portal`), publishing to this repo's `x402-production-alarms`
+topic, so they reach the same channel.
+
 ### The uptime figure
 
 A minute counts as up only when the probe read `ready` (decision 5; a missing point counts as
@@ -181,6 +203,36 @@ probe now and then, a lease that moves, or a tunnel that drops.
    lines in `/var/log/x402/host/metrics.log`; the [watchdog](runbook.md#the-watchdog) section
    says where the reason is logged.
 2. Then `/var/log/x402/production/cloudflared.log`.
+
+### portal-uptime
+
+The portal's backend (`apps/portal`, [runbook, The portal's backend](runbook.md#the-portals-backend))
+was not ready for 7 minutes in a row. The hub's x402 tab can't show, issue or revoke a key
+meanwhile; the facilitator doesn't need the backend, and pubnet's `/verify` and `/settle` read the
+registry, not the backend. Missing points count as down.
+
+1. Open `https://x402-portal.sorobanscan.com/health`. `{"ready":false}` with a 503 is the
+   backend's own answer: its database didn't answer. A 502 or a Cloudflare error page is the
+   tunnel or Cloudflare, and the backend never saw the request.
+2. On the server: `systemctl status x402-portal@production`, then the end of
+   `/var/log/x402/production/portal.log` (`startup_failed`, `not_ready`, `pool_error`) and
+   `/var/log/x402/production/cloudflared.log`.
+3. If the backend answers ready and the probe still reads 0, read the probe's log,
+   `/aws/lambda/x402-production-portal-uptime-probe`.
+
+### hub-uptime
+
+The API hub's backend did not answer `https://sorobanscan.com/api/hub/me` with a 200 and
+`{"authenticated": false}` for 7 minutes in a row, read through the explorer's CloudFront: no
+member can sign in, and neither the x402 tab nor the Prices API tab works. Missing points count as
+down.
+
+1. Open the URL. A redirect or the explorer's HTML is the distribution: its route for
+   `/api/hub/*` (`soroban-block-explorer`, `infra/`). A JSON error or a 5xx from the hub is its
+   backend, a Lambda in `rumblefishdev/sorobanscan-api-portal`, whose own alarms (`Throttles`,
+   `Url5xxCount`, being added there) post to this channel too.
+2. If the hub answers and the probe still reads 0, read the probe's log,
+   `/aws/lambda/x402-production-hub-uptime-probe`.
 
 ## The off-server check
 
@@ -779,6 +831,8 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `mem_used_percent`                          | `x402-host`        | gauge, Percent | none                                                     | [memory](#memory), [telemetry-silent](#telemetry-silent)                                                      |
 | `disk_used_percent`                         | `x402-host`        | gauge, Percent | `path`                                                   | [audit-disk](#audit-disk), [disk](#disk), [telemetry-silent](#telemetry-silent)                               |
 | `ready`                                     | `x402-watch`       | gauge, None    | none                                                     | [uptime](#uptime), [uptime-flapping](#uptime-flapping)                                                        |
+| `portal_ready`                              | `x402-watch`       | gauge, None    | none                                                     | [portal-uptime](#portal-uptime) (off)                                                                         |
+| `hub_ready`                                 | `x402-watch`       | gauge, None    | none                                                     | [hub-uptime](#hub-uptime) (off)                                                                               |
 | `spendable_stroops`                         | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
 | `protocol_version`                          | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
 | `protocol_supported_version`                | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |

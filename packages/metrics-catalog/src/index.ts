@@ -811,10 +811,30 @@ export const CATALOG = [
     emit: "aggregated",
   },
 
-  // ---- x402-watch: PutMetricData from the uptime probe and the off-server check (#115) ----
+  // ---- x402-watch: PutMetricData from the uptime probes and the off-server check (#115) ----
   {
     namespace: WATCH,
     name: "ready",
+    kind: "gauge",
+    unit: "None",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
+  // The same probe on the portal's backend (`/health`) and on the API hub's backend through the
+  // explorer's CloudFront (`/api/hub/me`), one metric each (0106 decision 21).
+  {
+    namespace: WATCH,
+    name: "portal_ready",
+    kind: "gauge",
+    unit: "None",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
+  {
+    namespace: WATCH,
+    name: "hub_ready",
     kind: "gauge",
     unit: "None",
     scope: "process",
