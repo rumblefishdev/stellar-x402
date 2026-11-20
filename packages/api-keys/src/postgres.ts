@@ -119,11 +119,14 @@ export class PostgresSealedKeyStore implements SealedKeyStore {
   async revoke(owner: string, now: number): Promise<boolean> {
     return this.transaction(async (client) => {
       const revoked = await new PostgresApiKeyStore(client).revoke(owner, now);
-      // Every copy of the owner's keys, not the revoked key's alone: a key the operator's script
-      // revoked left its copy behind, and this is where it goes.
+      // The copy of every revoked key of the owner, not this one's alone: a key the operator's
+      // script revoked left its copy behind, and this is where it goes. Never an active key's: in
+      // READ COMMITTED this statement sees an issue that committed after the UPDATE above, whose
+      // fresh copy would go, leaving its key active and unshowable. Such an issue finds no lock
+      // when the UPDATE revoked nothing (0106 decision 34).
       await client.query(
         `DELETE FROM api_key_copies
-         WHERE key_hash IN (SELECT key_hash FROM api_keys WHERE owner = $1)`,
+         WHERE key_hash IN (SELECT key_hash FROM api_keys WHERE owner = $1 AND state = 'revoked')`,
         [owner],
       );
       return revoked;
