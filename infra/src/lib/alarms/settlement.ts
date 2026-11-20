@@ -44,6 +44,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     f.level("pending", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "settlement_oldest_open_seconds", dims: on },
       statistic: "Maximum",
       periodMinutes: 1,
@@ -111,6 +112,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
       f.event("breaker-opened", {
         group: "facilitator",
         network,
+        severity: "critical",
         qualifier: breaker.replace("_", "-"),
         signal: { catalog: "spend_breaker_opened_total", dims: { network, breaker } },
         description: {
@@ -123,6 +125,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     f.event("budget-nearing", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "spend_budget_nearing_total", dims: on },
       periodMinutes: 5,
       periods: 4,
@@ -180,6 +183,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     f.event("landed-after-expired", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "settlement_landed_after_expired_total", dims: on },
       description: {
         what: `A transaction on ${network} landed after its record was marked expired: the payer may have been told the payment failed while it settled.`,
@@ -191,6 +195,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     f.level("sweeps-stopped", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "settlement_sweeps_total", dims: { network, outcome: "listed" } },
       statistic: "Sum",
       periodMinutes: 1,
@@ -294,6 +299,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     f.event("commit-unmatched", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "spend_commit_unmatched_total", dims: on },
       description: {
         what: `A settled fee on ${network} counts against no budget: its reservation was never made or was pruned meanwhile, so the fee budgets undercount.`,

@@ -720,6 +720,10 @@ threshold and this page's section. Until the switch nothing on the VM loads it.
 - `network` is a label, not part of the name: pubnet adds alert instances, not rules.
 - Every Event alarm is one branch of the single rule `x402-event`; its `check` label is the
   alarm's name.
+- Every alert has `severity`: `critical` for what would page on mainnet (`pending`, the
+  `breaker-opened-*` alarms, `budget-nearing`, `sweeps-stopped`, `landed-after-expired`,
+  `commit-unmatched`, `facilitator-silent`, `gauge-stale`), `warning` for the rest (lore 0139,
+  decision 1). Until the phone route exists, both go to Slack.
 - What stays in CloudWatch: the off-server check's and the uptime probe's alarms, `audit-disk`,
   `certificate`, `credentials-stale`, `telemetry-silent` and `log-volume-app`. The EMF alarms go
   with EMF.

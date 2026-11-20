@@ -69,12 +69,17 @@ export interface AlarmRecord {
   readonly series: readonly SeriesRef[];
 }
 
+/** A Prometheus rule's `severity` (0139 decision 1); CloudWatch doesn't read it. */
+export type Severity = "critical" | "warning";
+
 interface Common {
   readonly group: AlarmGroup;
   readonly network?: StellarNetwork;
   /** Ends the name after the network, for a row with one alarm per mount or log group. */
   readonly qualifier?: string;
   readonly description: Description;
+  /** Default `warning`. `critical`: it would page on mainnet (the phone route, 0138's D11). */
+  readonly severity?: Severity;
 }
 
 export interface EventSpec extends Common {

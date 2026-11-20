@@ -57,6 +57,40 @@ test("every Event row is a branch of one rule, and the rule sets no check of its
   expect(events[0]!.annotations.description).toContain('eq $labels.check "http-500"');
 });
 
+test("the checks that would page on mainnet are critical, every other one a warning", () => {
+  const severity = new Map<string, string>();
+  for (const r of buildRules(allOn()).rules) {
+    if (r.labels.check) severity.set(r.labels.check, r.labels.severity ?? "none");
+    for (const m of r.expr.matchAll(
+      /label_replace\(label_replace\(.*?, "check", "([a-z0-9-]+)", "", ""\), "severity", "([a-z]+)", "", ""\)/g,
+    ))
+      severity.set(m[1]!, m[2]!);
+  }
+  // 0139 decision 1: ADR 0011's money alerts, then 0138's D1 and D2 defaults.
+  const critical = [
+    "pending",
+    "breaker-opened-payer",
+    "breaker-opened-pay-to",
+    "breaker-opened-asset",
+    "budget-nearing",
+    "sweeps-stopped",
+    "landed-after-expired",
+    "commit-unmatched",
+    "facilitator-silent",
+    "gauge-stale",
+  ];
+  expect(
+    [...severity]
+      .filter(([, s]) => s === "critical")
+      .map(([c]) => c)
+      .sort(),
+  ).toEqual([...critical].sort());
+  expect([...severity.values()].every((s) => s === "critical" || s === "warning")).toBe(true);
+  // The Event rule sets neither: its label would override every branch's.
+  const event = buildRules(allOn()).rules.find((r) => r.alert === "x402-event")!;
+  expect(event.labels.severity).toBeUndefined();
+});
+
 test("every selector is x402's, and so is every alert", () => {
   for (const r of buildRules(allOn()).rules) {
     for (const m of r.expr.matchAll(/\b([a-z_]+)\{([^}]*)\}/g))

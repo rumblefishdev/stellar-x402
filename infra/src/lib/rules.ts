@@ -17,6 +17,7 @@ import {
   type EventSpec,
   type LevelSpec,
   type MathSignal,
+  type Severity,
   type Shape,
   type Signal,
   type SilenceSpec,
@@ -33,9 +34,10 @@ export interface Rule {
   readonly alert: string;
   readonly expr: string;
   readonly for?: string;
-  /** No `check` on the Event rule: a rule's label overrides the one its branches set. */
+  /** No `check` or `severity` on the Event rule: a rule's label overrides its branches'. */
   readonly labels: {
     readonly check?: string;
+    readonly severity?: Severity;
     readonly shape: Shape | "server";
     readonly project: typeof PROJECT_NAME;
   };
@@ -124,7 +126,8 @@ export class RuleSet implements Alarms {
       // "t in 1 of n periods": any increase in the window, or a period's at t or over.
       const expr =
         t === 1 ? `${inc(n * p)} > 0` : `max_over_time((${inc(p)})[${minutes(n * p)}:1m]) >= ${t}`;
-      return `label_replace(${expr}, "check", "${check}", "", "")`;
+      const labelled = `label_replace(${expr}, "check", "${check}", "", "")`;
+      return `label_replace(${labelled}, "severity", "${spec.severity ?? "warning"}", "", "")`;
     });
     const expr = branches.join(" or ");
     const text = anyNetwork(describe(base, spec.description, "event"), spec.network);
@@ -218,7 +221,12 @@ export class RuleSet implements Alarms {
 
   private add(
     base: string,
-    spec: { network?: StellarNetwork; qualifier?: string; description: Description },
+    spec: {
+      network?: StellarNetwork;
+      qualifier?: string;
+      description: Description;
+      severity?: Severity;
+    },
     shape: Shape,
     expr: string,
     extra: { for?: string },
@@ -229,7 +237,7 @@ export class RuleSet implements Alarms {
       alert,
       expr,
       ...extra,
-      labels: { check, shape, project: PROJECT_NAME },
+      labels: { check, severity: spec.severity ?? "warning", shape, project: PROJECT_NAME },
       annotations: {
         description: anyNetwork(describe(base, spec.description, shape), spec.network),
       },
@@ -269,13 +277,14 @@ export function serverRules(c: EnvironmentConfig): Rule[] {
     expr: string,
     d: Description,
     wait?: number,
+    severity: Severity = "warning",
   ): void => {
     if (!on[group]) return;
     rules.push({
       alert: `x402-${check}`,
       expr,
       ...(wait && { for: minutes(wait) }),
-      labels: { check, shape: "server", project: PROJECT_NAME },
+      labels: { check, severity, shape: "server", project: PROJECT_NAME },
       annotations: { description: describe(check, d) },
     });
   };
@@ -292,6 +301,8 @@ export function serverRules(c: EnvironmentConfig): Rule[] {
       noData: "Absence is what this rule is for.",
     },
     10,
+    // 0138's D2: the money rules can't see without it.
+    "critical",
   );
 
   // Each gauge's stamp moves at each successful read; a read that keeps throwing stops it while
@@ -318,6 +329,8 @@ export function serverRules(c: EnvironmentConfig): Rule[] {
       noData: "With the process down, facilitator-silent fires instead.",
     },
     5,
+    // 0138's D2, as facilitator-silent: a stale gauge blinds the rules on it.
+    "critical",
   );
 
   // The collector keeps serving a file's last values when nobody writes it, so each file has an
