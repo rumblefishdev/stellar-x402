@@ -95,13 +95,13 @@ fire-test:
 		--history-item-type Action --max-records 3 \
 		--query 'AlarmHistoryItems[].[Timestamp,HistorySummary]' --output table
 
-# Before a group goes on: every series it reads that is written all the time has data
-# (decision 26). GROUP is one of the alarmGroups in envs/production.json.
 # The monitoring VM's rule file, from the same rows as the alarms (lore 0139 step 6). A test fails
 # while the committed file differs from what this writes.
 rules: build
 	node dist/bin/rules.js > ../deploy/metrics/rules/x402-production.yml
 
+# Before a group goes on: every series it reads that is written all the time has data
+# (decision 26). GROUP is one of the alarmGroups in envs/production.json.
 check-series: build
 	@test -n "$(GROUP)" || { echo "usage: make check-series GROUP=<group>" >&2; exit 2; }
 	node dist/bin/check-series.js $(GROUP)
