@@ -160,6 +160,34 @@ describe("sequence reads", () => {
     expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
   });
 
+  it("stops failed reads at the caller's deadline, with the read's error, and keeps the channel (0056)", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 60 });
+    Object.assign(fake, {
+      getLedgerEntries: async () => Promise.reject(new Error("fetch failed")),
+    });
+    const deadline = fake.closeTime * 1000 + 10_000;
+    await expect(submitter.submit(call(), { deadline })).rejects.toThrow("fetch failed");
+    // Within a ledger of the deadline, not the 60 s window.
+    expect(fake.closeTime * 1000).toBeGreaterThanOrEqual(deadline);
+    expect(fake.closeTime * 1000).toBeLessThanOrEqual(deadline + fake.ledgerSeconds * 1000);
+    expect(fake.calls.sendTransaction ?? 0).toBe(0);
+    expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
+  });
+
+  it("still retires a channel with no entry after timeoutSeconds, past the caller's deadline (0056)", async () => {
+    const { fake, submitter, events } = setup({ timeoutSeconds: 60 });
+    failReads(fake, Infinity);
+    const start = fake.closeTime * 1000;
+    await expect(submitter.submit(call(), { deadline: start + 10_000 })).rejects.toThrow(
+      "Account not found",
+    );
+    expect(fake.closeTime * 1000).toBeGreaterThanOrEqual(start + 60_000);
+    expect(submitter.stats()).toMatchObject({ quarantined: 1, channels: 0 });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "channel-quarantined", channel: channels[0] }),
+    );
+  });
+
   it("fails waiting calls once the last channel is quarantined", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 20 });
     failReads(fake, Infinity);
