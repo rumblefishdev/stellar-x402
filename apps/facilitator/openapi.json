@@ -477,6 +477,7 @@
         "properties": {
           "x402Version": {
             "type": "integer",
+            "description": "The protocol version the buyer paid under. Only `2` is accepted.",
             "enum": [2],
             "example": 2
           },
@@ -567,23 +568,28 @@
           },
           "description": {
             "type": "string",
+            "description": "What the resource does, in the seller's words. A catalog listing shows it, cut to 500 characters.",
             "example": "Current temperature for a city"
           },
           "mimeType": {
             "type": "string",
+            "description": "The media type of the resource's answer. A catalog listing shows it.",
             "example": "application/json"
           },
           "serviceName": {
-            "type": "string"
+            "type": "string",
+            "description": "The seller's name for its service. A catalog listing shows it when it is 1 to 32 printable ASCII characters, and leaves it out otherwise."
           },
           "tags": {
             "type": "array",
+            "description": "Short tags for the service. A catalog listing keeps up to 5, each 1 to 32 printable ASCII characters and none twice, and leaves the rest out.",
             "items": {
               "type": "string"
             }
           },
           "iconUrl": {
-            "type": "string"
+            "type": "string",
+            "description": "The address of the service's icon. A catalog listing shows it when it is an `https` address on a public host name, at most 2048 characters, and leaves it out otherwise."
           }
         }
       },
@@ -704,18 +710,22 @@
       },
       "SupportedKind": {
         "type": "object",
+        "description": "One thing this instance verifies and settles: a protocol version, a scheme and a network.",
         "required": ["x402Version", "scheme", "network"],
         "properties": {
           "x402Version": {
             "type": "integer",
+            "description": "The protocol version: `2`.",
             "example": 2
           },
           "scheme": {
             "type": "string",
+            "description": "The payment scheme: `exact`.",
             "example": "exact"
           },
           "network": {
             "type": "string",
+            "description": "The network this instance serves, as a CAIP-2 id: `stellar:testnet` or `stellar:pubnet`.",
             "example": "stellar:testnet"
           },
           "extra": {
@@ -735,10 +745,12 @@
         "properties": {
           "x402Version": {
             "type": "integer",
+            "description": "The protocol version of the answer: `2`.",
             "example": 2
           },
           "items": {
             "type": "array",
+            "description": "The page's entries, in the order they were first listed. An entry that is refreshed keeps its place, so paging doesn't shift.",
             "items": {
               "$ref": "#/components/schemas/DiscoveryResource"
             }
@@ -765,6 +777,7 @@
           },
           "x402Version": {
             "type": "integer",
+            "description": "The protocol version the resource is paid under: `2`.",
             "example": 2
           },
           "accepts": {
@@ -783,6 +796,24 @@
             "type": "string",
             "description": "The media type of the resource's answer.",
             "example": "application/json"
+          },
+          "serviceName": {
+            "type": "string",
+            "description": "The seller's name for its service: 1 to 32 printable ASCII characters.",
+            "example": "Example Weather"
+          },
+          "tags": {
+            "type": "array",
+            "description": "The seller's tags for the service: at most 5, each 1 to 32 printable ASCII characters.",
+            "items": {
+              "type": "string"
+            },
+            "example": ["weather", "forecast"]
+          },
+          "iconUrl": {
+            "type": "string",
+            "description": "The address of the service's icon: an `https` address on a public host name.",
+            "example": "https://api.example.com/icon.png"
           },
           "lastUpdated": {
             "type": "string",
@@ -819,6 +850,7 @@
       },
       "Pagination": {
         "type": "object",
+        "description": "Where the page is among the entries the filters match.",
         "required": ["limit", "offset", "total"],
         "properties": {
           "limit": {
@@ -828,6 +860,7 @@
           },
           "offset": {
             "type": "integer",
+            "description": "The offset used: how many matching entries the page skipped. `0` unless the request gave one.",
             "example": 0
           },
           "total": {
@@ -839,6 +872,7 @@
       },
       "HealthStatus": {
         "type": "object",
+        "description": "What the instance says of itself: whether `/settle` serves, whether its signing key works, and which build answers.",
         "required": ["ready", "listed"],
         "properties": {
           "ready": {
