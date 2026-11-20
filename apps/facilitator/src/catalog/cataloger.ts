@@ -19,6 +19,19 @@ import { askMcpSeller, askSeller } from "./seller-check.js";
 
 export type BazaarApi = Pick<typeof bazaarLib, "validate" | "normalize" | "toExtensionResponses">;
 
+/** What a check's log lines carry about what triggered it: a settlement's `context` today. */
+type LogFields = Record<string, unknown>;
+
+/** One listing key to ask its seller about, and what the attempt knew before asking. */
+interface SellerCheck {
+  url: string;
+  input: bazaarLib.Discovered["discoveryInfo"]["input"];
+  key: CatalogKey;
+  /** The settlement's ledger, kept on the entry. */
+  ledger: number;
+  compared: Omit<CatalogAttempt, "stage" | "outcome">;
+}
+
 export interface CatalogerDeps {
   store: CatalogStore;
   attempts: CatalogAttemptStore;
@@ -59,8 +72,6 @@ const SELLER_RESPONSE_BYTES = 64 * 1024;
 const MCP_RESPONSE_BYTES = 256 * 1024;
 /** A library error lists every issue; the attempt's row keeps its start. */
 const DETAIL_CHARS = 1_000;
-/** The steps of `catalog` taken once the seller is asked: a failure there is the seller stage's. */
-const SELLER_STEPS = ["ask", "seller", "upsert", "report"];
 
 const contentHash = (resource: Omit<DiscoveryResource, "lastUpdated">) =>
   createHash("sha256")
@@ -112,12 +123,12 @@ export function createCataloger({
   };
   const internalError = (
     stage: string,
-    record: SettlementRecord,
+    fields: LogFields,
     origin: SettlementOrigin,
     error?: unknown,
   ) =>
     report(() => {
-      logger.error("catalog_internal_error", { ...context(record, origin), stage, error });
+      logger.error("catalog_internal_error", { ...fields, stage, error });
       metrics.increment("catalog_internal_errors_total", { stage, origin });
     });
 
@@ -139,14 +150,14 @@ export function createCataloger({
    */
   async function finish(
     attempt: CatalogAttempt,
-    record: SettlementRecord,
+    fields: LogFields,
     origin: SettlementOrigin,
   ): Promise<void> {
     const { stage, outcome, reason = "" } = attempt;
     report(() => {
       metrics.increment("catalog_attempts_total", { origin, stage, outcome, reason });
-      const fields = {
-        ...context(record, origin),
+      const line = {
+        ...fields,
         stage,
         outcome,
         reason: attempt.reason,
@@ -157,15 +168,15 @@ export function createCataloger({
         bytes: attempt.fieldBytes,
       };
       if (outcome === "over_budget")
-        logger.info("catalog_check_skipped", { ...fields, budget: reason });
-      else if (outcome === "unchanged") logger.debug("catalog_unchanged", fields);
+        logger.info("catalog_check_skipped", { ...line, budget: reason });
+      else if (outcome === "unchanged") logger.debug("catalog_unchanged", line);
       else if (
         outcome !== "refreshed" &&
         outcome !== "stale" &&
         outcome !== "upsert_failed" &&
         outcome !== "internal_error"
       )
-        logger.info("catalog_rejected", fields);
+        logger.info("catalog_rejected", line);
     });
     // A copy equal to the stored listing tried to change nothing: counted, not a row.
     if (outcome === "unchanged") return;
@@ -177,16 +188,17 @@ export function createCataloger({
       });
     } catch (error) {
       report(() => {
-        logger.error("catalog_attempt_write_failed", { ...context(record, origin), error });
+        logger.error("catalog_attempt_write_failed", { ...fields, error });
         metrics.increment("catalog_attempt_write_failures_total", { origin });
       });
     }
   }
 
   async function catalog(record: SettlementRecord, origin: SettlementOrigin): Promise<void> {
-    if (record.state !== "success") return internalError("not_success", record, origin);
+    const fields = context(record, origin);
+    if (record.state !== "success") return internalError("not_success", fields, origin);
     // The success transition sets it (0019); the entry still carries it.
-    if (record.ledger === undefined) return internalError("no_ledger", record, origin);
+    if (record.ledger === undefined) return internalError("no_ledger", fields, origin);
     const paidUrl = (record.paymentPayload.resource as { url?: unknown } | undefined)?.url;
     const attempt = {
       at: now(),
@@ -207,9 +219,9 @@ export function createCataloger({
       if (!result.ok) {
         // A library failure, not a bad listing.
         if (result.reason === "internal_error") {
-          internalError(stage, record, origin, result.detail);
+          internalError(stage, fields, origin, result.detail);
           const failed = { stage: "payment", outcome: "internal_error", reason: stage } as const;
-          return await finish({ ...attempt, ...failed, detail: result.detail }, record, origin);
+          return await finish({ ...attempt, ...failed, detail: result.detail }, fields, origin);
         }
         const { reason, detail, bytes: fieldBytes } = result;
         const rejected = {
@@ -219,7 +231,7 @@ export function createCataloger({
           detail,
           fieldBytes,
         } as const;
-        return await finish({ ...attempt, ...rejected }, record, origin);
+        return await finish({ ...attempt, ...rejected }, fields, origin);
       }
       stage = "normalize";
       const echoed = bazaar.normalize(result, record.paymentRequirements);
@@ -234,13 +246,13 @@ export function createCataloger({
           outcome: "not_askable",
           reason: "mcp_tool_url",
         } as const;
-        return await finish({ ...tried, ...toolUrl }, record, origin);
+        return await finish({ ...tried, ...toolUrl }, fields, origin);
       }
 
       stage = "compare";
       const stored = await store.get(key);
       if (stored && bazaarLib.sameListing(stored, echoed.resource)) {
-        return await finish({ ...tried, stage: "payment", outcome: "unchanged" }, record, origin);
+        return await finish({ ...tried, stage: "payment", outcome: "unchanged" }, fields, origin);
       }
 
       // From here the copy differs from the stored listing: kept to compare with the answer.
@@ -252,39 +264,71 @@ export function createCataloger({
       const budget = await overBudget(rateLimits, key, host, checksPerHost, attempt.at);
       if (budget) {
         const skipped = { stage: "payment", outcome: "over_budget", reason: budget } as const;
-        return await finish({ ...compared, ...skipped }, record, origin);
+        return await finish({ ...compared, ...skipped }, fields, origin);
       }
 
-      stage = "ask";
+      return await checkSeller(fields, origin, {
+        url: result.resourceUrl,
+        input: result.discovered.discoveryInfo.input,
+        key,
+        ledger: record.ledger,
+        compared,
+      });
+    } catch (error) {
+      internalError(stage, fields, origin, error);
+      // Still an attempt (row 23), named by the step it failed at.
+      const failed = {
+        stage: "payment",
+        outcome: "internal_error",
+        reason: stage,
+        detail: String(error),
+      } as const;
+      await finish({ ...known, ...failed }, fields, origin);
+    }
+  }
+
+  /**
+   * Asks the seller about one listing key and writes its answer (0063): the steps after the
+   * payment's copy showed a check is due. A step that throws is still an attempt (row 23), named
+   * by the step it failed at.
+   */
+  async function checkSeller(
+    fields: LogFields,
+    origin: SettlementOrigin,
+    { url, input, key, ledger, compared }: SellerCheck,
+  ): Promise<void> {
+    let stage = "ask";
+    // What the attempt knew so far (key, copy, answer), for a row if a later step throws.
+    let known: Omit<CatalogAttempt, "stage" | "outcome"> = compared;
+    try {
       const checkedAt = now();
       // An MCP listing is checked with an MCP client (row 5), an HTTP one with one request.
-      const input = result.discovered.discoveryInfo.input;
       const answer =
         input.type === "mcp"
           ? await askMcpSeller(
-              result.resourceUrl,
+              url,
               bazaarLib.toolCall(input),
               { ...sellerLimits, maxResponseBytes: MCP_RESPONSE_BYTES },
               logger,
             )
           : await askSeller(
-              bazaarLib.sellerRequest(result.resourceUrl, { ...input, method: key.method }),
+              bazaarLib.sellerRequest(url, { ...input, method: key.method }),
               sellerLimits,
             );
       if (!answer.ok) {
         const { reason, detail } = answer;
         const failed = { stage: "seller", outcome: "not_askable", reason, detail } as const;
-        return await finish({ ...compared, ...failed }, record, origin);
+        return await finish({ ...compared, ...failed }, fields, origin);
       }
 
       const asked = { ...compared, answer: answer.paymentRequired };
 
-      known = { ...known, ...asked };
+      known = asked;
 
       stage = "seller";
       const listing = bazaarLib.listingFromSeller(
         answer.paymentRequired,
-        { url: result.resourceUrl, network: key.network, payTo: key.payTo },
+        { url, network: key.network, payTo: key.payTo },
         options,
       );
       if (!listing.ok) {
@@ -292,10 +336,10 @@ export function createCataloger({
         const refused = { ...asked, stage: "seller", detail, fieldBytes } as const;
         // These two are outcomes of their own, and a 402 without a listing is no usable answer.
         if (reason === "other_pay_to" || reason === "too_large")
-          return await finish({ ...refused, outcome: reason }, record, origin);
+          return await finish({ ...refused, outcome: reason }, fields, origin);
         if (reason === "no_listing")
-          return await finish({ ...refused, outcome: "not_askable", reason }, record, origin);
-        return await finish({ ...refused, outcome: "rejected", reason }, record, origin);
+          return await finish({ ...refused, outcome: "not_askable", reason }, fields, origin);
+        return await finish({ ...refused, outcome: "rejected", reason }, fields, origin);
       }
       // The answer speaks for the listing asked about only: on a host or MCP server several sellers
       // share, one route's 402 could otherwise name another's method, route or tool and replace it.
@@ -309,14 +353,14 @@ export function createCataloger({
         const detail = `asked ${key.method} ${key.resourceUrl}, answered ${answered.method} ${answered.resourceUrl}`;
         return await finish(
           { ...asked, stage: "seller", outcome: "other_key", detail },
-          record,
+          fields,
           origin,
         );
       }
       const entry: CatalogEntry = {
         key: listing.entry.key as CatalogKey,
         keyVersion: listing.entry.keyVersion,
-        ledger: record.ledger,
+        ledger,
         checkedAt,
         // The time of the seller's answer (0063): when the listing was last confirmed.
         resource: { ...listing.entry.resource, lastUpdated: new Date(now()).toISOString() },
@@ -329,18 +373,18 @@ export function createCataloger({
         outcome = await upsert(entry);
       } catch (error) {
         report(() => {
-          logger.error("catalog_upsert_failed", { ...context(record, origin), error });
+          logger.error("catalog_upsert_failed", { ...fields, error });
           metrics.increment("catalog_upsert_failures_total", { origin });
         });
         return await finish(
           { ...written, stage: "seller", outcome: "upsert_failed" },
-          record,
+          fields,
           origin,
         );
       }
       stage = "report";
       logger.info("catalog_upserted", {
-        ...context(record, origin),
+        ...fields,
         type: entry.resource.type,
         method: entry.key.method,
         resourceUrl: entry.key.resourceUrl,
@@ -352,23 +396,22 @@ export function createCataloger({
       if (listing.routeTemplateIgnored && outcome !== "stale")
         metrics.increment("catalog_route_template_ignored_total", { origin });
       if (outcome === "stale")
-        await finish({ ...written, stage: "seller", outcome: "stale" }, record, origin);
+        await finish({ ...written, stage: "seller", outcome: "stale" }, fields, origin);
       else
         await finish(
           { ...written, stage: "seller", outcome: "refreshed", reason: outcome },
-          record,
+          fields,
           origin,
         );
     } catch (error) {
-      internalError(stage, record, origin, error);
-      // Still an attempt (row 23), named by the step it failed at.
+      internalError(stage, fields, origin, error);
       const failed = {
-        stage: SELLER_STEPS.includes(stage) ? "seller" : "payment",
+        stage: "seller",
         outcome: "internal_error",
         reason: stage,
         detail: String(error),
       } as const;
-      await finish({ ...known, ...failed }, record, origin);
+      await finish({ ...known, ...failed }, fields, origin);
     }
   }
 
@@ -379,7 +422,7 @@ export function createCataloger({
         const result = bazaar.validate(record.paymentPayload, record.paymentRequirements, options);
         return result && bazaar.toExtensionResponses(result);
       } catch (error) {
-        internalError("header", record, "settle", error);
+        internalError("header", context(record, "settle"), "settle", error);
         return { bazaar: { status: "rejected", rejectedReason: "internal_error" } };
       }
     },
