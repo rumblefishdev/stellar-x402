@@ -1,12 +1,12 @@
 {
-  "ranAt": "2026-11-09T18:40:55Z",
+  "ranAt": "2026-11-20T13:44:07Z",
   "network": "stellar:testnet",
   "script": "apps/facilitator/test/live/catalog-smoke.ts",
-  "commit": "2bc55cc2",
-  "facilitator": "GAB3QH5T2DWT5Z6MEDGIU6LQBX4LLUUYJUQYLEL2B4HNWJDOJBKSRN25",
-  "seller": "GDVBUWJL5EK4R4AY2CRH7E2HCSBDMBW3D65QOU3UV7CATPBRZ34OLDVR",
-  "buyer": "GA25XKLIBN4FFFNFOUCTD2KMWEJEUTAAFLWZ2253Z6KGLXDE676ANBM5",
-  "outsider": "GAQNFRWA5W7WKGHI4PYRRBSVH24FGS3RMXEN3Z27KRFAJHDQTCEJGFYP",
+  "commit": "8bf406e9",
+  "facilitator": "GAOJSZODB7W54JSNZNJYQE3AKYZY757Z26ZWF3PPGK6CXULFONDZTEHN",
+  "seller": "GDM4NZD7TTAWVEIEAK3NABQRKPE53JLXU3JBD5SI3ROCMSDEFHT5GPEY",
+  "buyer": "GDXFYHHLY5LV3VO2OFIT5UWTABF7OMVAYBKPOVLRT32R3E5AHEI52XZE",
+  "outsider": "GBST4AMG7KSMO7S47O5RXOFLAYE6EJM6Y26NOC6TPTHIKO65CJZCUY45",
   "steps": {
     "buyerPays": 200,
     "afterBuyer": {
@@ -14,28 +14,29 @@
         {
           "description": "Weather by city",
           "amounts": ["10000"],
-          "lastUpdated": "2026-11-09T18:42:38.823Z"
+          "lastUpdated": "2026-11-20T13:41:07.328Z"
         }
       ],
       "unpaid": ["GET /weather?city=Warsaw", "GET /weather?city=Warsaw"]
     },
-    "buyerPaysAgain": 402,
+    "buyerPaysAgain": 200,
     "afterRepeat": {
       "listing": [
         {
           "description": "Weather by city",
           "amounts": ["10000"],
-          "lastUpdated": "2026-11-09T18:42:38.823Z"
+          "lastUpdated": "2026-11-20T13:41:07.328Z"
         }
       ],
       "unpaid": ["GET /weather?city=Warsaw", "GET /weather?city=Warsaw", "GET /weather?city=Warsaw"]
     },
+    "outsiderSameMinute": true,
     "afterOutsiderSameMinute": {
       "listing": [
         {
           "description": "Weather by city",
           "amounts": ["10000"],
-          "lastUpdated": "2026-11-09T18:42:38.823Z"
+          "lastUpdated": "2026-11-20T13:41:07.328Z"
         }
       ],
       "unpaid": ["GET /weather?city=Warsaw", "GET /weather?city=Warsaw", "GET /weather?city=Warsaw"]
@@ -46,7 +47,7 @@
         {
           "description": "Weather by city",
           "amounts": ["10000"],
-          "lastUpdated": "2026-11-09T18:45:26.980Z"
+          "lastUpdated": "2026-11-20T13:42:06.601Z"
         }
       ],
       "unpaid": [
@@ -56,16 +57,37 @@
         "GET /weather?city=Warsaw"
       ]
     },
-    "buyerPaysNewPrice": 402,
+    "buyerPaysNewPrice": 200,
     "afterNewPrice": {
       "listing": [
         {
           "description": "Weather by city",
-          "amounts": ["10000"],
-          "lastUpdated": "2026-11-09T18:45:26.980Z"
+          "amounts": ["20000"],
+          "lastUpdated": "2026-11-20T13:43:06.465Z"
         }
       ],
       "unpaid": [
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw"
+      ]
+    },
+    "buyerPaysSellerRedirects": 200,
+    "afterRedirect": {
+      "listing": [
+        {
+          "description": "Weather by city",
+          "amounts": ["20000"],
+          "lastUpdated": "2026-11-20T13:43:06.465Z"
+        }
+      ],
+      "unpaid": [
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
+        "GET /weather?city=Warsaw",
         "GET /weather?city=Warsaw",
         "GET /weather?city=Warsaw",
         "GET /weather?city=Warsaw",
@@ -76,7 +98,7 @@
   },
   "settles": [
     {
-      "transaction": "fee64e4474c5442c89fbd47a48837361f49bd60b2d473baa4973ff24da0ff12c",
+      "transaction": "6ef123ef1f73cd5b6c85e90cef587879396708ac7d91ccf4e9d4d690d66d54c1",
       "extensionResponses": {
         "bazaar": {
           "status": "processing"
@@ -85,15 +107,7 @@
       "onChain": "SUCCESS"
     },
     {
-      "transaction": "5f6a96e2aa213d279c15c41ed538e077bc7fd0c1ac3a3dbe3112cc086f0d8e9c",
-      "extensionResponses": null,
-      "onChain": "SUCCESS"
-    },
-    {
-      "extensionResponses": null
-    },
-    {
-      "transaction": "8ef5f9f1188d76ad5d857d2e197c4306676bfed34caf3a8b6c015f4fd4b91175",
+      "transaction": "b8049e25228282f9a6b3c8586cbbe809b6fae471f677fe2bb20c33fa6936d341",
       "extensionResponses": {
         "bazaar": {
           "status": "processing"
@@ -102,7 +116,40 @@
       "onChain": "SUCCESS"
     },
     {
-      "extensionResponses": null
+      "transaction": "3072ccbcc78d1ce3293f2e2d3f31b31c0e7d1d4b604f13c5e3eb9b2beb0d13cf",
+      "extensionResponses": {
+        "bazaar": {
+          "status": "processing"
+        }
+      },
+      "onChain": "SUCCESS"
+    },
+    {
+      "transaction": "42515a6a36465395751151269833035311dfba909b96684d013699b98e445f7c",
+      "extensionResponses": {
+        "bazaar": {
+          "status": "processing"
+        }
+      },
+      "onChain": "SUCCESS"
+    },
+    {
+      "transaction": "7cdaf3761d04951d42a03edfaed081e79be026c55ee1e46502476fc962973977",
+      "extensionResponses": {
+        "bazaar": {
+          "status": "processing"
+        }
+      },
+      "onChain": "SUCCESS"
+    },
+    {
+      "transaction": "448c072b5685c23d527a6571f497f07302f3f0c66cb714c1d88427a23c783da4",
+      "extensionResponses": {
+        "bazaar": {
+          "status": "processing"
+        }
+      },
+      "onChain": "SUCCESS"
     }
   ],
   "attempts": [
@@ -110,21 +157,51 @@
       "stage": "seller",
       "outcome": "refreshed",
       "reason": "inserted",
-      "payer": "GA25XKLIBN4FFFNFOUCTD2KMWEJEUTAAFLWZ2253Z6KGLXDE676ANBM5",
-      "transaction": "fee64e4474c5442c89fbd47a48837361f49bd60b2d473baa4973ff24da0ff12c",
-      "resource_url": "http://127.0.0.1:53135/weather",
-      "url": "http://127.0.0.1:53135/weather?city=Warsaw",
-      "content_hash": "ec958cec5a1848179b3a5c324f5369eb8b29c2c70d8a863e7244215d10f6732b"
+      "payer": "GDXFYHHLY5LV3VO2OFIT5UWTABF7OMVAYBKPOVLRT32R3E5AHEI52XZE",
+      "transaction": "6ef123ef1f73cd5b6c85e90cef587879396708ac7d91ccf4e9d4d690d66d54c1",
+      "resource_url": "http://127.0.0.1:64568/weather",
+      "url": "http://127.0.0.1:64568/weather?city=Warsaw",
+      "content_hash": "00da9af24de9104346eb8bbb3a6d8279299aba6c8f73c675e8ba08f7817754cf"
+    },
+    {
+      "stage": "payment",
+      "outcome": "over_budget",
+      "reason": "key",
+      "payer": "GBST4AMG7KSMO7S47O5RXOFLAYE6EJM6Y26NOC6TPTHIKO65CJZCUY45",
+      "transaction": "3072ccbcc78d1ce3293f2e2d3f31b31c0e7d1d4b604f13c5e3eb9b2beb0d13cf",
+      "resource_url": "http://127.0.0.1:64568/weather",
+      "url": "http://127.0.0.1:64568/weather?city=Warsaw",
+      "content_hash": "853923404435d743e55dc3d4cf7ab5796d74fd3697dc9e6e85ef01cf351c7f19"
     },
     {
       "stage": "seller",
       "outcome": "refreshed",
       "reason": "updated",
-      "payer": "GAQNFRWA5W7WKGHI4PYRRBSVH24FGS3RMXEN3Z27KRFAJHDQTCEJGFYP",
-      "transaction": "8ef5f9f1188d76ad5d857d2e197c4306676bfed34caf3a8b6c015f4fd4b91175",
-      "resource_url": "http://127.0.0.1:53135/weather",
-      "url": "http://127.0.0.1:53135/weather?city=Warsaw",
-      "content_hash": "ec958cec5a1848179b3a5c324f5369eb8b29c2c70d8a863e7244215d10f6732b"
+      "payer": "GBST4AMG7KSMO7S47O5RXOFLAYE6EJM6Y26NOC6TPTHIKO65CJZCUY45",
+      "transaction": "42515a6a36465395751151269833035311dfba909b96684d013699b98e445f7c",
+      "resource_url": "http://127.0.0.1:64568/weather",
+      "url": "http://127.0.0.1:64568/weather?city=Warsaw",
+      "content_hash": "00da9af24de9104346eb8bbb3a6d8279299aba6c8f73c675e8ba08f7817754cf"
+    },
+    {
+      "stage": "seller",
+      "outcome": "refreshed",
+      "reason": "updated",
+      "payer": "GDXFYHHLY5LV3VO2OFIT5UWTABF7OMVAYBKPOVLRT32R3E5AHEI52XZE",
+      "transaction": "7cdaf3761d04951d42a03edfaed081e79be026c55ee1e46502476fc962973977",
+      "resource_url": "http://127.0.0.1:64568/weather",
+      "url": "http://127.0.0.1:64568/weather?city=Warsaw",
+      "content_hash": "d01e35d332b0708bc4f47f1ff051f8343fef7cb5c2ebf292e743803f54f0ca6d"
+    },
+    {
+      "stage": "seller",
+      "outcome": "not_askable",
+      "reason": "redirect",
+      "payer": "GDXFYHHLY5LV3VO2OFIT5UWTABF7OMVAYBKPOVLRT32R3E5AHEI52XZE",
+      "transaction": "448c072b5685c23d527a6571f497f07302f3f0c66cb714c1d88427a23c783da4",
+      "resource_url": "http://127.0.0.1:64568/weather",
+      "url": "http://127.0.0.1:64568/weather?city=Warsaw",
+      "content_hash": "18830fbbaa56ac88636c5eb95ab5a70b61d6edd9fae781ffec5ed68f06804203"
     }
   ]
 }
