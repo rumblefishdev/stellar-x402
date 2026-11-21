@@ -3,9 +3,9 @@
 // spec, differs from the gate's pin, and clears once the pin moves to an upstream that has the
 // change. `upstream-silent` fires when the section published nothing for two days: `watch-errors`
 // counts 2 of 3 five-minute runs, so a once-a-day failure never reaches it.
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
-export function addUpstreamAlarms(f: AlarmFactory): void {
+export function addUpstreamAlarms(f: Alarms): void {
   f.level("upstream-changed", {
     group: "upstream",
     signal: { catalog: "upstream_files_changed" },
