@@ -5,6 +5,17 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
 [ADR 0006](../../docs/adr/0006-settlement-record.md) (the settlement record) and
 [ADR 0011](../../docs/adr/0011-facilitator-hosting.md) (the settle budget and its timing).
 
+## `openapi.json`
+
+[`openapi.json`](openapi.json) describes the five public routes (`/verify`, `/settle`,
+`/discovery/resources`, `/supported` and `/health`) as OpenAPI 3.1: for a seller, for a generator,
+and for the API hub's reference page at `sorobanscan.com/api/docs/x402`, which renders a copy of
+it (`public/docs/x402/openapi.json` in `rumblefishdev/sorobanscan-api-portal`).
+
+It is written by hand, from this README and `src/http/app.ts`. No route serves it and no test
+compares it with the routes yet, so a change here to a route, a status, a limit or an answer's
+shape has to be made in the document too, and the hub's copy replaced.
+
 ## Settings that shape `/settle`
 
 - `SETTLE_BUDGET_MS` (30 s by default, 1–80 s): the longest one `/settle` call takes, the checks

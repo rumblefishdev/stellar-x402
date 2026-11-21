@@ -1,0 +1,919 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "x402 Facilitator for Stellar",
+    "version": "1.0.0",
+    "description": "The facilitator a seller's server calls to check an x402 payment on Stellar and to settle it on chain, and the catalog (the Bazaar) that buyers and AI agents read to find paid resources. It speaks x402 version 2 with the `exact` scheme. The facilitator pays the network fee of every settlement, so neither the buyer nor the seller needs XLM for it. `POST /verify` and `POST /settle` are called server to server: they send no CORS headers, so a browser page can't call them. `GET /supported` says which networks this instance serves. Amounts are strings of digits in the token's smallest unit, never JSON numbers, so no precision is lost in transport."
+  },
+  "servers": [
+    {
+      "url": "https://x402-facilitator.sorobanscan.com"
+    }
+  ],
+  "tags": [
+    {
+      "name": "payments",
+      "description": "Check a payment, then settle it on chain"
+    },
+    {
+      "name": "discovery",
+      "description": "The Bazaar: the catalog of paid resources that settled through this facilitator"
+    },
+    {
+      "name": "ops",
+      "description": "What this instance supports, and whether it is up"
+    }
+  ],
+  "security": [{}],
+  "paths": {
+    "/verify": {
+      "post": {
+        "tags": ["payments"],
+        "summary": "`POST /verify` — check a payment without settling it.",
+        "description": "Checks that the payment the buyer signed pays what the requirements ask: the scheme, the network, the asset, the amount, the recipient and the expiry of the buyer's signature, and that the transaction would succeed on chain. Nothing is sent to the network and nothing is recorded, so the same payment can be verified any number of times.\n\nEvery verdict is a `200`: read `isValid`, never the status. A refused payment carries `invalidReason`, a stable code, and often `invalidMessage`, a sentence for a person. A `503 rpc_unavailable` means no verdict was reached: the payment was not judged, and the same request may be sent again after `Retry-After`.\n\nA request whose `paymentRequirements.network` is `stellar:pubnet` must carry an API key as `Authorization: Bearer <key>`. A request for any other network needs none, and its `Authorization` header is not read.\n\nEach caller may send 600 requests a minute. A caller is its IP address (an IPv6 one counts by its /56), or the API key's owner for `stellar:pubnet`. A seller's server calls this route for all of its buyers, so the budget is a budget per seller.",
+        "operationId": "verify",
+        "security": [
+          {},
+          {
+            "api_key": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The payment the buyer sent and the requirements the seller set for the resource. At most 65,536 bytes.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The verdict, valid or not",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not an x402 version 2 request: malformed JSON, a missing or mistyped field, an `amount` that is not digits, or a body nested too deeply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "bad_request"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A request for `stellar:pubnet` without an active API key: `missing_api_key` with no `Authorization` header, `invalid_api_key` for another scheme, a malformed key, an unknown key or a revoked one. Answered with `WWW-Authenticate: Bearer`. Nothing was checked, and the request counts in no rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "missing_api_key"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body is larger than 65,536 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "payload_too_large"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller is over its budget for this route. `Retry-After` gives the seconds until the window ends; the other routes still answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "too_many_requests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An error of the facilitator's. Send the same request again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "internal_error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No Stellar RPC gave a verdict. The payment was not judged: send the same request again after `Retry-After` (5 seconds)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "rpc_unavailable"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settle": {
+      "post": {
+        "tags": ["payments"],
+        "summary": "`POST /settle` — settle a payment on chain.",
+        "description": "Runs the checks of `/verify` again, then submits the buyer's signed transfer to Stellar and waits for it to be final. The facilitator pays the network fee.\n\nEvery outcome is a `200`: read `success`, never the status. `success: true` is answered once per payment. Every later call with the same payment gets `settle_exact_stellar_already_settled`, so one payment unlocks one response from the seller.\n\nWhen `success` is false, `errorReason` says what happened and `transaction` says whether anything reached the network:\n\n- `settlement_pending`: sent and not final yet, or not signed yet. Send the same request again, or look the hash up.\n- A reason with `extra.retryable: true`: nothing was sent. Send the same payment again, as it is, while the network's latest ledger is at most `extra.expirationLedger - 2`.\n- A reason with `extra.retryable: false` and `extra.expirationLedger`: the payment ended. The buyer signs a new payment only once that ledger has closed; before it, the first one could still land and charge the buyer twice.\n- `invalid_exact_stellar_*` and `invalid_network`: the checks refused the payment before anything was recorded. Fix what the reason names.\n\nA `503` (`no_lease` or `shutting_down`) means nothing was read or settled: send the same request again after `Retry-After`. After a `500`, send the same request again and never sign a new payment because of it, since the first one may still be settling.\n\nA settlement whose payment carries the `bazaar` extension lists the resource in the catalog that `GET /discovery/resources` serves. The answer's `EXTENSION-RESPONSES` header says whether the listing was accepted; a rejected listing never fails the settlement.\n\nA request whose `paymentRequirements.network` is `stellar:pubnet` must carry an API key as `Authorization: Bearer <key>`. A request for any other network needs none, and its `Authorization` header is not read.\n\nEach caller may send 600 requests a minute, counted as on `/verify`.",
+        "operationId": "settle",
+        "security": [
+          {},
+          {
+            "api_key": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The same body as `/verify`: the payment the buyer sent and the requirements the seller set. At most 65,536 bytes.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The outcome, settled or not. A settled payment that carried the `bazaar` extension also answers the header `EXTENSION-RESPONSES`, base64 of a JSON object that says whether the resource was listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettleResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not an x402 version 2 request: malformed JSON, a missing or mistyped field, an `amount` that is not digits, or a body nested too deeply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "bad_request"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A request for `stellar:pubnet` without an active API key: `missing_api_key` with no `Authorization` header, `invalid_api_key` for another scheme, a malformed key, an unknown key or a revoked one. Answered with `WWW-Authenticate: Bearer`. Nothing was settled, and the request counts in no rate limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "invalid_api_key"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body is larger than 65,536 bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "payload_too_large"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller is over its budget for this route. `Retry-After` gives the seconds until the window ends; the other routes still answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "too_many_requests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An error of the facilitator's. Send the same request again; never sign a new payment because of it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "internal_error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "This instance can't settle right now: `no_lease` or `shutting_down`. Nothing was read or settled: send the same request again after `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "shutting_down"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/discovery/resources": {
+      "get": {
+        "tags": ["discovery"],
+        "summary": "`GET /discovery/resources` — list the paid resources in the Bazaar.",
+        "description": "The catalog of resources that were paid for through this facilitator, one entry per resource, in a stable order with no ranking. An entry is added or refreshed when a payment that carries the `bazaar` extension settles, so every entry has been paid for at least once. Only resource URLs a buyer can reach are listed: `https` or `http` with a public DNS name.\n\nThe filters combine. A well-formed `network` this instance doesn't serve, any `scheme` but `exact` and any `extensions` but `bazaar` give an empty page, not an error. An empty value counts as absent, and a parameter the route doesn't know is ignored.\n\nNo API key. Each IP address may send 120 requests a minute to `/discovery`.",
+        "operationId": "discoveryResources",
+        "security": [{}],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "The kind of resource, such as `http`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "example": "http"
+          },
+          {
+            "name": "payTo",
+            "in": "query",
+            "required": false,
+            "description": "The address a resource is paid to: every resource of one seller.",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "example": "GDPBXAO27ZR2M2TM6DVG5IVJ5D3C6DLHPE5FXYXKAUTM6XKPIACDAIH3"
+          },
+          {
+            "name": "network",
+            "in": "query",
+            "required": false,
+            "description": "The network a resource is paid on, as a CAIP-2 id. Anything that isn't one is a `400`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "example": "stellar:testnet"
+          },
+          {
+            "name": "scheme",
+            "in": "query",
+            "required": false,
+            "description": "The payment scheme. Every entry is `exact`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "example": "exact"
+          },
+          {
+            "name": "extensions",
+            "in": "query",
+            "required": false,
+            "description": "The extension an entry carries. Every entry has `bazaar`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "example": "bazaar"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "How many entries a page holds: 20 by default, at most 100. A larger value is clamped, and `pagination.limit` echoes the one used. `0` gives `total` alone.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 20
+            },
+            "example": 20
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "How many entries to skip: at most 1,000,000.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000,
+              "default": 0
+            },
+            "example": 0
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of the catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveryResourcesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is malformed, and `param` names it: `limit` or `offset` not plain digits, `offset` above 1,000,000, a repeated parameter, a value over 256 characters or with a control character, a `network` that isn't CAIP-2, or a known name written otherwise (`type[]`, `payto`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "bad_request",
+                  "param": "limit"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller is over its budget for `/discovery`. `Retry-After` gives the seconds until the window ends",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "too_many_requests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An error of the facilitator's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "internal_error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/supported": {
+      "get": {
+        "tags": ["ops"],
+        "summary": "`GET /supported` — what this instance settles.",
+        "description": "The x402 versions, schemes and networks this instance verifies and settles, the extensions it understands and the addresses it signs with. A seller's x402 client reads it once, when it starts. No API key and no rate limit.",
+        "operationId": "supported",
+        "security": [{}],
+        "responses": {
+          "200": {
+            "description": "What this instance supports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["ops"],
+        "summary": "`GET /health` — liveness probe.",
+        "description": "Answers `200` while the server is up. `ready` says whether `/settle` serves right now; a `200` with `ready: false` is an instance that is starting or stopping. No API key and no rate limit.",
+        "operationId": "health",
+        "security": [{}],
+        "responses": {
+          "200": {
+            "description": "The server is up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "api_key": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The seller's API key, `x402_` and 43 characters, sent as `Authorization: Bearer <key>`. Required on `/verify` and `/settle` for `stellar:pubnet` only; for any other network the header is not read. One active key per account, from the dashboard at `https://sorobanscan.com/api/dashboard/x402`. A revoked key stops working from the next request."
+      }
+    },
+    "schemas": {
+      "PaymentRequest": {
+        "type": "object",
+        "description": "The body of `/verify` and `/settle`: an x402 version 2 payment and the requirements it must meet.",
+        "required": ["x402Version", "paymentPayload", "paymentRequirements"],
+        "properties": {
+          "x402Version": {
+            "type": "integer",
+            "enum": [2],
+            "description": "The protocol version. Only `2` is accepted.",
+            "example": 2
+          },
+          "paymentPayload": {
+            "$ref": "#/components/schemas/PaymentPayload"
+          },
+          "paymentRequirements": {
+            "$ref": "#/components/schemas/PaymentRequirements"
+          }
+        }
+      },
+      "PaymentPayload": {
+        "type": "object",
+        "description": "What the buyer sent with its paid request, in the `PAYMENT-SIGNATURE` header: the requirement it chose and the transaction it signed. The seller passes it on unchanged.",
+        "required": ["x402Version", "accepted", "payload"],
+        "properties": {
+          "x402Version": {
+            "type": "integer",
+            "description": "The protocol version the buyer paid under. Only `2` is accepted.",
+            "enum": [2],
+            "example": 2
+          },
+          "resource": {
+            "$ref": "#/components/schemas/ResourceInfo"
+          },
+          "accepted": {
+            "$ref": "#/components/schemas/PaymentRequirements"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/StellarExactPayload"
+          },
+          "extensions": {
+            "type": "object",
+            "description": "Extension data the buyer's client echoes from the seller's `402` answer. With a `bazaar` entry, a successful settlement lists the resource in the catalog.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "StellarExactPayload": {
+        "type": "object",
+        "description": "The `exact` scheme's payload on Stellar.",
+        "required": ["transaction"],
+        "properties": {
+          "transaction": {
+            "type": "string",
+            "description": "The transaction the buyer built, as base64 XDR: one call of the token's `transfer`, with the buyer's signed authorization entry. The facilitator rebuilds it on an account of its own and pays its fee.",
+            "example": "AAAAAgAAAAA..."
+          }
+        }
+      },
+      "PaymentRequirements": {
+        "type": "object",
+        "description": "What a payment must pay: one entry of the `accepts` list in the seller's `402` answer.",
+        "required": ["scheme", "network", "amount", "asset", "payTo", "maxTimeoutSeconds"],
+        "properties": {
+          "scheme": {
+            "type": "string",
+            "description": "The payment scheme. This facilitator settles `exact`.",
+            "example": "exact"
+          },
+          "network": {
+            "type": "string",
+            "description": "The network, as a CAIP-2 id: `stellar:testnet` or `stellar:pubnet`. `GET /supported` lists the ones this instance serves.",
+            "example": "stellar:testnet"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "The price in the token's smallest unit, as digits. USDC has 7 decimals on Stellar, so `10000` is 0.001 USDC.",
+            "example": "10000"
+          },
+          "asset": {
+            "type": "string",
+            "description": "The token's contract address (`C…`): a Stellar Asset Contract or another SEP-41 token.",
+            "example": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+          },
+          "payTo": {
+            "type": "string",
+            "description": "The seller's address, which receives the payment. For a classic asset it must hold a trustline to it.",
+            "example": "GDPBXAO27ZR2M2TM6DVG5IVJ5D3C6DLHPE5FXYXKAUTM6XKPIACDAIH3"
+          },
+          "maxTimeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How long the buyer's signature may stay valid, in seconds. At most 300; a larger value is refused.",
+            "example": 300
+          },
+          "extra": {
+            "type": ["object", "null"],
+            "description": "Scheme data. `areFeesSponsored: true` says the facilitator pays the network fee, as `GET /supported` advertises.",
+            "additionalProperties": true,
+            "example": {
+              "areFeesSponsored": true
+            }
+          }
+        }
+      },
+      "ResourceInfo": {
+        "type": "object",
+        "description": "The resource the payment is for, as the seller described it.",
+        "required": ["url"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The resource's address.",
+            "example": "https://api.example.com/weather"
+          },
+          "description": {
+            "type": "string",
+            "description": "What the resource does, in the seller's words. A catalog listing shows it, cut to 500 characters.",
+            "example": "Current temperature for a city"
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "The media type of the resource's answer. A catalog listing shows it.",
+            "example": "application/json"
+          },
+          "serviceName": {
+            "type": "string",
+            "description": "The seller's name for its service. A catalog listing shows it when it is 1 to 32 printable ASCII characters, and leaves it out otherwise."
+          },
+          "tags": {
+            "type": "array",
+            "description": "Short tags for the service. A catalog listing keeps up to 5, each 1 to 32 printable ASCII characters and none twice, and leaves the rest out.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "iconUrl": {
+            "type": "string",
+            "description": "The address of the service's icon. A catalog listing shows it when it is an `https` address on a public host name, at most 2048 characters, and leaves it out otherwise."
+          }
+        }
+      },
+      "VerifyResponse": {
+        "type": "object",
+        "description": "The verdict of `/verify`.",
+        "required": ["isValid"],
+        "properties": {
+          "isValid": {
+            "type": "boolean",
+            "description": "Whether the payment meets the requirements and would settle now.",
+            "example": true
+          },
+          "invalidReason": {
+            "type": "string",
+            "description": "Why the payment was refused, as a stable code: an `invalid_exact_stellar_*` reason, `invalid_network`, or a `settle_exact_stellar_breaker_open_*` reason while settlements of this payer, recipient or asset keep failing on chain. Absent when `isValid` is true."
+          },
+          "invalidMessage": {
+            "type": "string",
+            "description": "The refusal in a sentence, for a person. Not stable: read `invalidReason` in code."
+          },
+          "payer": {
+            "type": "string",
+            "description": "The buyer's address, when the payment names one.",
+            "example": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI"
+          },
+          "extra": {
+            "type": "object",
+            "description": "Details that go with the reason.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "SettleResponse": {
+        "type": "object",
+        "description": "The outcome of `/settle`.",
+        "required": ["success", "transaction", "network"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the payment is final on chain and this call is the one that gets its success. Answered `true` once per payment.",
+            "example": true
+          },
+          "transaction": {
+            "type": "string",
+            "description": "The hash of the transaction, 64 hex digits. Empty when nothing was sent. On a failure it is the last hash stored for the payment, which may never have reached the network.",
+            "example": "3f1c8a6d2b9e4f70a1c5d8e2b7f4a9c0d3e6f1a2b5c8d7e0f9a4b3c2d1e0f6a7"
+          },
+          "network": {
+            "type": "string",
+            "description": "The network the payment was for.",
+            "example": "stellar:testnet"
+          },
+          "payer": {
+            "type": "string",
+            "description": "The buyer's address.",
+            "example": "GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI"
+          },
+          "errorReason": {
+            "type": "string",
+            "description": "Why the payment did not settle, as a stable code: `settlement_pending`, a `settle_exact_stellar_*` reason, one of the checks' `invalid_exact_stellar_*` reasons, `invalid_network` or `unexpected_settle_error`. Absent on success."
+          },
+          "errorMessage": {
+            "type": "string",
+            "description": "The failure in a sentence, for a person. Not stable: read `errorReason` and `extra` in code."
+          },
+          "extra": {
+            "type": "object",
+            "description": "What to do after a failed settlement. Absent on success and on a refusal by the checks.",
+            "additionalProperties": true,
+            "properties": {
+              "retryable": {
+                "type": "boolean",
+                "description": "`true`: nothing was sent, so send the same payment again as it is. `false`: this payment ended, and a new one must be signed, but only once `expirationLedger` has closed."
+              },
+              "expirationLedger": {
+                "type": "integer",
+                "description": "The last ledger in which the buyer's signature is valid. Until it has closed, the payment can still land; a new payment signed before then could charge the buyer twice."
+              }
+            }
+          }
+        }
+      },
+      "SupportedResponse": {
+        "type": "object",
+        "description": "What this instance verifies and settles.",
+        "required": ["kinds", "extensions", "signers"],
+        "properties": {
+          "kinds": {
+            "type": "array",
+            "description": "One entry per version, scheme and network.",
+            "items": {
+              "$ref": "#/components/schemas/SupportedKind"
+            }
+          },
+          "extensions": {
+            "type": "array",
+            "description": "The extensions this instance understands.",
+            "items": {
+              "type": "string"
+            },
+            "example": ["bazaar"]
+          },
+          "signers": {
+            "type": "object",
+            "description": "The addresses this instance signs with, by network pattern.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "example": {
+              "stellar:*": ["GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP"]
+            }
+          }
+        }
+      },
+      "SupportedKind": {
+        "type": "object",
+        "description": "One thing this instance verifies and settles: a protocol version, a scheme and a network.",
+        "required": ["x402Version", "scheme", "network"],
+        "properties": {
+          "x402Version": {
+            "type": "integer",
+            "description": "The protocol version: `2`.",
+            "example": 2
+          },
+          "scheme": {
+            "type": "string",
+            "description": "The payment scheme: `exact`.",
+            "example": "exact"
+          },
+          "network": {
+            "type": "string",
+            "description": "The network this instance serves, as a CAIP-2 id: `stellar:testnet` or `stellar:pubnet`.",
+            "example": "stellar:testnet"
+          },
+          "extra": {
+            "type": "object",
+            "description": "Scheme data. `areFeesSponsored: true`: the facilitator pays the network fee.",
+            "additionalProperties": true,
+            "example": {
+              "areFeesSponsored": true
+            }
+          }
+        }
+      },
+      "DiscoveryResourcesResponse": {
+        "type": "object",
+        "description": "One page of the catalog.",
+        "required": ["x402Version", "items", "pagination"],
+        "properties": {
+          "x402Version": {
+            "type": "integer",
+            "description": "The protocol version of the answer: `2`.",
+            "example": 2
+          },
+          "items": {
+            "type": "array",
+            "description": "The page's entries, in the order they were first listed. An entry that is refreshed keeps its place, so paging doesn't shift.",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveryResource"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        }
+      },
+      "DiscoveryResource": {
+        "type": "object",
+        "description": "A paid resource: where it is, what it costs and how to call it.",
+        "required": ["type", "resource", "x402Version", "accepts", "lastUpdated"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "The kind of resource.",
+            "example": "http"
+          },
+          "resource": {
+            "type": "string",
+            "description": "The resource's address: request it, and it answers `402` with the same requirements.",
+            "example": "https://api.example.com/weather"
+          },
+          "x402Version": {
+            "type": "integer",
+            "description": "The protocol version the resource is paid under: `2`.",
+            "example": 2
+          },
+          "accepts": {
+            "type": "array",
+            "description": "What the resource was last paid with: the network, the asset, the price and the recipient.",
+            "items": {
+              "$ref": "#/components/schemas/PaymentRequirements"
+            }
+          },
+          "description": {
+            "type": "string",
+            "description": "What the resource does, in the seller's words.",
+            "example": "Current temperature for a city"
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "The media type of the resource's answer.",
+            "example": "application/json"
+          },
+          "serviceName": {
+            "type": "string",
+            "description": "The seller's name for its service: 1 to 32 printable ASCII characters.",
+            "example": "Example Weather"
+          },
+          "tags": {
+            "type": "array",
+            "description": "The seller's tags for the service: at most 5, each 1 to 32 printable ASCII characters.",
+            "items": {
+              "type": "string"
+            },
+            "example": ["weather", "forecast"]
+          },
+          "iconUrl": {
+            "type": "string",
+            "description": "The address of the service's icon: an `https` address on a public host name.",
+            "example": "https://api.example.com/icon.png"
+          },
+          "lastUpdated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a settlement last added or refreshed the entry.",
+            "example": "2026-11-12T15:02:50.313Z"
+          },
+          "extensions": {
+            "type": "object",
+            "description": "The seller's `bazaar` declaration: `info` holds an example of the resource's input and output, and `schema` a JSON Schema of them, so an agent can build a request without reading any other documentation.",
+            "additionalProperties": true,
+            "example": {
+              "bazaar": {
+                "info": {
+                  "input": {
+                    "type": "http",
+                    "method": "GET",
+                    "queryParams": {
+                      "city": "Warsaw"
+                    }
+                  },
+                  "output": {
+                    "type": "json",
+                    "example": {
+                      "city": "Warsaw",
+                      "tempC": 14
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "description": "Where the page is among the entries the filters match.",
+        "required": ["limit", "offset", "total"],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "The limit used, after clamping.",
+            "example": 20
+          },
+          "offset": {
+            "type": "integer",
+            "description": "The offset used: how many matching entries the page skipped. `0` unless the request gave one.",
+            "example": 0
+          },
+          "total": {
+            "type": "integer",
+            "description": "How many entries the filters match, on every page together.",
+            "example": 1
+          }
+        }
+      },
+      "HealthStatus": {
+        "type": "object",
+        "description": "What the instance says of itself: whether `/settle` serves, whether its signing key works, and which build answers.",
+        "required": ["ready", "listed"],
+        "properties": {
+          "ready": {
+            "type": "boolean",
+            "description": "Whether `/settle` serves: the instance may send transactions and isn't shutting down.",
+            "example": true
+          },
+          "signer": {
+            "type": "string",
+            "enum": ["unchecked", "ok", "failed"],
+            "description": "Whether the instance's signing key works, from its last signature.",
+            "example": "ok"
+          },
+          "listed": {
+            "type": "boolean",
+            "description": "Whether the instance has read its open settlements since it started.",
+            "example": true
+          },
+          "commit": {
+            "type": "string",
+            "description": "The build that answers, as a git commit.",
+            "example": "7a5ce70d939fe39e4c651e97ff4efdf896165b13"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "description": "Every answer that is not a `200`: a code, and for a bad query parameter its name.",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "A stable code: `bad_request`, `missing_api_key`, `invalid_api_key`, `not_found`, `payload_too_large`, `unsupported_media_type`, `too_many_requests`, `internal_error`, `rpc_unavailable`, `no_lease` or `shutting_down`.",
+            "example": "bad_request"
+          },
+          "param": {
+            "type": "string",
+            "description": "The query parameter a `400` from `/discovery/resources` refuses."
+          }
+        }
+      }
+    }
+  }
+}
