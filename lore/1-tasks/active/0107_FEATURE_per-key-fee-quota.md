@@ -2,7 +2,8 @@
 id: "0107"
 title: "Give each API key holder a free quota and a fee budget apart from the shared ones"
 type: FEATURE
-status: backlog
+status: active
+owner: akot
 milestone: 2
 related_adr: ["0007", "0013"]
 related_tasks: ["0024", "0105", "0106", "0108"]
@@ -14,6 +15,10 @@ history:
     status: backlog
     who: akot
     note: "Spawned from 0024: per-key budgets close the shared-budget exhaustion on pubnet."
+  - date: "2026-11-23"
+    status: active
+    who: akot
+    note: "Work starts, with a design first: the decisions in \"Decisions to make here\"."
 ---
 
 # Give each API key holder a free quota and a fee budget apart from the shared ones
