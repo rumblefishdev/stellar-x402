@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { SellerFetchError, guardedFetch } from "@stellar-x402/seller-fetch";
+import robotsParser from "robots-parser";
 import type { Cataloger, SeedResult } from "./cataloger.js";
 import { SELLER_USER_AGENT } from "./seller-check.js";
 
@@ -14,6 +15,10 @@ export const SEED_FILE_BYTES = 512 * 1024;
  * URL costs one request, a second when its 402 declares another method or an MCP tool.
  */
 export const REQUEST_GAP_MS = 3_000;
+/** The robots.txt size a parser must read, RFC 9309 §2.5. */
+const ROBOTS_BYTES = 500 * 1024;
+/** Our robot's name in robots.txt groups: the product token of `SELLER_USER_AGENT`. */
+const ROBOT_NAME = "stellar-x402-bazaar";
 /** As long as a seller check may take (`cataloger.ts`'s seller timeout). */
 const FILE_TIMEOUT_MS = 10_000;
 /** The only methods a check sends: real listings use these two alone (ADR 0008). */
@@ -47,7 +52,7 @@ export function parseHosts(text: string): { origins: string[]; invalid: string[]
 export interface Skipped {
   entry: string;
   method: string;
-  reason: "off_host" | "other_method" | "unreadable";
+  reason: "off_host" | "other_method" | "unreadable" | "robots";
 }
 
 export type FileResources =
@@ -146,6 +151,29 @@ async function readFile402(origin: string, listLocal: boolean): Promise<unknown>
   }
 }
 
+/**
+ * The host's robots.txt rules for our robot (0155, owner 2026-11-23), by RFC 9309: a 4xx means no
+ * rules (§2.3.1.3); a 5xx, or no answer at all, means every URL is off limits (§2.3.1.4), so the
+ * host is not asked. A redirect is not followed, as for every seller request: measured hosts that
+ * redirect robots.txt redirect their `/.well-known/x402` too, so they are not seeded either way.
+ */
+async function readRobots(
+  origin: string,
+  listLocal: boolean,
+): Promise<{ isDisallowed(url: string, ua: string): boolean | undefined } | undefined> {
+  const limits = {
+    timeoutMs: FILE_TIMEOUT_MS,
+    maxResponseBytes: ROBOTS_BYTES,
+    allowInsecureLocal: listLocal,
+  };
+  const fetch = guardedFetch(limits, AbortSignal.timeout(FILE_TIMEOUT_MS));
+  const url = new URL("/robots.txt", origin).href;
+  const response = await fetch(url, { headers: { "user-agent": SELLER_USER_AGENT } });
+  if (response.status >= 400 && response.status < 500) return undefined;
+  if (response.status !== 200) throw new Error(`robots.txt status ${response.status}`);
+  return robotsParser(url, await response.text());
+}
+
 /** Seeds one host: its file, then each URL in turn, a failure in one never stopping the next. */
 async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): Promise<HostReport> {
   const report: HostReport = {
@@ -156,7 +184,9 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
     results: [],
   };
   let file: unknown;
+  let robots: Awaited<ReturnType<typeof readRobots>>;
   try {
+    robots = await readRobots(origin, deps.listLocal);
     file = await readFile402(origin, deps.listLocal);
   } catch (error) {
     report.file =
@@ -170,13 +200,19 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
     report.file = found.reason;
     return report;
   }
-  report.listed = found.resources.length;
+  const resources = [];
+  for (const resource of found.resources) {
+    if (robots?.isDisallowed(resource.url, ROBOT_NAME))
+      found.skipped.push({ entry: resource.url, method: resource.method, reason: "robots" });
+    else resources.push(resource);
+  }
+  report.listed = resources.length;
   report.skipped = found.skipped;
   const wait = deps.wait ?? sleep;
-  for (const [i, { url, method }] of found.resources.entries()) {
+  for (const [i, { url, method }] of resources.entries()) {
     const { results, requests } = await cataloger.seed(url, method);
     report.results.push(...results);
-    if (i < found.resources.length - 1) await wait(REQUEST_GAP_MS * requests);
+    if (i < resources.length - 1) await wait(REQUEST_GAP_MS * requests);
   }
   return report;
 }
@@ -192,8 +228,9 @@ export async function seedHosts(
 
 /**
  * The run's report for the operator: a tab-separated line per result (URL, method, network, payTo,
- * outcome, reason, detail) and per skipped entry (outcome `skipped`), a line per host, the totals, and each `payTo` seen on more than one
- * host (decision 12), since a host can name another seller's account (ADR 0008).
+ * outcome, reason, detail) and per skipped entry (outcome `skipped`), a line per host, the totals,
+ * and each `payTo` seen on more than one host (decision 12), since a host can name another seller's
+ * account (ADR 0008).
  */
 export function reportLines(reports: HostReport[]): string[] {
   const lines: string[] = [];
@@ -216,7 +253,8 @@ export function reportLines(reports: HostReport[]): string[] {
     lines.push(
       `host ${report.origin}: file ${report.file}, ${report.listed} listed, ` +
         `${skips("off_host")} on another host, ${skips("other_method")} other methods, ` +
-        `${skips("unreadable")} unreadable, ${count} written`,
+        `${skips("unreadable")} unreadable, ${skips("robots")} refused by robots.txt, ` +
+        `${count} written`,
     );
     for (const r of report.results) {
       if (r.payTo === undefined) continue;

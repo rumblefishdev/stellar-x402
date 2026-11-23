@@ -187,6 +187,38 @@ describe("seedHosts (0155)", () => {
     expect(seller.userAgents[0]).toBe(SELLER_USER_AGENT);
   });
 
+  it("skips a URL the host's robots.txt disallows, naming it (0155 decision 3, amended)", async () => {
+    seller.files["/robots.txt"] = "User-agent: *\nDisallow: /private/\n";
+    seller.files["/.well-known/x402"] = JSON.stringify({
+      resources: [`${seller.url}/private/a`, `${seller.url}/b`],
+    });
+    const { cataloger, wait } = setup();
+    const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
+    expect(report!.skipped).toEqual([
+      { entry: `${seller.url}/private/a`, method: "GET", reason: "robots" },
+    ]);
+    expect(report!.results).toMatchObject([{ url: `${seller.url}/b`, outcome: "refreshed" }]);
+    expect(seller.requests.map((request) => request.url)).not.toContain("/private/a");
+  });
+
+  it("follows the group that names our robot over the one for every robot", async () => {
+    seller.files["/robots.txt"] =
+      "User-agent: *\nDisallow: /\n\nUser-agent: stellar-x402-bazaar\nAllow: /\n";
+    seller.files["/.well-known/x402"] = JSON.stringify({ resources: [`${seller.url}/a`] });
+    const { cataloger, wait } = setup();
+    const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
+    expect(report!.skipped).toEqual([]);
+    expect(report!.results).toMatchObject([{ outcome: "refreshed" }]);
+  });
+
+  it("asks nothing of a host whose robots.txt answers a server error (RFC 9309 §2.3.1.4)", async () => {
+    seller.reply = async (request) => ({ status: request.url === "/robots.txt" ? 503 : 402 });
+    seller.files["/.well-known/x402"] = JSON.stringify({ resources: [`${seller.url}/a`] });
+    const { cataloger, wait } = setup();
+    const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
+    expect(report).toMatchObject({ file: "robots.txt status 503", results: [] });
+  });
+
   it("reports a host whose file can't be read, and seeds the other hosts", async () => {
     seller.files["/.well-known/x402"] = JSON.stringify({ resources: [`${seller.url}/a`] });
     const { cataloger, wait } = setup();
@@ -291,9 +323,9 @@ describe("the seed's report (0155 decision 12)", () => {
       "https://a.example/2\tGET\t\t\tnot_askable\tnot_402\t",
       "https://b.example/1\tGET\tstellar:pubnet\tGSHARED\trefreshed\tupdated\t",
       "https://x.example/1\tGET\t\t\tskipped\toff_host\t",
-      "host https://a.example: file ok, 2 listed, 0 on another host, 0 other methods, 0 unreadable, 1 written",
-      "host https://b.example: file ok, 1 listed, 1 on another host, 0 other methods, 0 unreadable, 1 written",
-      "host https://c.example: file status 404, 0 listed, 0 on another host, 0 other methods, 0 unreadable, 0 written",
+      "host https://a.example: file ok, 2 listed, 0 on another host, 0 other methods, 0 unreadable, 0 refused by robots.txt, 1 written",
+      "host https://b.example: file ok, 1 listed, 1 on another host, 0 other methods, 0 unreadable, 0 refused by robots.txt, 1 written",
+      "host https://c.example: file status 404, 0 listed, 0 on another host, 0 other methods, 0 unreadable, 0 refused by robots.txt, 0 written",
       "total: 2 written (1 added, 1 updated), 2 hosts with a listing, 1 payTo",
       "payTo GSHARED on 2 hosts: https://a.example, https://b.example",
     ]);
