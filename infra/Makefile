@@ -16,6 +16,7 @@ CDK := pnpm exec cdk --app "$(PRODUCTION_APP)"
 	diff-production-uptime deploy-production-uptime \
 	diff-production-alarms deploy-production-alarms \
 	diff-production-watch deploy-production-watch \
+	diff-production-heartbeat deploy-production-heartbeat \
 	fire-test check-series check-emf-disabled telemetry-arns
 
 # The catalog and the config package first: turbo builds what infra imports.
@@ -80,6 +81,14 @@ diff-production-watch: build
 deploy-production-watch: build
 	$(CDK) diff --strict $(PREFIX)-Watch
 	$(CDK) deploy $(PREFIX)-Watch --exclusively --require-approval broadening
+
+# The monitoring VM's heartbeat topic and alarm, and its Roles Anywhere role (lore 0139).
+diff-production-heartbeat: build
+	$(CDK) diff --strict $(PREFIX)-Heartbeat
+
+deploy-production-heartbeat: build
+	$(CDK) diff --strict $(PREFIX)-Heartbeat
+	$(CDK) deploy $(PREFIX)-Heartbeat --exclusively --require-approval broadening
 
 # The delivery test, after every deploy of the alarms (ADR 0011, decision 12): done only when a
 # person sees the message in Slack. The default alarm reads a metric written only on a failure,

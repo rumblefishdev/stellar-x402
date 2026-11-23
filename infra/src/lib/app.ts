@@ -3,6 +3,7 @@ import * as cdk from "aws-cdk-lib";
 import { type EnvironmentConfig, validateConfig } from "./config.js";
 import { stackPrefix } from "./names.js";
 import { AlarmsStack } from "./stacks/alarms-stack.js";
+import { HeartbeatStack } from "./stacks/heartbeat-stack.js";
 import { TelemetryStack } from "./stacks/telemetry-stack.js";
 import { UptimeStack } from "./stacks/uptime-stack.js";
 import { WatchStack } from "./stacks/watch-stack.js";
@@ -13,6 +14,7 @@ export interface X402App {
   readonly uptime: UptimeStack;
   readonly telemetry: TelemetryStack;
   readonly watch: WatchStack;
+  readonly heartbeat: HeartbeatStack;
 }
 
 export function createApp(config: EnvironmentConfig, app = new cdk.App()): X402App {
@@ -32,5 +34,6 @@ export function createApp(config: EnvironmentConfig, app = new cdk.App()): X402A
     uptime: new UptimeStack(app, `${prefix}-Uptime`, props("Uptime")),
     telemetry: new TelemetryStack(app, `${prefix}-Telemetry`, props("Telemetry")),
     watch: new WatchStack(app, `${prefix}-Watch`, props("Watch")),
+    heartbeat: new HeartbeatStack(app, `${prefix}-Heartbeat`, props("Heartbeat")),
   };
 }

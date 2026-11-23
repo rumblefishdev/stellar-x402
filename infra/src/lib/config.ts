@@ -75,6 +75,11 @@ export const ALARM_GROUPS = [
    * once its 08:00 UTC run has published: until then `upstream-silent` sees no point and fires.
    */
   "upstream",
+  /**
+   * `monitoring-heartbeat`, on the monitoring VM's heartbeat topic (ADR 0011, "Heartbeat"; 0139),
+   * once Alertmanager's Watchdog publishes to it: missing data breaches, so it fires until then.
+   */
+  "heartbeat",
 ] as const;
 export type AlarmGroup = (typeof ALARM_GROUPS)[number];
 
@@ -128,6 +133,16 @@ export interface EnvironmentConfig {
     readonly serverIpSsmParam: string;
     /** The longest session the profile and the role allow (#113's helper asks for 12). */
     readonly sessionHours: number;
+  };
+  /**
+   * The monitoring VM's AWS identity (ADR 0011, "The VM's AWS identity"; 0139): a certificate
+   * from the same CA as `logging`, whose role may only publish to the heartbeat and alarm topics.
+   */
+  readonly monitoringVm: {
+    /** The CN its role's trust policy accepts, the VM's certificate's. */
+    readonly certificateCn: string;
+    /** SSM parameter holding the VM's public IPv4, resolved at deploy. */
+    readonly ipSsmParam: string;
   };
   readonly uptime: {
     /** The facilitator's `/health` URL the probe reads, through Cloudflare. */
@@ -264,6 +279,10 @@ const schema = z.object({
       .min(1, SESSION)
       .max(MAX_SESSION_HOURS, SESSION),
   }),
+  monitoringVm: z.object({
+    certificateCn: z.string({ message: LOWER }).regex(/^[a-z0-9][a-z0-9-]{0,63}$/, LOWER),
+    ipSsmParam: ssmName,
+  }),
   uptime: z.object({
     url: z.string({ message: HTTPS }).refine(isHttpsUrl, HTTPS),
     portalUrl: z.string({ message: HTTPS }).refine(isHttpsUrl, HTTPS),
@@ -313,6 +332,10 @@ function crossChecks(c: z.infer<typeof schema>, ctx: z.RefinementCtx): void {
       );
   for (const n of Object.keys(c.feeAccounts))
     if (!c.networks.includes(n as StellarNetwork)) fail(["feeAccounts", n], "is not in networks");
+  // One CA signs both, and each role trusts a CN: the same one would let the server's agent
+  // publish to SNS and the VM write our logs.
+  if (c.monitoringVm.certificateCn === c.logging.certificateCn)
+    fail(["monitoringVm", "certificateCn"], "must differ from logging.certificateCn");
 
   for (const n of c.networks)
     if (!isHttpsUrl(c.watch.rpcUrls[n]))
