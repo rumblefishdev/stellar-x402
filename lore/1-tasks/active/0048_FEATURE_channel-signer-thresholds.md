@@ -2,7 +2,8 @@
 id: "0048"
 title: "Before mainnet, decide again how far the hot key's power reaches"
 type: FEATURE
-status: backlog
+status: active
+owner: okarcz
 milestone: 2
 related_adr: ["0003", "0005", "0011"]
 related_tasks: ["0047", "0007", "0016", "0020", "0026", "0027"]
@@ -33,6 +34,10 @@ history:
     status: backlog
     who: okarcz
     note: "Moved to M2: a re-check before mainnet, which comes after 0036 and 0026, and mainnet is outside T1's scope."
+  - date: "2026-11-23"
+    status: active
+    who: okarcz
+    note: "Started with the re-check: a cold recovery key, another way to keep the hot key below high, or the hot key's full power accepted."
 ---
 
 # Before mainnet, decide again how far the hot key's power reaches

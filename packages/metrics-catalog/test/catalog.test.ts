@@ -164,6 +164,8 @@ describe("CATALOG", () => {
     );
     expect(scopes).toEqual({
       ready: "process",
+      portal_ready: "process",
+      hub_ready: "process",
       spendable_stroops: "network",
       protocol_version: "network",
       protocol_supported_version: "network",
@@ -299,6 +301,8 @@ describe("CATALOG", () => {
       mem_used_percent: [g, "Percent", proc],
       disk_used_percent: [g, "Percent", proc],
       ready: [g, "None", proc],
+      portal_ready: [g, "None", proc],
+      hub_ready: [g, "None", proc],
       spendable_stroops: [g, "None", net],
       protocol_version: [g, "None", net],
       protocol_supported_version: [g, "None", net],

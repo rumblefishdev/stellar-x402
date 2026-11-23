@@ -18,6 +18,18 @@ export const ALARM_GROUPS = [
    * for a while: with missing data breaching, an alarm made before that pages at once (decision 37).
    */
   "uptime",
+  /**
+   * `portalUptime`: the portal backend's probe, `portal_ready` (0106 decision 21). Off until that
+   * probe has published for a while, as `uptime`.
+   */
+  "portalUptime",
+  /**
+   * `hubUptime`: the API hub's backend read through the explorer's CloudFront, `hub_ready` (0106
+   * decision 21). Off until the hub's backend is in the explorer's distribution (the hub's runbook,
+   * step 4) and its probe reads 1: until then the distribution answers `/api/hub/me` with a
+   * redirect, and the alarm would page at once.
+   */
+  "hubUptime",
   /** The EMF error alarms on the metrics log group. */
   "telemetry",
   /** Every `x402-facilitator` alarm but `channel-held`; their lines reach CloudWatch with #113. */
@@ -67,7 +79,10 @@ export const ALARM_GROUPS = [
 export type AlarmGroup = (typeof ALARM_GROUPS)[number];
 
 export interface Thresholds {
-  /** `uptime`: failing minutes in a row, above a deploy's worst downtime (ADR 0011). */
+  /**
+   * `uptime`: failing minutes in a row, above a deploy's worst downtime (ADR 0011). `portal-uptime`
+   * and `hub-uptime` take the same run.
+   */
   readonly uptimeFailingMinutes: number;
   /**
    * `uptime-flapping`: failing minutes in the window that fire it though none of them run for
@@ -115,8 +130,15 @@ export interface EnvironmentConfig {
     readonly sessionHours: number;
   };
   readonly uptime: {
-    /** The `/health` URL the probe reads, through Cloudflare. */
+    /** The facilitator's `/health` URL the probe reads, through Cloudflare. */
     readonly url: string;
+    /** The portal backend's `/health`, through Cloudflare (0106 decision 21). */
+    readonly portalUrl: string;
+    /**
+     * The API hub backend's `/api/hub/me`, through the explorer's CloudFront: the whole path a
+     * member's browser takes to it (0106 decision 21).
+     */
+    readonly hubUrl: string;
   };
   /**
    * The fee account per network, `G...`: the balance alarms name it (ADR 0013). Public, since
@@ -244,6 +266,8 @@ const schema = z.object({
   }),
   uptime: z.object({
     url: z.string({ message: HTTPS }).refine(isHttpsUrl, HTTPS),
+    portalUrl: z.string({ message: HTTPS }).refine(isHttpsUrl, HTTPS),
+    hubUrl: z.string({ message: HTTPS }).refine(isHttpsUrl, HTTPS),
   }),
   // Each entry is checked against `networks` in crossChecks, where both are known.
   feeAccounts: z.record(z.string(), z.unknown(), { message: "must map networks to addresses" }),

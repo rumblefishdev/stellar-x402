@@ -207,6 +207,69 @@ describe("PostgreSQL stores", () => {
     sealed: new PostgresSealedKeyStore(pool),
   }));
 
+  describe("the sealed store's revoke beside an issue for the same owner (0106)", () => {
+    const OWNER = "discord:412345678901234567";
+    const OLD = "a".repeat(64);
+    const NEW = "b".repeat(64);
+    const COPY_OLD = Buffer.from("sealed copy of a");
+    const COPY_NEW = Buffer.from("sealed copy of b");
+    const copies = async () =>
+      (
+        await pool.query<{ key_hash: string }>(
+          "SELECT key_hash FROM api_key_copies ORDER BY key_hash",
+        )
+      ).rows.map((row) => row.key_hash);
+
+    /** `pool`, but each client runs `between` once, just before a revoke deletes copies. */
+    const pausedBeforeDelete = (between: () => Promise<unknown>) =>
+      ({
+        connect: async () => {
+          const client = await pool.connect();
+          return {
+            query: async (text: string, values?: unknown[]) => {
+              if (text.includes("DELETE FROM api_key_copies")) await between();
+              return client.query(text, values);
+            },
+            release: () => client.release(),
+          };
+        },
+      }) as unknown as pg.Pool;
+
+    it("never deletes the copy of a key an issue committed between its two statements", async () => {
+      await db.empty();
+      const sealed = new PostgresSealedKeyStore(pool);
+      // The owner's last key is revoked already, so the revoke below revokes nothing and holds no
+      // lock that would make the issue wait: it commits between the UPDATE and the DELETE.
+      await sealed.issue({ hash: OLD, owner: OWNER, sealed: COPY_OLD, now: 1_000 });
+      await sealed.revoke(OWNER, 2_000);
+      let issued: boolean | undefined;
+      const racing = new PostgresSealedKeyStore(
+        pausedBeforeDelete(async () => {
+          issued = await sealed.issue({ hash: NEW, owner: OWNER, sealed: COPY_NEW, now: 3_000 });
+        }),
+      );
+      expect(await racing.revoke(OWNER, 3_000)).toBe(false);
+      expect(issued).toBe(true);
+      expect(await sealed.keysOf(OWNER)).toEqual({
+        active: { hash: NEW, createdAt: 3_000, sealed: COPY_NEW },
+        lastRevokedAt: 2_000,
+      });
+      expect(await copies()).toEqual([NEW]);
+    });
+
+    it("still deletes the copy a revoke by the registry alone left behind", async () => {
+      const { apiKeys } = await stores();
+      const sealed = new PostgresSealedKeyStore(pool);
+      await sealed.issue({ hash: OLD, owner: OWNER, sealed: COPY_OLD, now: 1_000 });
+      // The operator's script revokes through the registry, which knows nothing of copies.
+      await apiKeys.revoke(OWNER, 2_000);
+      await sealed.issue({ hash: NEW, owner: OWNER, sealed: COPY_NEW, now: 3_000 });
+      expect(await copies()).toEqual([OLD, NEW]);
+      expect(await sealed.revoke(OWNER, 4_000)).toBe(true);
+      expect(await copies()).toEqual([]);
+    });
+  });
+
   /**
    * Resolves the pid of a backend waiting on a lock `holder` holds, once one is. Other test files
    * share the database, so a lock wait of theirs doesn't count.

@@ -2,7 +2,8 @@
 id: "0107"
 title: "Give each API key holder a free quota and a fee budget apart from the shared ones"
 type: FEATURE
-status: backlog
+status: active
+owner: akot
 milestone: 2
 related_adr: ["0007", "0013"]
 related_tasks: ["0024", "0105", "0106", "0108"]
@@ -14,6 +15,10 @@ history:
     status: backlog
     who: akot
     note: "Spawned from 0024: per-key budgets close the shared-budget exhaustion on pubnet."
+  - date: "2026-11-23"
+    status: active
+    who: akot
+    note: "Work starts, with a design first: the decisions in \"Decisions to make here\"."
 ---
 
 # Give each API key holder a free quota and a fee budget apart from the shared ones
@@ -70,6 +75,10 @@ doesn't block pubnet: until then the operator raises an account's limit by hand.
   - If it stays refused: the refusal says the payment creates `payTo`'s balance and that the seller
     creates it once from their own account (today it names only the fee and the ceiling), and ADR
     0007 and the threat model ("Fee inflation by rent") get the pubnet figures for `exact`.
+- Whether an operator's revoke should ban an owner (0106 decision 35). Today `pnpm keys revoke`
+  holds a new key back only until the month's end, as any revoke does, and nothing in the registry
+  blocks an owner. A ban alone doesn't stop a Sybil with many Discord accounts; with one, the
+  month's cap also gets its lock (0106 decision 34).
 
 ## Acceptance Criteria
 

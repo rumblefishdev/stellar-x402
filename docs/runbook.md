@@ -991,8 +991,10 @@ agent's own log is `/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agen
 | `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`                                |
 | `metrics/agent.log`               | `x402-metrics`                                | `metrics-agent` in `app`                           |
 
-`x402-logrotate.timer` rotates a file past 100 MB every 10 minutes and keeps 10: `*.log.1` as it
-was, the older ones compressed. A rotation during an AWS outage loses the app lines the agent
+`x402-logrotate.timer` runs every 10 minutes and rotates each file once a day, empty or not, or
+sooner once past 100 MB; it keeps 10, `*.log.1` as it was and the older ones compressed, and
+deletes any older than 30 days. So no line stays on the server past the 30 days the hub's privacy
+policy states, the facilitator's (whose lines name a pubnet caller) and the portal's alike (0106). A rotation during an AWS outage loses the app lines the agent
 hadn't sent yet from CloudWatch, never from the server: they are in `*.log.1` (ADR 0011).
 
 **The units' first move to files** (0027), after the admin step, in the window of The playbook's
@@ -1555,7 +1557,7 @@ call.
 One JSON object per line in `/var/log/x402/production/portal.log`, shipped as `portal` in
 `/x402/production/app`. A call is named by its token's `jti` and `act`, a key by its `key_id`,
 the first 12 hex digits of its SHA-256; never a key, a token, a secret or a Discord id. No alarm
-watches them yet.
+reads them yet: what watches the backend is the uptime probe on its `/health` (Monitoring, below).
 
 | Event                                                           | Level | Means, and what to do                                                                                                                                                                     |
 | --------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1635,10 +1637,42 @@ sudo FACILITATOR_IMAGE=unused docker compose exec -T postgres-testnet psql -U po
 Trying it touches real keys: a revoke holds back a new key until the next calendar month, so try
 revoke last, or with a second Discord account.
 
+### Monitoring
+
+An uptime probe in AWS, `x402-production-portal-uptime-probe`, reads
+`https://x402-portal.sorobanscan.com/health` through Cloudflare every minute and publishes
+`portal_ready` (1 for a 200 with `{"ready":true}`) to `x402-watch`; its alarm is `portal-uptime`
+(7 minutes in a row, a missing point counted as down), in the group `portalUptime`. A second probe,
+`x402-production-hub-uptime-probe`, reads the hub's `https://sorobanscan.com/api/hub/me` through
+the explorer's CloudFront, the whole path a member's browser takes, and publishes `hub_ready` (1
+for a 200 with `{"authenticated":false}`); its alarm is `hub-uptime`, in `hubUptime`. Both come
+with the Uptime stack (`infra/`, 0106 decision 21); what each alarm means and what to do is in
+[monitoring, Uptime](monitoring.md#uptime).
+
+Both groups are off when the probes are first deployed, since an alarm made before its probe has
+data pages at once:
+
+- **`portalUptime`**, once the portal's probe has published for a few minutes: from `infra/`,
+  `make deploy-production-uptime`, then `make check-series GROUP=portalUptime` until it passes,
+  then `"portalUptime": true` in `infra/envs/production.json`, `make deploy-production-alarms` and
+  `make fire-test` (infra/README.md, Alarm groups).
+- **`hubUptime`**, once the hub's backend is routed in the explorer's distribution (the hub's
+  runbook, step 4) and the probe reads 1: until then the distribution answers `/api/hub/me` with
+  a `302` to `/api/`, which the probe reads as down. The same steps, with `GROUP=hubUptime`; first
+  check the probe's last lines say `"ready":1` (`/aws/lambda/x402-production-hub-uptime-probe`).
+
+The hub's own alarms, on its Lambda's `Throttles` and `Url5xxCount`, are being added in its repo
+(`rumblefishdev/sorobanscan-api-portal`), publishing to this repo's `x402-production-alarms` topic,
+so they reach `#stellar-x402-bot` beside these. Later, not built: a watchdog for this backend,
+metric filters with alarms on its log lines (`startup_failed`, `hub_call_failed`,
+`hub_key_copy_unreadable`), and an alarm on the hub's Lambda nearing its concurrency
+(`ConcurrentExecutions`), which `Throttles` sees only once it is reached.
+
 ### What this backend lacks
 
-- A watchdog and an alarm: Docker marks a hung backend `unhealthy` and nothing restarts it, and
-  no probe watches its hostname. Its logs ship (`portal` in `app`).
+- A watchdog: Docker marks a hung backend `unhealthy` and nothing restarts it; the probe above
+  sees it, and a person restarts it. Its logs ship (`portal` in `app`), and no metric filter or
+  alarm reads them yet.
 - The page's own publish, `aws s3 sync` to the explorer's bucket, and the page's Basic Auth
   (0106 decisions 1 and 6): both are the explorer's distribution's.
 - A gate on the backend's hostname: there is none, on purpose. Every route but `/health` needs

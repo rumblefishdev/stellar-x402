@@ -38,12 +38,15 @@ export class MemoryKeyStore implements ApiKeyStore, SealedKeyStore {
   }
 
   revoke(owner: string, now: number): Promise<boolean> {
-    for (const key of this.keys) if (key.owner === owner) this.copies.delete(key.hash);
+    // As PostgreSQL's: revoke, then delete the copies of the owner's revoked keys only.
     const active = this.active(owner);
-    if (!active) return Promise.resolve(false);
-    active.state = "revoked";
-    active.revokedAt = now;
-    return Promise.resolve(true);
+    if (active) {
+      active.state = "revoked";
+      active.revokedAt = now;
+    }
+    for (const key of this.keys)
+      if (key.owner === owner && key.state === "revoked") this.copies.delete(key.hash);
+    return Promise.resolve(active !== undefined);
   }
 
   list(): Promise<ApiKeyRecord[]> {
