@@ -2,7 +2,8 @@
 id: "0135"
 title: "Labelled query set and nDCG@10 run for the Bazaar search"
 type: FEATURE
-status: backlog
+status: active
+owner: karolkow
 milestone: 2
 related_adr: ["0008", "0014"]
 related_tasks: ["0120", "0134", "0132"]
@@ -16,6 +17,11 @@ history:
     note: >
       Created with okarcz from the Milestone 2 plan. The Panel Review response (§4) promises this
       evaluation; no task held it.
+  - date: "2026-11-23"
+    status: active
+    who: karolkow
+    note: >
+      Started.
 ---
 
 # Labelled query set and nDCG@10 run for the Bazaar search
