@@ -2,10 +2,11 @@
 id: "0120"
 title: "Search the Bazaar: /discovery/search with ranking"
 type: FEATURE
-status: backlog
+status: active
+owner: karolkow
 milestone: 2
 related_adr: ["0008", "0012", "0014"]
-related_tasks: ["0029", "0063", "0137", "0134", "0135", "0154"]
+related_tasks: ["0029", "0063", "0137", "0134", "0135", "0154", "0155"]
 tags: [bazaar, discovery, mcp, priority-medium, effort-large]
 links:
   - ../../../docs/rfp/07-x402-facilitator-bazaar.md
@@ -22,6 +23,12 @@ history:
     note: >
       0134 chose the approach (ADR 0014); the questions left here are listed under
       Implementation.
+  - date: "2026-11-23"
+    status: active
+    who: karolkow
+    note: >
+      Work starts. The open questions are settled; the first PR serves search by words, the second
+      adds meaning and the model's container.
 ---
 
 # Search the Bazaar: `/discovery/search` with ranking
@@ -38,7 +45,7 @@ ranked by fit, so that I can find a paid resource without knowing its seller or 
   Bazaar" (`docs/rfp/07-x402-facilitator-bazaar.md`).
 - `docs/planning/m1-epics.md` puts `/discovery/search` and ranking out of Tranche 1; the spine
   defers them to "later tranches" (`m1-spine.md`, Deferred).
-- Upstream `@x402/extensions` 2.28 types the request as `SearchDiscoveryResourcesParams`, with a
+- Upstream `@x402/extensions` 2.31.0 types the request as `SearchDiscoveryResourcesParams`, with a
   natural-language query.
 - [ADR 0014](../../../docs/adr/0014-bazaar-search.md) (task 0134) chose the approach: words and
   meaning in PostgreSQL, fused by rank, the model in its own container. The quality score and
