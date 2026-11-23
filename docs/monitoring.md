@@ -724,6 +724,10 @@ threshold and this page's section. Until the switch nothing on the VM loads it.
   `breaker-opened-*` alarms, `budget-nearing`, `sweeps-stopped`, `landed-after-expired`,
   `commit-unmatched`, `facilitator-silent`, `gauge-stale`), `warning` for the rest (lore 0139,
   decision 1). Until the phone route exists, both go to Slack.
+- Without data a rule doesn't keep its state as a CloudWatch alarm does: it resolves once its
+  series goes stale, so a resolved message can mean the series stopped. The silence rules say
+  which: `facilitator-silent`, `gauge-stale`, `textfile-stale` (for `probe-silent`) and
+  `server-silent` (for the agent, `telemetry-silent` in CloudWatch).
 - What stays in CloudWatch: the off-server check's and the uptime probe's alarms, `audit-disk`,
   `certificate`, `credentials-stale`, `telemetry-silent` and `log-volume-app`. The EMF alarms go
   with EMF.

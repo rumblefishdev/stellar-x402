@@ -64,6 +64,26 @@ const REPLACED: Record<string, string> = {
   "telemetry-silent": "stays in CloudWatch: it watches the CloudWatch agent",
 };
 
+/** The rule that covers here what a row's no-data text names (`serverRules`). */
+const SILENCE_HERE: Record<string, string> = {
+  "probe-silent": "textfile-stale",
+  "telemetry-silent": "server-silent",
+};
+
+/**
+ * A row's description with its no-data text as it holds in Prometheus (Karol's point 2 on #211):
+ * CloudWatch keeps an alarm's state without data, while a rule resolves once its series goes
+ * stale, so a resolved message can mean the series stopped, not that the cause went away.
+ */
+function here(d: Description): Description {
+  let noData = d.noData.replace(
+    /^Keeps its state;/,
+    "Resolves once its series stops, which is no recovery;",
+  );
+  for (const [cw, rule] of Object.entries(SILENCE_HERE)) noData = noData.replaceAll(cw, rule);
+  return { ...d, noData };
+}
+
 /** The CloudWatch agent's two host metrics, as node_exporter's series give them. */
 const NODE: Partial<Record<MetricName, (dims: Readonly<Record<string, string>>) => string>> = {
   mem_used_percent: () =>
@@ -130,7 +150,7 @@ export class RuleSet implements Alarms {
       return `label_replace(${labelled}, "severity", "${spec.severity ?? "warning"}", "", "")`;
     });
     const expr = branches.join(" or ");
-    const text = anyNetwork(describe(base, spec.description, "event"), spec.network);
+    const text = anyNetwork(describe(base, here(spec.description), "event"), spec.network);
     const seen = this.events.get(check);
     if (seen && seen.expr !== expr) throw new Error(`${check}: the networks' rows differ`);
     this.events.set(check, { expr, text });
@@ -239,7 +259,7 @@ export class RuleSet implements Alarms {
       ...extra,
       labels: { check, severity: spec.severity ?? "warning", shape, project: PROJECT_NAME },
       annotations: {
-        description: anyNetwork(describe(base, spec.description, shape), spec.network),
+        description: anyNetwork(describe(base, here(spec.description), shape), spec.network),
       },
     };
     const seen = this.rules.find((r) => r.alert === alert);

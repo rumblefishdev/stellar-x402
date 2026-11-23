@@ -57,6 +57,14 @@ test("every Event row is a branch of one rule, and the rule sets no check of its
   expect(events[0]!.annotations.description).toContain('eq $labels.check "http-500"');
 });
 
+test("no rule says CloudWatch's no-data behaviour or names its silences", () => {
+  // A rule resolves once its series goes stale (Karol's point 2 on #211), and probe-silent and
+  // telemetry-silent are textfile-stale and server-silent here.
+  for (const r of buildRules(allOn()).rules)
+    for (const cw of ["Keeps its state", "probe-silent", "telemetry-silent"])
+      expect(r.annotations.description, r.alert).not.toContain(cw);
+});
+
 test("the checks that would page on mainnet are critical, every other one a warning", () => {
   const severity = new Map<string, string>();
   for (const r of buildRules(allOn()).rules) {
