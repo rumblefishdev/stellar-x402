@@ -6,7 +6,11 @@ import { validateConfig } from "../src/lib/config.js";
 import { INFRA_ROOT } from "../src/lib/names.js";
 import { allOn, ofType, production, synth } from "./fixtures.js";
 
-const prod = synth(production()).heartbeat;
+// The group set here, not read from production.json, so turning it on there changes no test.
+const off = (() => {
+  const c = production();
+  return synth({ ...c, alarmGroups: { ...c.alarmGroups, heartbeat: false } }).heartbeat;
+})();
 const on = synth(allOn()).heartbeat;
 
 type Statement = {
@@ -37,14 +41,14 @@ const alarmTopicArn = {
 
 describe("the heartbeat", () => {
   test("has its topic whether the alarm is on or not, so the VM can publish before it is", () => {
-    for (const t of [prod, on])
+    for (const t of [off, on])
       expect(ofType(t, "AWS::SNS::Topic").map((r) => r.Properties["TopicName"])).toEqual([
         "x402-production-monitoring-heartbeat",
       ]);
   });
 
   test("makes no alarm while the group is off: missing data breaches, so it would fire at once", () => {
-    expect(ofType(prod, "AWS::CloudWatch::Alarm")).toEqual([]);
+    expect(ofType(off, "AWS::CloudWatch::Alarm")).toEqual([]);
   });
 
   test("fires after two silent 5-minute periods, missing data breaching, to the alarm topic", () => {
