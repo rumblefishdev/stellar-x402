@@ -336,8 +336,8 @@ export function compose(
   // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
   // A test's `rpc` serves every URL.
   const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
-  // 1 while calls are off `RPC_URLS[0]` (0027 AD-5). `active` is a plain read; `begin()` could
-  // start a probe. The label is the endpoint's name, as `buildRpc` names it, never its URL.
+  // 1 while calls are off `RPC_URLS[0]` (0027 AD-5), so a move to another endpoint reaches the
+  // owner. The label is the endpoint's name, as `buildRpc` names it, never its URL.
   const primary = rpcEndpointName(config.rpcUrls[0]!, 0);
   metrics.registerGauge("rpc_on_fallback", () => {
     const active = rpc.active;

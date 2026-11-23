@@ -5,7 +5,7 @@ import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
-import { PRIMARY_PROBE_INTERVAL_MS, compose } from "../src/main.js";
+import { compose } from "../src/main.js";
 import {
   memoryMetrics,
   scoped,
@@ -173,32 +173,18 @@ describe("pool gauges", () => {
 });
 
 describe("rpc_on_fallback", () => {
-  test("rpc_on_fallback is 1 after a failover and 0 after failback, label is the active endpoint name", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    const { read, rpc: shared, fake } = composed();
+  test("rpc_on_fallback is 1 while calls are off the first endpoint, label is the active endpoint name", () => {
+    const { read, rpc: shared } = composed();
     const name = (i: number) => rpcEndpointName(URLS[i]!, i);
 
     expect(read("rpc_on_fallback")).toEqual({ value: 0, labels: { rpc: name(0), network } });
 
     const { index, token } = shared.begin();
     shared.markFailed(index, token, new Error("down"), "test");
-    expect(read("rpc_on_fallback")).toEqual({ value: 1, labels: { rpc: name(1), network } });
-
-    // A probe is due, but reading the gauge never starts one.
-    vi.setSystemTime(Date.now() + PRIMARY_PROBE_INTERVAL_MS + 1);
-    const ledgers = fake.calls.getLatestLedger ?? 0;
-    read("rpc_on_fallback");
-    await Promise.resolve();
-    expect(fake.calls.getLatestLedger ?? 0).toBe(ledgers);
-    expect(read("rpc_on_fallback")!.value).toBe(1);
-
-    // A call starts the probe, which finds the first endpoint caught up.
-    shared.begin();
-    await vi.waitFor(() => expect(shared.active).toBe(name(0)));
-    const back = read("rpc_on_fallback");
-    expect(back).toEqual({ value: 0, labels: { rpc: name(0), network } });
+    const moved = read("rpc_on_fallback");
+    expect(moved).toEqual({ value: 1, labels: { rpc: name(1), network } });
     // The label is the endpoint's name, never its URL (ADR 0011).
-    expect(JSON.stringify(back?.labels)).not.toContain("https://");
+    expect(JSON.stringify(moved?.labels)).not.toContain("https://");
   });
 });
 

@@ -265,8 +265,8 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
       comparison: ">=",
       threshold: 1,
       description: {
-        what: `The facilitator's RPC on ${network} has run on a fallback endpoint for 15 minutes, every sample: a lagging fallback answers valid payments with rejections. Its OK is the recovery.`,
-        next: "Read rpc_failover in the app logs for why endpoint 0 failed, then fix it or reorder RPC_URLS.",
+        what: `The facilitator's RPC on ${network} has run on an endpoint other than RPC_URLS[0] for 15 minutes, every sample: another endpoint answered a read first and, at most 2 ledgers behind, took the calls over. Its OK means RPC_URLS[0] answered first again.`,
+        next: "Read rpc_failover in the app logs for why the calls moved (by, reason), and check that the endpoint now in use keeps up with the network; one that does needs no fix.",
         noData: SILENT_LEVEL,
       },
     });
