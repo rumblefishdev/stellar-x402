@@ -51,6 +51,8 @@ picks the listings that fit a query; this task orders them by a quality score an
 
 ## Questions
 
+Answered by the 2026-11-23 amendment of ADR 0014 ("Quality score" to "When the ranking is served").
+
 - Which settlements count toward buyer reach and volume, and how a seller paying itself is left out?
 - Is the score kept apart per network, or off on testnet?
 - How a listing's settlements are linked to it, and how often the score is recomputed?
@@ -65,8 +67,8 @@ picks the listings that fit a query; this task orders them by a quality score an
 
 - [ ] An ADR (or an amendment to 0134's ADR) records the score's inputs, their weights, how faked
       buyers are left out, and the curation rule
-- [ ] Given two matching listings, one with distinct paying buyers and one with none, when an agent
-      searches, then the one with buyers ranks first
-- [ ] Given a listing whose only buyers are its own `payTo` or accounts it funded, when the score
-      is computed, then those settlements do not count
+- [ ] Given two listings that match a query equally, one with distinct paying wallets and one with
+      none, when an agent searches, then the one with paying wallets ranks first
+- [ ] Given a listing whose only payer is its own `payTo`, when the score is computed, then those
+      payments do not count
 - [ ] Any difference from the proposal's §4.3 is listed for the M2 evidence (0132)

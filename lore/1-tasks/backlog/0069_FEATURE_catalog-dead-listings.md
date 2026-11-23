@@ -49,6 +49,9 @@ As a buyer browsing the Bazaar, I want listings of services that are gone to dro
   check keeps failing on the seller's side — an answer over 64 KiB or later than 10 s, no 402.
   Today it stays as the seller last confirmed it, with that `lastUpdated`. Peers: Veridex compares
   the live payment terms at each refresh; openx402's MCP shows `status: stale`.
+- Decide with the owner (moved from 0154, 2026-11-23): whether a listing whose seller stopped
+  answering ranks lower in search, as one more factor of ADR 0014's quality factor q, and which
+  check says so. Seeded listings are checked once today, so a periodic check comes first.
 - Pruning runs where 0050 prunes other store rows, if that fits.
 
 ## Acceptance Criteria
