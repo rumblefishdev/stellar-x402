@@ -81,7 +81,7 @@ but the task as first written could not run and was larger than needed.
 | 5 | Only free checks: the facilitator never pays for a test call | owner, 2026-11-19 | matches | no standard | | |
 | 6 | One catalog holds both networks' listings, each row with its network; the seed runs once now for mainnet and testnet sellers alike, although the facilitator settles only on testnet | owner, 2026-11-20 | beyond it; settles half of the point ADR 0012 left to 0126 (`docs/adr/0012-facilitator-state-store.md:65-70`): one table for both networks, while which database holds it stays with 0126 | no standard; the bazaar spec leaves storage to the implementation (`specs/extensions/bazaar.md`) | | |
 | 7 | No removal mechanism until the first seller asks to be removed | owner, 2026-11-20 | changes it: the task asked for removal on request | no standard | | |
-| 8 | Every request to a seller names our robot: `User-Agent: stellar-x402-bazaar/1 (+<docs URL>)`, so a seller can tell it apart and block it by name | owner, 2026-11-20 | beyond it | RFC 9309 §2.2.1 product token | | |
+| 8 | Every request to a seller names our robot: `User-Agent: stellar-bazaar/1 (+<docs URL>)`, so a seller can tell it apart and block it by name; the name has no digits, as RFC 9309 §2.2.1 asks of a product token | owner, 2026-11-20; name changed by owner 2026-11-23 | beyond it | RFC 9309 §2.2.1 product token | | |
 | 9 | Only resource URLs on the host that serves the file are asked; every other entry is skipped and named in the report with its reason (the AC asks for every refused URL) | agent, then owner 2026-11-20 | beyond it | no standard | | |
 | 10 | One request per URL, by the file's method or GET: its 402 is the check's answer for every Stellar account it names. The seller is asked once more only when the 402 declares another method or an MCP tool (measured: 103 of 784 listings in a sample declare another method) | agent, then owner 2026-11-20 | beyond it | upstream: no standard | | |
 | 11 | The seller's file is read up to 512 KiB, twice the largest measured (219,455 B) | agent | beyond it | no standard | | |
@@ -110,7 +110,7 @@ but the task as first written could not run and was larger than needed.
 - [ ] Given the host list, when the seed runs, then every listing it adds comes from the seller's
       own file and its 402, and passes the same gates as a listing from a settlement
 - [ ] No request goes to another x402 catalog during the seed
-- [ ] Every request to a seller carries the `stellar-x402-bazaar` User-Agent
+- [ ] Every request to a seller carries the `stellar-bazaar` User-Agent
 - [ ] Discovery lists both networks' listings, and `?network=` narrows them to one
 - [ ] Given a host where some resources fail, when the seed runs, then its other resources are
       still listed and each failure is reported with its reason
