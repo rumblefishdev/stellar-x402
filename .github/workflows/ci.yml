@@ -72,7 +72,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The digest the metrics agent pins (deploy/metrics/compose.yaml), so CI checks that version.
+      # What loads the file is the monitoring VM's Prometheus, v3.16.0 (soroban-infrastructure,
+      # monitoring/ansible/playbook.yml, prometheus_version); the agent runs --agent and never
+      # evaluates rules. The digest is the agent's image of that tag: raise the two together.
       - run: >-
           docker run --rm --entrypoint promtool
           -v "$PWD/deploy/metrics/rules:/rules:ro"
