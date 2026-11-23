@@ -684,14 +684,15 @@ export function createSettler(deps: SettlerDeps): Settle & {
               throw error;
             }
             if (!added) throw new Error("the settlement record is final or missing");
-            // The stored expiry may have passed while the store wrote, or the lease lapsed and was
-            // acquired again: a new token fences this call too (decision 1).
-            if (deps.lease()?.token !== lease.token) throw new LeaseLostError();
             // The budget answer may have gone out while the store wrote. The hash it named is
             // sent, as the answer told the seller; any other isn't (0009 decision 35, amended).
             if (call.budgetOver && (await call.answer)?.response.transaction !== hash) {
               throw new Error("the settle budget ran out");
             }
+            // The stored expiry may have passed while the store wrote or the budget answer read
+            // it, or the lease lapsed and was acquired again: a new token fences this call too
+            // (decision 1). Last before the send, so no wait follows it.
+            if (deps.lease()?.token !== lease.token) throw new LeaseLostError();
           },
           // A hint for debugging, never awaited: the send has happened, so a failed write changes
           // nothing (0019 decision 7). Not a record failure: no outage alarm, no sweep.

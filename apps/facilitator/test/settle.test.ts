@@ -1924,6 +1924,59 @@ describe("createSettler", () => {
       expect(rebuilt).toBeInstanceOf(Error);
     });
 
+    it("sends no named hash once the lease is lost while the budget answer reads the store", async () => {
+      let held = true;
+      let signed: unknown = "not called";
+      const { settle, store } = setup(
+        async (opts) => {
+          signed = await Promise.resolve(opts.onSigned!(HASH, BOUNDS)).then(
+            () => "sent",
+            (error: unknown) => error,
+          );
+          return new Promise(() => {});
+        },
+        { budgetMs: BUDGET_MS, lease: () => (held ? fence : undefined) },
+      );
+      // The hash is stored at once, but the store answers only after the budget answer started.
+      let reply!: () => void;
+      const replied = new Promise<void>((resolve) => (reply = resolve));
+      let written = false;
+      const addHash = store.addHash.bind(store);
+      vi.spyOn(store, "addHash").mockImplementation(async (...args) => {
+        const added = await addHash(...args);
+        written = true;
+        await replied;
+        return added;
+      });
+      // The budget answer's read of the record is slow, and the lease lapses meanwhile.
+      let reading!: () => void;
+      const reads = new Promise<void>((resolve) => (reading = resolve));
+      let open!: () => void;
+      const opened = new Promise<void>((resolve) => (open = resolve));
+      const get = store.get.bind(store);
+      vi.spyOn(store, "get").mockImplementation(async (...args) => {
+        if (written) {
+          reading();
+          await opened;
+        }
+        return get(...args);
+      });
+      const settled = settle(payload(), requirements);
+      await elapse(BUDGET_MS);
+      await reads;
+      reply();
+      await storeIdle();
+      held = false;
+      open();
+      expect((await settled).response).toMatchObject({
+        errorReason: SETTLE_REASONS.pending,
+        transaction: HASH,
+      });
+      await storeIdle();
+      // Another process may hold the channel now (0025 decision 22): the hash is not sent.
+      expect(signed).toBeInstanceOf(LeaseLostError);
+    });
+
     it("sends the hash a store-failed budget answer named only if its write lands", async () => {
       for (const lands of [true, false]) {
         await db.empty();
