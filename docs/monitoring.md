@@ -722,7 +722,7 @@ credential is broken. Meanwhile the Prometheus rules page no one. Its own stack,
 1. Did the Watchdog reach SNS? Two hours, one-minute periods:
 
    ```sh
-   S=$(date -u -v-2H +%FT%TZ); E=$(date -u +%FT%TZ); aws cloudwatch get-metric-statistics --namespace AWS/SNS --metric-name NumberOfMessagesPublished --dimensions Name=TopicName,Value=x402-production-monitoring-heartbeat --statistics Sum --period 60 --start-time $S --end-time $E --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Sum]' --output text
+   S=$(date -u -d '-2 hour' +%FT%TZ 2>/dev/null || date -u -v-2H +%FT%TZ); E=$(date -u +%FT%TZ); aws cloudwatch get-metric-statistics --namespace AWS/SNS --metric-name NumberOfMessagesPublished --dimensions Name=TopicName,Value=x402-production-monitoring-heartbeat --statistics Sum --period 60 --start-time $S --end-time $E --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Sum]' --output text
    ```
 
    No points since it fired: nothing reached the topic, go to 2. Points every minute and the

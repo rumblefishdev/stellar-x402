@@ -3,6 +3,9 @@
 // minute; an alarm on the topic's published messages fires when that stops: Prometheus,
 // Alertmanager or the VM gone quiet, or the VM's credential broken. The VM's role may only publish
 // to that topic and the alarm topic (the failed-notification route), from the VM's IP only.
+// The alarm topic reaches Slack through Amazon Q, which drops any message not in its custom-
+// notification envelope (`version`, `source: "custom"`, `content`; the Prices API's
+// `alarm_digest.rs`), so Alertmanager's SNS receiver for it must send that envelope.
 // Its own stack, apart from Alarms and Telemetry, as every stack here (0027 decision 27).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -31,7 +31,10 @@ in `x402-host`, all from the server's IP. It reads nothing and can't reach a sec
 The monitoring VM's role (ADR 0011, "The VM's AWS identity"; lore 0139) trusts only
 `CN=x402-monitoring-vm-production` from the same CA, on the Heartbeat stack's own anchor, and can
 only `sns:Publish` to the heartbeat topic and `x402-production-alarms`, from the VM's IP. Synth
-refuses the same CN for both roles.
+refuses the same CN for both roles. Amazon Q drops a message on `x402-production-alarms` that isn't
+in its custom-notification envelope (`version`, `source: "custom"`, `content`), so Alertmanager's
+SNS receiver for that topic, the failed-notification route, has to send one; the VM's SNS client
+keeps the default endpoint, IPv4 only, which the role's IP condition expects.
 
 The `x402-host` condition binds `PutMetricData` only. An EMF line written with `PutLogEvents` to
 `/x402/production/metrics` can name any namespace, `x402-watch` included, so the role doesn't
@@ -120,6 +123,10 @@ exists with its actions off (decision 26).
 | `protocol`      | `protocol-changed`, `protocol-upgrade-coming`                                                                                                  | The check's protocol section publishes both versions for each network in `watch.protocol` (decision 70)                                       |
 | `upstream`      | `upstream-changed`, `upstream-silent`                                                                                                          | The check's 08:00 UTC run publishes `upstream_files_changed` (task 0029)                                                                      |
 | `heartbeat`     | `monitoring-heartbeat`, in the Heartbeat stack: deploy it with `make deploy-production-heartbeat`                                              | The topic's `NumberOfMessagesPublished` shows Alertmanager's `Watchdog` every minute (docs/monitoring.md, monitoring-heartbeat, step 1; 0139) |
+
+`heartbeat` is the exception to what follows: check-series builds only the Alarms stack, so it
+says "no alarm to check" for it. Its check is the topic's `NumberOfMessagesPublished`
+(docs/monitoring.md, monitoring-heartbeat, step 1), and its deploy `make deploy-production-heartbeat`.
 
 To turn one on: `make check-series GROUP=<group>` until it passes, then set the flag (and any
 threshold it needs; synth refuses a group without one), `make deploy-production-alarms`, and
