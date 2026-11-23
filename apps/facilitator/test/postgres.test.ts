@@ -971,6 +971,37 @@ describe("PostgreSQL stores", () => {
     await expect(copy("a".repeat(64), Buffer.from("x"))).rejects.toThrow(/api_key_copies_pkey/);
   });
 
+  it("0017_catalog_words: fills a listing's words on every write, the release before's included (0120)", async () => {
+    await db.empty();
+    // The insert the release before sends: it names its columns and never `words`.
+    const write = (url: string, resource: unknown) =>
+      pool.query(
+        `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger,
+           checked_at, resource, type, extension_keys)
+         VALUES ('stellar:testnet', 'G', 'GET', $1, 1, NULL, 1, $2, 'http', '{bazaar}')
+         ON CONFLICT (network, pay_to, method, resource_url) DO UPDATE SET resource = $2`,
+        [url, JSON.stringify(resource)],
+      );
+    const words = async (url: string) =>
+      (await pool.query("SELECT words::text FROM catalog WHERE resource_url = $1", [url])).rows[0]
+        .words;
+    const url = "https://a.example/forecast";
+    await write(url, {
+      resource: url,
+      serviceName: "Tides",
+      tags: ["ocean"],
+      description: "Weather",
+      extensions: { bazaar: { info: { input: { queryParams: { city: "Gdansk" } } } } },
+    });
+    // Name, tags, description and parameters carry the weights A to D.
+    expect(await words(url)).toBe("'citi':5 'forecast':2A 'ocean':3B 'tide':1A 'weather':4C");
+    await write(url, { resource: url, description: "stocks" });
+    expect(await words(url)).toBe("'forecast':1A 'stock':2C");
+    // A listing of an unexpected shape is stored, with whatever words it holds: a lone tag counts.
+    await write("https://b.example/x", { resource: 1, tags: "x", extensions: [] });
+    expect(await words("https://b.example/x")).toBe("'x':1B");
+  });
+
   it("applies the migrations once when two runs race", async () => {
     const fresh = `${schema}_m`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -1106,6 +1137,7 @@ describe("PostgreSQL stores", () => {
           "0014_api_key_copies",
           "0015_settlement_refused",
           "0016_catalog_seed",
+          "0017_catalog_words",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1141,6 +1173,7 @@ describe("PostgreSQL stores", () => {
         "0014_api_key_copies",
         "0015_settlement_refused",
         "0016_catalog_seed",
+        "0017_catalog_words",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
