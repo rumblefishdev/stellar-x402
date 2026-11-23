@@ -17,20 +17,19 @@ export const DISCOVERY_LIMIT = { default: 20, max: 100 } as const;
  */
 export const MAX_OFFSET = 1_000_000;
 /** A `G…` address is 56 characters and a CAIP-2 id a few dozen; anything longer is noise. */
-const MAX_VALUE_LENGTH = 256;
+export const MAX_VALUE_LENGTH = 256;
 /**
  * T1 settles `exact` alone (0015 adds `upto`). Entries come from settlements and from the seed
  * (0155), which keeps a seller's `upto` offers too: 2 of 2,659 known offers on 2026-11-19.
  */
-const CATALOGED_SCHEMES: readonly string[] = ["exact"];
+export const CATALOGED_SCHEMES: readonly string[] = ["exact"];
 /**
  * Every entry's extensions are `bazaar` alone: `@stellar-x402/bazaar`'s validator, the only way
  * into the catalog, writes that block and drops the rest.
  */
-const CATALOGED_EXTENSIONS: readonly string[] = ["bazaar"];
+export const CATALOGED_EXTENSIONS: readonly string[] = ["bazaar"];
 /** The parameters upstream's `listResources` sends. */
 const KNOWN_PARAMS = ["type", "payTo", "scheme", "network", "extensions", "limit", "offset"];
-const KNOWN_LOWER = new Set(KNOWN_PARAMS.map((param) => param.toLowerCase()));
 
 /**
  * A name meant as a known param but not written as one: with brackets (Express 5's query parser
@@ -38,16 +37,17 @@ const KNOWN_LOWER = new Set(KNOWN_PARAMS.map((param) => param.toLowerCase()));
  * with spaces (`type `). As an unknown param it would be ignored and the whole catalog returned
  * unfiltered. Names further off (`pay_to`, `types`) stay unknown, as a new upstream filter might.
  */
-function misspelledKnown(param: string): boolean {
-  if (KNOWN_PARAMS.includes(param)) return false;
-  return KNOWN_LOWER.has(param.split("[")[0]!.trim().toLowerCase());
+export function misspelledKnown(param: string, known: readonly string[] = KNOWN_PARAMS): boolean {
+  if (known.includes(param)) return false;
+  const name = param.split("[")[0]!.trim().toLowerCase();
+  return known.some((knownParam) => knownParam.toLowerCase() === name);
 }
 
 /**
  * One value per parameter: a repeated one (`?type=a&type=b`) arrives as an array and fails here,
  * as do control characters such as NUL, which PostgreSQL rejects in text.
  */
-const text = z
+export const text = z
   .string()
   .max(MAX_VALUE_LENGTH)
   .regex(/^\P{Cc}*$/u);
@@ -55,14 +55,16 @@ const text = z
  * Plain decimal digits only: `Number()` would read `" "` as 0, `0x10` as 16 and `1e3` as 1000. Up
  * to 256 of them, as any value, so a huge `limit` is clamped like any other above the max (AD-20).
  */
-const count = z.string().max(MAX_VALUE_LENGTH).regex(/^\d+$/).transform(Number);
+export const count = z.string().max(MAX_VALUE_LENGTH).regex(/^\d+$/).transform(Number);
+
+/** CAIP-2: a malformed id is a 400; a well-formed one that isn't Stellar's matches nothing. */
+export const network = text.regex(/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/);
 
 const QUERY = z.object({
   type: text.optional(),
   payTo: text.optional(),
   scheme: text.optional(),
-  // CAIP-2: a malformed id is a 400; a well-formed one that isn't Stellar's matches nothing.
-  network: text.regex(/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/).optional(),
+  network: network.optional(),
   extensions: text.optional(),
   // 0 asks for the total alone.
   limit: count.optional(),
@@ -91,7 +93,7 @@ export type DiscoveryQuery =
  * whole table.
  */
 export function parseDiscoveryQuery(raw: Record<string, unknown>): DiscoveryQuery {
-  const misspelled = Object.keys(raw).find(misspelledKnown);
+  const misspelled = Object.keys(raw).find((param) => misspelledKnown(param));
   if (misspelled !== undefined) return { kind: "invalid", param: misspelled.slice(0, 64) };
   const given = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== ""));
   const parsed = QUERY.safeParse(given);
