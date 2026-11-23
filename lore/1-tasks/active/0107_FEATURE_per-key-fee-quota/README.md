@@ -9,7 +9,7 @@ related_adr: ["0007", "0013"]
 related_tasks: ["0024", "0105", "0106", "0108"]
 tags: [facilitator, fees, budgets, before-pubnet, priority-high, effort-medium, platform]
 links:
-  - ../../../docs/adr/0007-fee-abuse-containment.md
+  - ../../../../docs/adr/0007-fee-abuse-containment.md
 history:
   - date: "2026-11-03"
     status: backlog
@@ -31,6 +31,20 @@ its own rather than in 0024's shared `asset:<C…>` and `tier:other` ones (decid
 2026-11-03). Then a caller's self-payments use up only its own quota, which is what closes 0024's
 "Shared budget exhaustion by Sybil self-payments" on pubnet. Charging past the quota is 0108 and
 doesn't block pubnet: until then the operator raises an account's limit by hand.
+
+## Research (2026-11-23)
+
+Summary and inputs to the design: [S-research](notes/S-research.md). The notes:
+
+- [R-codebase-map](notes/R-codebase-map.md): where the budgets are counted, the reservation, repeats
+  and reopens, and the seams an owner scope fits into.
+- [R-fee-numbers](notes/R-fee-numbers.md): pubnet's typical settlement (12,203 stroops, measured), the
+  ceiling, a new balance's rent, and the arithmetic for the defaults. Scripts in
+  [notes/fee-scan](notes/fee-scan/).
+- [R-prior-art](notes/R-prior-art.md): CDP, PayAI, OpenZeppelin Channels, Launchtube, paymasters and
+  free-tier APIs, with their sources.
+- [R-prices-api](notes/R-prices-api.md): how stellar-prices-api counts its monthly quota.
+- [R-threats](notes/R-threats.md): what each option closes and leaves in the threat model.
 
 ## Implementation
 
@@ -71,7 +85,7 @@ doesn't block pubnet: until then the operator raises an account's limit by hand.
   counted in the key's budget, or paying only when the seller and the facilitator both opt in, as
   the x402 Solana spec does for a recipient's token account (`ataCreationRequired`,
   `ataCreationSponsored`). Rent may rise about tenfold once pubnet's state passes 2 GB. Figures and
-  sources: [R-pubnet-new-balance-rent](../../3-wiki/R-pubnet-new-balance-rent.md).
+  sources: [R-pubnet-new-balance-rent](../../../3-wiki/R-pubnet-new-balance-rent.md).
   - If it stays refused: the refusal says the payment creates `payTo`'s balance and that the seller
     creates it once from their own account (today it names only the fee and the ceiling), and ADR
     0007 and the threat model ("Fee inflation by rent") get the pubnet figures for `exact`.
