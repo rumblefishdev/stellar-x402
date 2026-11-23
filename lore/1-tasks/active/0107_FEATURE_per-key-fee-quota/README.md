@@ -45,6 +45,8 @@ Summary and inputs to the design: [S-research](notes/S-research.md). The notes:
   free-tier APIs, with their sources.
 - [R-prices-api](notes/R-prices-api.md): how stellar-prices-api counts its monthly quota.
 - [R-threats](notes/R-threats.md): what each option closes and leaves in the threat model.
+- [R-recipient-balance](notes/R-recipient-balance.md): who pays to create a recipient's token balance
+  on other chains, in the x402 specs and at other facilitators (for decision 4).
 
 ## Implementation
 
@@ -73,26 +75,12 @@ Summary and inputs to the design: [S-research](notes/S-research.md). The notes:
 
 ## Decisions to make here
 
-- Whether the per-payer and per-`payTo` budgets still apply to keyed traffic, or are keyed by the
-  caller too: a `payTo` budget shared by every caller still lets one key fill a seller's budget
-  ("Targeted `payTo` budget exhaustion").
-- Whether the quota is counted in settlements, in fees, or both as above.
-- The month: calendar month in UTC, or a rolling 30 days.
-- Whether the facilitator pays for a payment that creates `payTo`'s balance, considered from
-  scratch. On pubnet such a payment costs ~443,000 stroops (USDC to a C-address, measured
-  2026-11-05), about 31× a typical settlement, so today it is refused under the 250,000 ceiling.
-  Once a key's fees count in its own budget, paying may be safe: the options are a raised ceiling
-  counted in the key's budget, or paying only when the seller and the facilitator both opt in, as
-  the x402 Solana spec does for a recipient's token account (`ataCreationRequired`,
-  `ataCreationSponsored`). Rent may rise about tenfold once pubnet's state passes 2 GB. Figures and
-  sources: [R-pubnet-new-balance-rent](../../../3-wiki/R-pubnet-new-balance-rent.md).
-  - If it stays refused: the refusal says the payment creates `payTo`'s balance and that the seller
-    creates it once from their own account (today it names only the fee and the ceiling), and ADR
-    0007 and the threat model ("Fee inflation by rent") get the pubnet figures for `exact`.
-- Whether an operator's revoke should ban an owner (0106 decision 35). Today `pnpm keys revoke`
-  holds a new key back only until the month's end, as any revoke does, and nothing in the registry
-  blocks an owner. A ban alone doesn't stop a Sybil with many Discord accounts; with one, the
-  month's cap also gets its lock (0106 decision 34).
+All made on 2026-11-23, in "Design Decisions" below:
+- ~~Whether the per-payer and per-`payTo` budgets apply to keyed traffic~~: decision 2.
+- ~~Settlements, fees or both~~: decision 3.
+- ~~The month~~: decision 4.
+- ~~Whether the facilitator pays for a payment that creates `payTo`'s balance~~: decision 6.
+- ~~Whether an operator's revoke bans an owner (0106 decisions 34, 35)~~: decision 7.
 
 ## Acceptance Criteria
 
@@ -103,3 +91,89 @@ Summary and inputs to the design: [S-research](notes/S-research.md). The notes:
 - [ ] Given many accounts on free quotas, when together they fill the shared free budget, then an
       account with a raised limit still settles
 - [ ] Given the quota and budget values, when this task ends, then they are config and recorded
+
+## Design Decisions
+
+Design: [S-design](notes/S-design.md), waiting for akot's approval.
+
+### From Plan
+
+1 to 13 are akot's, from the design session of 2026-11-23.
+
+1. **As in stellar-prices-api, with the use shown in the hub, in this task.** An account has a
+   named plan with a monthly quota of payments, is refused when it is spent, and sees its use in
+   the hub's x402 tab. "Monthly Usage · Mainnet" takes the place of the "Mainnet (pubnet)" tile and
+   the Testnet tile stays. The hub's part is a pull request of its own in sorobanscan-api-portal,
+   as in 0106.
+2. **Keyed traffic counts in its account, `free` and `global` only.** `free` applies to an account
+   on the free plan. `payer:`, `payTo:`, `asset:` and `tier:other` stay for keyless traffic
+   (testnet). The breakers are unchanged on both networks. Another caller's key can no longer
+   fill a seller's `payTo` budget. What is left is accepted (akot, after the builder check): a
+   seller's own key carries its buyers' payments, so a buyer can use up the seller's quota at
+   1,000 × the price, paid to the seller. Charging past the quota (0108) is the fix.
+3. **1,000 payments a month, with a hidden fee budget per rolling 24 h under it** (2 XLM on the
+   free plan).
+   - A payment is a settlement sent to the network, a failed one included. `/verify`, a refusal
+     and a replay are not payments.
+   - The seller sees payments only.
+   - First decided as 5 XLM a month, then changed after the builder check: a monthly budget can be
+     spent in one day, so one raised account could fill `global` for everyone, and a seller
+     attacked with ceiling-cost payments would be refused for the rest of the month. There is no
+     monthly fee budget.
+4. **The calendar month in UTC,** from the 1st at 00:00, as Prices' `period.rs` and 0106 decision
+   24 have it.
+5. **`free` is 25 XLM per rolling 24 h, and `global` starts at 50 XLM per 24 h.**
+   - `global` is at least `free` plus the raised accounts' daily fee budgets. The operator checks
+     that when granting a plan.
+   - A monthly cap on `free` was dropped: it would bound the sum but turn an attack into a month
+     without a free tier, for fewer accounts.
+6. **A payment that creates `payTo`'s balance stays refused,** with a reason of its own,
+   `invalid_exact_stellar_pay_to_balance_missing`, and the fix in its message, in this task. Its
+   pubnet figures go into ADR 0007 and the threat model. This is the norm elsewhere: the x402 SVM
+   maintainers, PayAI, x402-rs, the NEAR spec and `@x402/stellar`'s 50,000 ceiling all refuse (R-recipient-balance).
+7. **No ban, as in Prices.** An operator's revoke stays a revoke (0106 decision 35). The issue cap
+   needs no lock (0106 decision 34): the use is the account's, so a key from that race gains no
+   quota.
+8. **Plans as in Prices.** The definitions are config. An account's plan is a row in the registry
+   (no row means Free), and the operator changes it by hand with a command, after the seller
+   writes to us. The plan survives a revoke and a new key.
+9. **Whoever's request sends the payment pays for it,** the first claim or a reopen. A quota
+   refusal doesn't reopen. A pubnet settlement without a caller is refused.
+10. **The refusals:**
+    - `settle_exact_stellar_quota_exhausted`, `…_spend_limit_account` and `…_spend_limit_free`;
+    - the reset instant in the message and `extra.resetsAt` for the monthly quota;
+    - HTTP 200 as for every x402 settle refusal;
+    - no quota check at `/verify`.
+11. **One alarm, the existing `budget-nearing`, which gains `free`.** Nothing per account: no alarm,
+    no metric, no event.
+12. **One pull request in stellar-x402,** its commits in risk order, and one in the hub.
+13. **Approach A:** the account and `free` as two more scopes in 0024's spend store. The portal
+    reads a view. The fallback, a counter per (account, month), is kept for the account scope if a
+    large plan's sum is too slow.
+
+### Emerged
+
+Claude's calls in the design (14 to 25), waiting for akot's check.
+
+14. **Plans Basic (10,000 payments a month, 2.5 XLM of fees per 24 h) and Pro (100,000, 10 XLM),**
+    beside Free (1,000, 2 XLM).
+15. **The scopes are `account:<owner>` and `free`,** in the order account (the month's payments,
+    then the day's fees), `free`, `global`.
+16. **The operator's command refuses a plan the config doesn't name.** A row whose plan was later
+    removed from the config counts as Free, with an error logged.
+17. **`spend_budget_nearing` is logged for the shared budgets only.**
+18. **`details.usage` has Prices' shape, payments only.** The fee budget is not shown, and `as_of`
+    is the time of the read.
+19. **The portal reads the view and `account_plans` only.** The facilitator and the portal read
+    the same plan definitions.
+20. **The balance-missing reason covers SAC tokens and a C-address `payTo` only.** It is read only
+    on the over-the-ceiling path.
+21. **The privacy paragraph says what is kept:** the payments and fees counted per account for
+    about two months, and the plan row.
+25. **A refusal's message and `extra` are stored with the record,** so a repeat answers the same
+    (from the builder check).
+22. **Pubnet is prepared in M2 and opened later.** That is Claude's reading: SCF's plan has the
+    mainnet launch in Tranche #3. akot has not confirmed it.
+23. **Three criteria are proposed:** the use in the hub, the use carrying over to a new key, and
+    the balance-missing refusal (S-design, the end).
+24. **The pruner keeps rows for the longest window,** about 62 days.

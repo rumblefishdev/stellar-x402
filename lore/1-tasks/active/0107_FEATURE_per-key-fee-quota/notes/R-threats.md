@@ -18,6 +18,12 @@ and "A new key for a new budget". Each section says what the options for 0107's 
 and what they leave. The code facts are from [R-codebase-map](R-codebase-map.md), the numbers from
 [R-fee-numbers](R-fee-numbers.md).
 
+> **After the design (2026-11-23).** This note assumed a monthly fee budget of 5 XLM per account
+> and looked only at an attacker calling with its own key. The design's builder check found the
+> other route: a seller's own key carries its buyers' payments. The design replaced the monthly
+> fee budget with a daily one and accepted what is left; [S-design](S-design.md), "Residual risk",
+> has the current figures.
+
 ## Figures used below
 
 These are proposals, not decisions; the design settles them.
