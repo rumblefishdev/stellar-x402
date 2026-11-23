@@ -547,8 +547,8 @@ approved by akot the same day with the design.
     (`key_id`), the facilitator's their caller (`discord:<id>` on pubnet). By size alone a quiet
     file never rotated, and logrotate reads `maxage` only when a file rotates, so `maxage 30`
     alone, as approved on 2026-11-20, would have changed nothing; the daily rotation was added in
-    the build and agreed the same day, for akot to confirm. The facilitator's quiet files now keep
-    about 10 days on the server (CloudWatch keeps 30). Checked with logrotate 3.22 on a scratch
+    the build, and akot confirmed it on 2026-11-23. The facilitator's quiet files now keep about 10
+    days on the server (CloudWatch keeps 30). Checked with logrotate 3.22 on a scratch
     tree: a line written once is gone after ten daily runs (it stayed with `notifempty` or with
     `size 100M`), a rotation 40 days old goes at the next rotation, a file past 100 MB rotates the
     same day. `@stellar-x402/deploy` 153 tests; ADR 0011, the runbook and `docs/monitoring.md`
