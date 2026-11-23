@@ -22,32 +22,29 @@ const MAX_VALUE_LENGTH = 256;
  * T1 settles `exact` alone (0015 adds `upto`). Entries come from settlements and from the seed
  * (0155), which keeps a seller's `upto` offers too: 2 of 2,659 known offers on 2026-11-19.
  */
-const CATALOGED_SCHEMES: readonly string[] = ["exact"];
+export const CATALOGED_SCHEMES: readonly string[] = ["exact"];
 /**
  * Every entry's extensions are `bazaar` alone: `@stellar-x402/bazaar`'s validator, the only way
  * into the catalog, writes that block and drops the rest.
  */
-const CATALOGED_EXTENSIONS: readonly string[] = ["bazaar"];
-/** The parameters upstream's `listResources` sends. */
-const KNOWN_PARAMS = ["type", "payTo", "scheme", "network", "extensions", "limit", "offset"];
-const KNOWN_LOWER = new Set(KNOWN_PARAMS.map((param) => param.toLowerCase()));
-
+export const CATALOGED_EXTENSIONS: readonly string[] = ["bazaar"];
 /**
  * A name meant as a known param but not written as one: with brackets (Express 5's query parser
  * keeps them in the name, so `?type[]=http` arrives as `type[]`), in another case (`payto`) or
  * with spaces (`type `). As an unknown param it would be ignored and the whole catalog returned
  * unfiltered. Names further off (`pay_to`, `types`) stay unknown, as a new upstream filter might.
  */
-function misspelledKnown(param: string): boolean {
-  if (KNOWN_PARAMS.includes(param)) return false;
-  return KNOWN_LOWER.has(param.split("[")[0]!.trim().toLowerCase());
+export function misspelledKnown(param: string, known: readonly string[]): boolean {
+  if (known.includes(param)) return false;
+  const name = param.split("[")[0]!.trim().toLowerCase();
+  return known.some((knownParam) => knownParam.toLowerCase() === name);
 }
 
 /**
  * One value per parameter: a repeated one (`?type=a&type=b`) arrives as an array and fails here,
  * as do control characters such as NUL, which PostgreSQL rejects in text.
  */
-const text = z
+export const text = z
   .string()
   .max(MAX_VALUE_LENGTH)
   .regex(/^\P{Cc}*$/u);
@@ -57,7 +54,8 @@ const text = z
  */
 const count = z.string().max(MAX_VALUE_LENGTH).regex(/^\d+$/).transform(Number);
 
-const QUERY = z.object({
+/** The parameters upstream's `listResources` sends; the search route reads them too. */
+export const QUERY = z.object({
   type: text.optional(),
   payTo: text.optional(),
   scheme: text.optional(),
@@ -68,6 +66,7 @@ const QUERY = z.object({
   limit: count.optional(),
   offset: count.pipe(z.number().max(MAX_OFFSET)).optional(),
 });
+const KNOWN_PARAMS = Object.keys(QUERY.shape);
 
 /**
  * What the route does with a request. `empty` is a well-formed query nothing in the catalog can
@@ -91,7 +90,7 @@ export type DiscoveryQuery =
  * whole table.
  */
 export function parseDiscoveryQuery(raw: Record<string, unknown>): DiscoveryQuery {
-  const misspelled = Object.keys(raw).find(misspelledKnown);
+  const misspelled = Object.keys(raw).find((param) => misspelledKnown(param, KNOWN_PARAMS));
   if (misspelled !== undefined) return { kind: "invalid", param: misspelled.slice(0, 64) };
   const given = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== ""));
   const parsed = QUERY.safeParse(given);
