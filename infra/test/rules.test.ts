@@ -97,6 +97,12 @@ test("the checks that would page on mainnet are critical, every other one a warn
   // The Event rule sets neither: its label would override every branch's.
   const event = buildRules(allOn()).rules.find((r) => r.alert === "x402-event")!;
   expect(event.labels.severity).toBeUndefined();
+  // Every branch that sets `check` sets `severity` too (Karol's re-review of #211): a branch that
+  // lost it would match neither the regex above nor be counted here.
+  const branches = [...event.expr.matchAll(/"check", "([a-z0-9-]+)"/g)].map((m) => m[1]!);
+  expect(branches.length).toBeGreaterThan(0);
+  expect([...event.expr.matchAll(/"severity", "/g)]).toHaveLength(branches.length);
+  expect(branches.filter((c) => !severity.has(c))).toEqual([]);
 });
 
 test("every selector is x402's, and so is every alert", () => {
