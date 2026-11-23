@@ -91,8 +91,9 @@ export interface CatalogStore {
   list(query: CatalogQuery): Promise<CatalogPage>;
   /**
    * Entries that hold a word of `text`, ranked by words (ADR 0014): a word in the name counts
-   * most, then tags, description and parameters. Equal ranks go by key, so a page that starts
-   * `after` a result goes on exactly where the page before stopped.
+   * most, then tags, description and parameters, and each repeat counts again (threat model,
+   * "Ranking by repeated words"). Equal ranks go by key, so a page that starts `after` a result
+   * goes on exactly where the page before stopped.
    */
   search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
 }

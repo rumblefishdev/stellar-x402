@@ -9,9 +9,8 @@ import {
   CATALOGED_EXTENSIONS,
   CATALOGED_SCHEMES,
   DISCOVERY_LIMIT,
-  count,
+  QUERY as LIST_QUERY,
   misspelledKnown,
-  network,
   text,
 } from "./discovery.js";
 
@@ -19,35 +18,33 @@ import {
 export const MAX_QUERY_LENGTH = 2_000;
 /**
  * A cursor holds a listing's key, whose URL alone may take 2,048 characters (`LIMITS.urlChars`),
- * with a tool name of 128, an address and a network: under 3,300 characters in base64url.
+ * with a tool name of 128, an address, a network and the field names: under 3,400 characters in
+ * base64url.
  */
 const MAX_CURSOR_LENGTH = 4_096;
-/** The parameters upstream's `search` sends. */
-const KNOWN_PARAMS = [
-  "query",
-  "type",
-  "payTo",
-  "scheme",
-  "network",
-  "extensions",
-  "limit",
-  "cursor",
-];
-
-const QUERY = z.object({
+/** The parameters upstream's `search` sends: the list's filters and `limit`, a query, a cursor. */
+const QUERY = LIST_QUERY.omit({ offset: true }).extend({
   query: z
     .string()
     .max(MAX_QUERY_LENGTH)
     .regex(/^\P{Cc}*$/u)
     .refine((query) => query.trim() !== ""),
-  type: text.optional(),
-  payTo: text.optional(),
-  scheme: text.optional(),
-  network: network.optional(),
-  extensions: text.optional(),
-  limit: count.optional(),
   cursor: z.string().max(MAX_CURSOR_LENGTH).optional(),
 });
+const KNOWN_PARAMS = Object.keys(QUERY.shape);
+
+/**
+ * Inside `real`'s range, which PostgreSQL refuses to cast beyond (`1e999`, `1e-999`); `ts_rank_cd`
+ * writes 0 or a value in it, with an exponent once it reaches 1e6 (`1e+06`).
+ */
+const RANK = z
+  .string()
+  .regex(/^\d+(\.\d+)?(e[-+]?\d+)?$/)
+  .refine((rank) => {
+    // `1e-999` reads as 0 here but is out of range for PostgreSQL, so a zero is written as one.
+    const value = Number(rank);
+    return /^0(\.0+)?$/.test(rank) || (value >= 1e-37 && value <= 1e37);
+  });
 
 /**
  * What the cursor carries: the last result's rank and key, and the ranking that wrote it. A rank
@@ -56,13 +53,13 @@ const QUERY = z.object({
  */
 const CURSOR = z.object({
   ranking: z.literal("words"),
-  rank: z.string().regex(/^\d+(\.\d+)?(e-?\d+)?$/),
-  key: z.tuple([
-    z.enum([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]),
-    text,
-    text,
-    z.string().regex(/^\P{Cc}*$/u),
-  ]),
+  rank: RANK,
+  key: z.object({
+    network: z.enum([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]),
+    payTo: text,
+    method: text,
+    resourceUrl: z.string().regex(/^\P{Cc}*$/u),
+  }),
 });
 
 function readCursor(cursor: string): CatalogSearchPosition | undefined {
@@ -75,21 +72,11 @@ function readCursor(cursor: string): CatalogSearchPosition | undefined {
   }
   const parsed = CURSOR.safeParse(decoded);
   if (!parsed.success) return undefined;
-  const [network, payTo, method, resourceUrl] = parsed.data.key;
-  return {
-    rank: parsed.data.rank,
-    key: { network, payTo, method, resourceUrl },
-  };
+  return { rank: parsed.data.rank, key: parsed.data.key };
 }
 
-function writeCursor(position: CatalogSearchPosition): string {
-  const { network, payTo, method, resourceUrl } = position.key;
-  const cursor = {
-    ranking: "words",
-    rank: position.rank,
-    key: [network, payTo, method, resourceUrl],
-  };
-  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+function writeCursor({ rank, key }: CatalogSearchPosition): string {
+  return Buffer.from(JSON.stringify({ ranking: "words", rank, key })).toString("base64url");
 }
 
 /**

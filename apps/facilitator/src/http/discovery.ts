@@ -17,7 +17,7 @@ export const DISCOVERY_LIMIT = { default: 20, max: 100 } as const;
  */
 export const MAX_OFFSET = 1_000_000;
 /** A `G…` address is 56 characters and a CAIP-2 id a few dozen; anything longer is noise. */
-export const MAX_VALUE_LENGTH = 256;
+const MAX_VALUE_LENGTH = 256;
 /**
  * T1 settles `exact` alone (0015 adds `upto`). Entries come from settlements and from the seed
  * (0155), which keeps a seller's `upto` offers too: 2 of 2,659 known offers on 2026-11-19.
@@ -28,16 +28,13 @@ export const CATALOGED_SCHEMES: readonly string[] = ["exact"];
  * into the catalog, writes that block and drops the rest.
  */
 export const CATALOGED_EXTENSIONS: readonly string[] = ["bazaar"];
-/** The parameters upstream's `listResources` sends. */
-const KNOWN_PARAMS = ["type", "payTo", "scheme", "network", "extensions", "limit", "offset"];
-
 /**
  * A name meant as a known param but not written as one: with brackets (Express 5's query parser
  * keeps them in the name, so `?type[]=http` arrives as `type[]`), in another case (`payto`) or
  * with spaces (`type `). As an unknown param it would be ignored and the whole catalog returned
  * unfiltered. Names further off (`pay_to`, `types`) stay unknown, as a new upstream filter might.
  */
-export function misspelledKnown(param: string, known: readonly string[] = KNOWN_PARAMS): boolean {
+export function misspelledKnown(param: string, known: readonly string[]): boolean {
   if (known.includes(param)) return false;
   const name = param.split("[")[0]!.trim().toLowerCase();
   return known.some((knownParam) => knownParam.toLowerCase() === name);
@@ -55,21 +52,21 @@ export const text = z
  * Plain decimal digits only: `Number()` would read `" "` as 0, `0x10` as 16 and `1e3` as 1000. Up
  * to 256 of them, as any value, so a huge `limit` is clamped like any other above the max (AD-20).
  */
-export const count = z.string().max(MAX_VALUE_LENGTH).regex(/^\d+$/).transform(Number);
+const count = z.string().max(MAX_VALUE_LENGTH).regex(/^\d+$/).transform(Number);
 
-/** CAIP-2: a malformed id is a 400; a well-formed one that isn't Stellar's matches nothing. */
-export const network = text.regex(/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/);
-
-const QUERY = z.object({
+/** The parameters upstream's `listResources` sends; the search route reads them too. */
+export const QUERY = z.object({
   type: text.optional(),
   payTo: text.optional(),
   scheme: text.optional(),
-  network: network.optional(),
+  // CAIP-2: a malformed id is a 400; a well-formed one that isn't Stellar's matches nothing.
+  network: text.regex(/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/).optional(),
   extensions: text.optional(),
   // 0 asks for the total alone.
   limit: count.optional(),
   offset: count.pipe(z.number().max(MAX_OFFSET)).optional(),
 });
+const KNOWN_PARAMS = Object.keys(QUERY.shape);
 
 /**
  * What the route does with a request. `empty` is a well-formed query nothing in the catalog can
@@ -93,7 +90,7 @@ export type DiscoveryQuery =
  * whole table.
  */
 export function parseDiscoveryQuery(raw: Record<string, unknown>): DiscoveryQuery {
-  const misspelled = Object.keys(raw).find((param) => misspelledKnown(param));
+  const misspelled = Object.keys(raw).find((param) => misspelledKnown(param, KNOWN_PARAMS));
   if (misspelled !== undefined) return { kind: "invalid", param: misspelled.slice(0, 64) };
   const given = Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== ""));
   const parsed = QUERY.safeParse(given);

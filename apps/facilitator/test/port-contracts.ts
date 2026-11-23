@@ -1957,6 +1957,14 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
         expect(await urls("the of")).toEqual([]);
       });
 
+      it("looks for the first 32 distinct words of a long query", async () => {
+        await listing("https://a.example/x", { description: "w32" });
+        await listing("https://b.example/x", { description: "w31" });
+        const words = Array.from({ length: 33 }, (_, i) => `w${i}`);
+        // Repeats don't count against the 32.
+        expect(await urls(["w0", ...words].join(" "))).toEqual(["https://b.example/x"]);
+      });
+
       it("ranks a word in the name above tags, then description, then parameters", async () => {
         await listing("https://params.example/x", {
           extensions: {

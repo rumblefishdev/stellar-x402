@@ -67,6 +67,18 @@ describe("parseSearchQuery", () => {
     });
   });
 
+  it("accepts a cursor whose rank PostgreSQL wrote with an exponent", () => {
+    const cursor = cursorOf({
+      ranking: "words",
+      rank: "1e+06",
+      key: { network: SERVED, payTo: "GB", method: "GET", resourceUrl: "u" },
+    });
+    expect(parseSearchQuery({ query: "weather", cursor })).toMatchObject({
+      kind: "query",
+      search: { after: { rank: "1e+06" } },
+    });
+  });
+
   it.each([
     ["no query", {}, "query"],
     ["an empty query", { query: "" }, "query"],
@@ -82,7 +94,35 @@ describe("parseSearchQuery", () => {
       "a cursor of another ranking",
       {
         query: "weather",
-        cursor: cursorOf({ ranking: "fused", rank: "0.1", key: [SERVED, "GB", "GET", "u"] }),
+        cursor: cursorOf({
+          ranking: "fused",
+          rank: "0.1",
+          key: { network: SERVED, payTo: "GB", method: "GET", resourceUrl: "u" },
+        }),
+      },
+      "cursor",
+    ],
+    [
+      "a cursor whose rank is beyond what PostgreSQL's real holds",
+      {
+        query: "weather",
+        cursor: cursorOf({
+          ranking: "words",
+          rank: "1e999",
+          key: { network: SERVED, payTo: "GB", method: "GET", resourceUrl: "u" },
+        }),
+      },
+      "cursor",
+    ],
+    [
+      "a cursor whose rank is below what PostgreSQL's real holds",
+      {
+        query: "weather",
+        cursor: cursorOf({
+          ranking: "words",
+          rank: "1e-999",
+          key: { network: SERVED, payTo: "GB", method: "GET", resourceUrl: "u" },
+        }),
       },
       "cursor",
     ],
@@ -90,7 +130,11 @@ describe("parseSearchQuery", () => {
       "a cursor whose rank isn't a number",
       {
         query: "weather",
-        cursor: cursorOf({ ranking: "words", rank: "1;", key: [SERVED, "GB", "GET", "u"] }),
+        cursor: cursorOf({
+          ranking: "words",
+          rank: "1;",
+          key: { network: SERVED, payTo: "GB", method: "GET", resourceUrl: "u" },
+        }),
       },
       "cursor",
     ],

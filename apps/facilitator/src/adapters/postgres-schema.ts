@@ -321,13 +321,18 @@ ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
     // stored listing, so every part of search reads the same text, and its words are a column
     // PostgreSQL computes on every write, with a GIN index. The release before keeps working: it
     // never names the column, and PostgreSQL fills it on its writes too. Adding the column
-    // rewrites the catalog under its write lock: 285–576 ms for 2,500 listings, 5.5 s for 35,000
-    // (measured locally on 18), so by those numbers it fits the group's 1 s a statement up to
-    // about 4,000 listings; a larger catalog fails the run, which rolls back. On 2026-11-23
-    // production held one listing, and the seed brings about 2,200 (0155). Computing the words per query instead, from an index
-    // on the function, took 210 ms for 2,500 matches against 4–14 ms from the column. Every field
-    // read returns NULL on an unexpected shape rather than failing the write. concat_ws is marked
-    // STABLE only because it takes any type; every argument here is text.
+    // rewrites the catalog under ACCESS EXCLUSIVE, which holds its reads and writes but no
+    // payment's (a settlement writes the catalog after `/settle` answers): with the index,
+    // 285–576 ms for 2,500 listings and 5.5 s for 35,000 (measured locally on 18). The 500 ms
+    // rule above would make it online from about 2,000 listings, and no migration is online
+    // until 0080, so it is transactional: production held one listing on 2026-11-23, and the
+    // seed brings about 2,200 (0155). Past the group's 1 s a statement or 1.5 s in all, the run
+    // fails and rolls back. A later change to either function must rewrite the column too:
+    // replacing a function leaves the words already stored as they were. Computing the words per
+    // query instead, from an index on the function, took 210 ms for 2,500 matches against 4–14 ms
+    // from the column. Every field read returns NULL on an unexpected shape rather than failing
+    // the write. concat_ws is marked STABLE only because it takes any type; every argument here
+    // is text.
     name: "0017_catalog_words",
     sql: `
 CREATE FUNCTION catalog_search_fields(listing jsonb) RETURNS text[]

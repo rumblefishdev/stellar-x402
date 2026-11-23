@@ -109,7 +109,10 @@ export class PostgresCatalogStore implements CatalogStore {
   /**
    * The query's words are OR-ed, so a long sentence still matches a listing that holds one of
    * them, and ranked by `ts_rank_cd` with the field weights name 1.0, tags 0.67, description 0.5,
-   * parameters 0.33 (ADR 0014, as 0134 measured it). The rank goes out and comes back as
+   * parameters 0.33 (ADR 0014, as 0134 measured it). Only the first 32 distinct words are looked
+   * for: each costs a pass over every listing that holds it. On 2,200 listings, 330 common words
+   * took 1.1–1.2 s and the first 32 of them 67 ms, against 10 ms for 7 words (measured locally);
+   * the longest of 0134's 40 real queries has 16, their median 4. The rank goes out and comes back as
    * PostgreSQL's text for the `real` it is, so the next page compares the same number. Only the
    * page's rows read `resource`, as in `list`.
    */
@@ -127,8 +130,13 @@ export class PostgresCatalogStore implements CatalogStore {
          FROM (SELECT seq, network, pay_to, method, resource_url,
                       ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query) AS rank
                  FROM catalog,
-                      CAST(replace(plainto_tsquery('english', $1)::text, '&', '|') AS tsquery)
-                        AS words_query
+                      (SELECT string_agg(term, ' | ' ORDER BY first)::tsquery AS words_query
+                         FROM (SELECT term, min(n) AS first
+                                 FROM unnest(string_to_array(plainto_tsquery('english', $1)::text,
+                                                             ' & ')) WITH ORDINALITY AS t(term, n)
+                                GROUP BY term
+                                ORDER BY first
+                                LIMIT 32) terms) q
                 WHERE words @@ words_query
                   AND ($2::text IS NULL OR type = $2)
                   AND ($3::text IS NULL OR pay_to = $3)
