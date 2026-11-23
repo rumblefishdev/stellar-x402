@@ -8,7 +8,7 @@ describe("asToolError", () => {
     ["not_https", "unsafe_url"],
     ["not_public", "unsafe_url"],
     ["redirect", "unsafe_url"],
-    ["too_large", "response_too_large"],
+    ["response_too_large", "response_too_large"],
     ["timeout", "upstream_error"],
     ["network", "upstream_error"],
   ])("gives the agent %s as %s, with the guard's message as is", (cause, code) => {

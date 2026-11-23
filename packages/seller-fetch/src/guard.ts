@@ -9,13 +9,19 @@ import { Agent, errors, fetch as undiciFetch } from "undici";
  * - `not_https`: its scheme is not https (nor http to this machine, when that is allowed).
  * - `not_public`: its host is, or resolves to, an address that is not public.
  * - `redirect`: the seller answered 3xx, which is not followed.
- * - `too_large`: the seller's headers or body are over their cap.
+ * - `response_too_large`: the seller's headers or body are over their cap.
  * - `timeout`: the deadline passed before the response arrived in full.
  * - `network`: the request or its body failed for any other reason (a refused or dropped
  *   connection, a TLS error, the request's own signal).
  */
 export type SellerFetchCode =
-  "not_a_url" | "not_https" | "not_public" | "redirect" | "too_large" | "timeout" | "network";
+  | "not_a_url"
+  | "not_https"
+  | "not_public"
+  | "redirect"
+  | "response_too_large"
+  | "timeout"
+  | "network";
 
 /**
  * Why a seller request was refused or failed. `message` states the fact and holds nothing from the
@@ -153,7 +159,7 @@ export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeo
       // A refusal from publicOnlyLookup comes back as the cause of undici's "fetch failed".
       if (error instanceof Error && error.cause instanceof SellerFetchError) throw error.cause;
       if (error instanceof Error && error.cause instanceof errors.HeadersOverflowError) {
-        throw new SellerFetchError("too_large", "The seller's response is too large.");
+        throw new SellerFetchError("response_too_large", "The seller's response is too large.");
       }
       throw new SellerFetchError(
         deadline.aborted ? "timeout" : "network",
@@ -174,7 +180,7 @@ export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeo
       for await (const chunk of response.body ?? []) {
         size += chunk.byteLength;
         if (size > limits.maxResponseBytes) {
-          throw new SellerFetchError("too_large", "The seller's response is too large.");
+          throw new SellerFetchError("response_too_large", "The seller's response is too large.");
         }
         chunks.push(chunk);
       }

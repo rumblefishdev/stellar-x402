@@ -77,11 +77,12 @@ refused listing's reason is exact. As a buyer's agent, I want the same tool erro
 ### From Plan
 
 1. **Six cause codes**: `not_https`, `not_public` (an IP in the URL or a name resolving to one),
-   `redirect`, `too_large` (headers or body), `timeout`, `network`, exported as
+   `redirect`, `response_too_large` (headers or body; see 5), `timeout`, `network`, exported as
    `SellerFetchCode`. Messages stay as they were: they are already plain facts, so the MCP shows
    the agent the same text.
-2. **`asToolError` maps them back**: `not_*` and `redirect` to `unsafe_url`, `too_large` to
-   `response_too_large`, `timeout` and `network` to `upstream_error`, in one exhaustive table.
+2. **`asToolError` maps them back**: `not_*` and `redirect` to `unsafe_url`,
+   `response_too_large` to itself, `timeout` and `network` to `upstream_error`, in one exhaustive
+   table.
 
 ### Emerged
 
@@ -93,9 +94,11 @@ refused listing's reason is exact. As a buyer's agent, I want the same tool erro
    sites (`guard.ts` request and body) check `deadline.aborted`; anything else is `network`. So
    a request ended by its own signal (the caller gave up, e.g. an MCP client closing its stream)
    is `network`, not `timeout`.
-5. **`too_large` kept, as the task names it**, although `catalog_attempts` also has a
-   `too_large` outcome (a listing over the entry limits). They sit in different columns; ADR 0008
-   says which is which.
+5. **`response_too_large`, not the task's `too_large`** (renamed in review, PR #220): in
+   `catalog_attempts` `too_large` already means a listing over the entry limits twice (the
+   payment's `rejected` reason from `bazaar`, and the seller stage's outcome), so a third meaning
+   would mix causes in one query. `response_too_large` is the reason it was before 0085, with the
+   same meaning, so rows before and after agree, and it is the MCP's code for the same cause.
 6. **The MCP log keeps the exact cause**: `asToolError` puts the seller-fetch code at the head of
    the tool error's `detail` (logs only), so a `payment_unknown` after a redirect still logs
    `redirect` while the agent sees the same code and message as before.

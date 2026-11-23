@@ -39,7 +39,7 @@ const SELLER_FETCH_CODES: Record<SellerFetchCode, ErrorCode> = {
   not_https: "unsafe_url",
   not_public: "unsafe_url",
   redirect: "unsafe_url",
-  too_large: "response_too_large",
+  response_too_large: "response_too_large",
   timeout: "upstream_error",
   network: "upstream_error",
 };

@@ -100,11 +100,10 @@ settlement.
     base64-encoded in a header. `CATALOG_LIST_LOCAL` also opens http to this machine.
   - A seller the guard stops is `not_askable` with the guard's own cause as the reason (task
     0085): `not_a_url`, `not_https`, `not_public` (an IP written in the URL or a name resolving
-    to one), `redirect`, `too_large` (either cap; a reason under `not_askable`, not the `too_large`
-    outcome of a listing over the entry limits), `timeout` (the 10 s deadline, before the
-    response arrived in full) and `network` (any other failure to connect or to read the body).
-    An MCP server that answers nothing by the deadline is a `timeout` too. These are not the
-    buyer's MCP tool codes: `apps/mcp-local` maps them to its own (`unsafe_url`, …).
+    to one), `redirect`, `response_too_large` (either cap), `timeout` (the 10 s deadline, before
+    the response arrived in full) and `network` (any other failure to connect or to read the
+    body). An MCP server that answers nothing by the deadline is a `timeout` too. These are not
+    the buyer's MCP tool codes: `apps/mcp-local` maps them to its own (`unsafe_url`, …).
   - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
     `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). An `mcp:`
     host must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host

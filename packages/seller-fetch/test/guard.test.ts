@@ -127,7 +127,7 @@ describe("guardedFetch", () => {
     try {
       await expect(
         guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url),
-      ).rejects.toMatchObject({ code: "too_large" });
+      ).rejects.toMatchObject({ code: "response_too_large" });
     } finally {
       seller.close();
     }
@@ -235,7 +235,7 @@ describe("guardedFetch", () => {
       try {
         const answer = guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url);
         if (status) expect((await answer).headers.get("payment-required")).toHaveLength(bytes);
-        else await expect(answer).rejects.toMatchObject({ code: "too_large" });
+        else await expect(answer).rejects.toMatchObject({ code: "response_too_large" });
       } finally {
         seller.close();
       }
