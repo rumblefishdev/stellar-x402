@@ -30,7 +30,7 @@
       "post": {
         "tags": ["payments"],
         "summary": "`POST /verify` — check a payment without settling it.",
-        "description": "Checks that the payment the buyer signed pays what the requirements ask: the scheme, the network, the asset, the amount, the recipient and the expiry of the buyer's signature, and that the transaction would succeed on chain. Nothing is sent to the network and nothing is recorded, so the same payment can be verified any number of times.\n\nEvery verdict is a `200`: read `isValid`, never the status. A refused payment carries `invalidReason`, a stable code, and often `invalidMessage`, a sentence for a person. A `503 rpc_unavailable` means no verdict was reached: the payment was not judged, and the same request may be sent again after `Retry-After`.\n\nA request whose `paymentRequirements.network` is `stellar:pubnet` must carry an API key as `Authorization: Bearer <key>`. A request for any other network needs none, and its `Authorization` header is not read.\n\nEach caller may send 600 requests a minute. A caller is its IP address (an IPv6 one counts by its /56), or the API key's owner for `stellar:pubnet`. A seller's server calls this route for all of its buyers, so the budget is a budget per seller.",
+        "description": "Checks that the payment the buyer signed pays what the requirements ask: the scheme, the network, the asset, the amount, the recipient and the expiry of the buyer's signature, and that the transaction would succeed on chain. Nothing is sent to the network, and a valid payment can be verified any number of times.\n\nA refusal is recorded: the same payment never settles through this facilitator afterwards, even once it would pass, and sent again it gets the recorded answer without the checks. `extra.expirationLedger` is the last ledger in which the buyer's signature can still land, and the buyer signs a new payment only once that ledger has closed. Three refusals are not recorded: one while a breaker is open (`settle_exact_stellar_breaker_open_*`), one of a payload that names no payer and nonce, and one of a payment whose signature expires more than 720 ledgers (about an hour) ahead, whose `invalidMessage` says until which ledger the payment may still settle.\n\nEvery verdict is a `200`: read `isValid`, never the status. A refused payment carries `invalidReason`, a stable code, and often `invalidMessage`, a sentence for a person. A `503` gives no verdict: `rpc_unavailable` when no Stellar RPC judged the payment, `store_unavailable` when a refusal could not be recorded. The same request may be sent again after `Retry-After`.\n\nA request whose `paymentRequirements.network` is `stellar:pubnet` must carry an API key as `Authorization: Bearer <key>`. A request for any other network needs none, and its `Authorization` header is not read.\n\nEach caller may send 600 requests a minute. A caller is its IP address (an IPv6 one counts by its /56), or the API key's owner for `stellar:pubnet`. A seller's server calls this route for all of its buyers, so the budget is a budget per seller.",
         "operationId": "verify",
         "security": [
           {},
@@ -126,7 +126,7 @@
             }
           },
           "503": {
-            "description": "No Stellar RPC gave a verdict. The payment was not judged: send the same request again after `Retry-After` (5 seconds)",
+            "description": "No verdict. `rpc_unavailable`: no Stellar RPC judged the payment. `store_unavailable`: the refusal could not be recorded within 2 seconds, and answering it unrecorded would invite a second signature. Send the same request again after `Retry-After` (5 seconds)",
             "content": {
               "application/json": {
                 "schema": {
@@ -145,7 +145,7 @@
       "post": {
         "tags": ["payments"],
         "summary": "`POST /settle` — settle a payment on chain.",
-        "description": "Runs the checks of `/verify` again, then submits the buyer's signed transfer to Stellar and waits for it to be final. The facilitator pays the network fee.\n\nEvery outcome is a `200`: read `success`, never the status. `success: true` is answered once per payment. Every later call with the same payment gets `settle_exact_stellar_already_settled`, so one payment unlocks one response from the seller.\n\nWhen `success` is false, `errorReason` says what happened and `transaction` says whether anything reached the network:\n\n- `settlement_pending`: sent and not final yet, or not signed yet. Send the same request again, or look the hash up.\n- A reason with `extra.retryable: true`: nothing was sent. Send the same payment again, as it is, while the network's latest ledger is at most `extra.expirationLedger - 2`.\n- A reason with `extra.retryable: false` and `extra.expirationLedger`: the payment ended. The buyer signs a new payment only once that ledger has closed; before it, the first one could still land and charge the buyer twice.\n- `invalid_exact_stellar_*` and `invalid_network`: the checks refused the payment before anything was recorded. Fix what the reason names.\n\nA `503` (`no_lease` or `shutting_down`) means nothing was read or settled: send the same request again after `Retry-After`. After a `500`, send the same request again and never sign a new payment because of it, since the first one may still be settling.\n\nA settlement whose payment carries the `bazaar` extension lists the resource in the catalog that `GET /discovery/resources` serves. The answer's `EXTENSION-RESPONSES` header says whether the listing was accepted; a rejected listing never fails the settlement.\n\nA request whose `paymentRequirements.network` is `stellar:pubnet` must carry an API key as `Authorization: Bearer <key>`. A request for any other network needs none, and its `Authorization` header is not read.\n\nEach caller may send 600 requests a minute, counted as on `/verify`.",
+        "description": "Runs the checks of `/verify` again, then submits the buyer's signed transfer to Stellar and waits for it to be final. The facilitator pays the network fee.\n\nEvery outcome is a `200`: read `success`, never the status. `success: true` is answered once per payment. Every later call with the same payment gets `settle_exact_stellar_already_settled`, so one payment unlocks one response from the seller.\n\nWhen `success` is false, `errorReason` says what happened and `transaction` says whether anything reached the network:\n\n- `settlement_pending`: sent and not final yet, or not signed yet. Send the same request again, or look the hash up.\n- A reason with `extra.retryable: true`: nothing was sent. Send the same payment again, as it is, while the network's latest ledger is at most `extra.expirationLedger - 2`.\n- A reason with `extra.retryable: false` and `extra.expirationLedger`: the payment ended. The buyer signs a new payment only once that ledger has closed; before it, the first one could still land and charge the buyer twice.\n- `invalid_exact_stellar_*` and `invalid_network`: the checks refused the payment before anything was sent. The refusal is recorded as on `/verify`, so the same payment gets the same answer again: fix what the reason names, and the buyer signs a new payment once `extra.expirationLedger` has closed.\n\nA `503` (`no_lease` or `shutting_down`) means nothing was read or settled: send the same request again after `Retry-After`. After a `500`, send the same request again and never sign a new payment because of it, since the first one may still be settling.\n\nA settlement whose payment carries the `bazaar` extension lists the resource in the catalog that `GET /discovery/resources` serves. The answer's `EXTENSION-RESPONSES` header says whether the listing was accepted; a rejected listing never fails the settlement.\n\nA request whose `paymentRequirements.network` is `stellar:pubnet` must carry an API key as `Authorization: Bearer <key>`. A request for any other network needs none, and its `Authorization` header is not read.\n\nEach caller may send 600 requests a minute, counted as on `/verify`.",
         "operationId": "settle",
         "security": [
           {},
@@ -260,7 +260,7 @@
       "get": {
         "tags": ["discovery"],
         "summary": "`GET /discovery/resources` — list the paid resources in the Bazaar.",
-        "description": "The catalog of resources that were paid for through this facilitator, one entry per resource, in a stable order with no ranking. An entry is added or refreshed when a payment that carries the `bazaar` extension settles, so every entry has been paid for at least once. Only resource URLs a buyer can reach are listed: `https` or `http` with a public DNS name.\n\nThe filters combine. A well-formed `network` this instance doesn't serve, any `scheme` but `exact` and any `extensions` but `bazaar` give an empty page, not an error. An empty value counts as absent, and a parameter the route doesn't know is ignored.\n\nNo API key. Each IP address may send 120 requests a minute to `/discovery`.",
+        "description": "The catalog of paid resources on Stellar, one entry per resource, in a stable order with no ranking. An entry is added or refreshed when a payment that carries the `bazaar` extension settles through this facilitator. The operator may also seed the catalog with listings read from the sellers' own `402` answers, which pass the same checks; nothing was paid through this facilitator for those. The catalog holds both Stellar networks, whichever one this instance settles on: without `network` a page lists both. Only resource URLs a buyer can reach are listed: `https` or `http` with a public DNS name.\n\nThe filters combine. A well-formed `network` that isn't Stellar's, such as `eip155:8453`, any `scheme` but `exact` and any `extensions` but `bazaar` give an empty page, not an error. An empty value counts as absent, and a parameter the route doesn't know is ignored.\n\nNo API key. Each IP address may send 120 requests a minute to `/discovery`.",
         "operationId": "discoveryResources",
         "security": [{}],
         "parameters": [
@@ -290,7 +290,7 @@
             "name": "network",
             "in": "query",
             "required": false,
-            "description": "The network a resource is paid on, as a CAIP-2 id. Anything that isn't one is a `400`.",
+            "description": "The network a resource is paid on, as a CAIP-2 id: `stellar:pubnet` or `stellar:testnet` narrows the page to one network. Anything that isn't a CAIP-2 id is a `400`.",
             "schema": {
               "type": "string",
               "maxLength": 256
@@ -618,7 +618,7 @@
           },
           "extra": {
             "type": "object",
-            "description": "Details that go with the reason.",
+            "description": "Details that go with the reason. On a refusal, `expirationLedger`: the last ledger in which the buyer's signature is valid, after which a new payment may be signed.",
             "additionalProperties": true
           }
         }
@@ -658,7 +658,7 @@
           },
           "extra": {
             "type": "object",
-            "description": "What to do after a failed settlement. Absent on success and on a refusal by the checks.",
+            "description": "What to do after a failed settlement. Absent on success. A refusal by the checks carries `expirationLedger` alone.",
             "additionalProperties": true,
             "properties": {
               "retryable": {
@@ -782,7 +782,7 @@
           },
           "accepts": {
             "type": "array",
-            "description": "What the resource was last paid with: the network, the asset, the price and the recipient.",
+            "description": "What the resource asks for: the network, the asset, the price and the recipient, as last paid or as its `402` offered when the entry was seeded.",
             "items": {
               "$ref": "#/components/schemas/PaymentRequirements"
             }
@@ -818,7 +818,7 @@
           "lastUpdated": {
             "type": "string",
             "format": "date-time",
-            "description": "When a settlement last added or refreshed the entry.",
+            "description": "When a settlement or the seed last added or refreshed the entry.",
             "example": "2026-11-12T15:02:50.313Z"
           },
           "extensions": {
@@ -905,7 +905,7 @@
         "properties": {
           "error": {
             "type": "string",
-            "description": "A stable code: `bad_request`, `missing_api_key`, `invalid_api_key`, `not_found`, `payload_too_large`, `unsupported_media_type`, `too_many_requests`, `internal_error`, `rpc_unavailable`, `no_lease` or `shutting_down`.",
+            "description": "A stable code: `bad_request`, `missing_api_key`, `invalid_api_key`, `not_found`, `payload_too_large`, `unsupported_media_type`, `too_many_requests`, `internal_error`, `rpc_unavailable`, `store_unavailable`, `no_lease` or `shutting_down`.",
             "example": "bad_request"
           },
           "param": {
