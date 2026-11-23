@@ -203,7 +203,7 @@ describe("seedHosts (0155)", () => {
 
   it("follows the group that names our robot over the one for every robot", async () => {
     seller.files["/robots.txt"] =
-      "User-agent: *\nDisallow: /\n\nUser-agent: stellar-x402-bazaar\nAllow: /\n";
+      "User-agent: *\nDisallow: /\n\nUser-agent: stellar-bazaar\nAllow: /\n";
     seller.files["/.well-known/x402"] = JSON.stringify({ resources: [`${seller.url}/a`] });
     const { cataloger, wait } = setup();
     const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });

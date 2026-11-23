@@ -18,7 +18,7 @@ export const REQUEST_GAP_MS = 3_000;
 /** The robots.txt size a parser must read, RFC 9309 §2.5. */
 const ROBOTS_BYTES = 500 * 1024;
 /** Our robot's name in robots.txt groups: the product token of `SELLER_USER_AGENT`. */
-const ROBOT_NAME = "stellar-x402-bazaar";
+const ROBOT_NAME = "stellar-bazaar";
 /** As long as a seller check may take (`cataloger.ts`'s seller timeout). */
 const FILE_TIMEOUT_MS = 10_000;
 /** The only methods a check sends: real listings use these two alone (ADR 0008). */

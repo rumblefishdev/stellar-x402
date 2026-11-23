@@ -823,9 +823,9 @@ catalog:
    30 checks a minute a host's checks after payments may use. A URL that fails never stops the
    next, nor a host the others.
 
-The seed follows each host's `robots.txt` (RFC 9309) under the name `stellar-x402-bazaar`: a URL it
+The seed follows each host's `robots.txt` (RFC 9309) under the name `stellar-bazaar`: a URL it
 disallows is skipped and reported as `robots`; a 4xx means no rules; a 5xx or no answer means the
-host is not asked. Every request says `User-Agent: stellar-x402-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
+host is not asked. Every request says `User-Agent: stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
 so a seller can block it by name. The report goes to stdout: a tab-separated line per URL and
 account (URL, method, network, `payTo`, outcome, reason, detail), a line per skipped entry
 (outcome `skipped`), a line per host, the totals, and each `payTo` seen on more than one host. As
