@@ -2,7 +2,8 @@
 id: "0154"
 title: "Quality score and curation for the Bazaar search ranking"
 type: FEATURE
-status: backlog
+status: active
+owner: karolkow
 milestone: 2
 related_adr: ["0007", "0008", "0012"]
 related_tasks: ["0134", "0120", "0135", "0069", "0070"]
@@ -16,6 +17,10 @@ history:
     note: >
       Split from 0134: matching the query text and the quality score need different data and
       carry different risks, so each is designed and checked on its own.
+  - date: "2026-11-23"
+    status: active
+    who: karolkow
+    note: "Work starts: the design is settled, the ADR 0014 amendment comes first."
 ---
 
 # Quality score and curation for the Bazaar search ranking
