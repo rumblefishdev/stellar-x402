@@ -187,6 +187,11 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
   let robots: Awaited<ReturnType<typeof readRobots>>;
   try {
     robots = await readRobots(origin, deps.listLocal);
+    // The seller's file is a URL like any other: a host that disallows it is not asked (W218).
+    if (robots?.isDisallowed(new URL("/.well-known/x402", origin).href, ROBOT_NAME)) {
+      report.file = "disallowed by robots.txt";
+      return report;
+    }
     file = await readFile402(origin, deps.listLocal);
   } catch (error) {
     report.file =

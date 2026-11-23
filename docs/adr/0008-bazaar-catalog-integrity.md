@@ -32,8 +32,8 @@ settlement.
     host's own `/.well-known/x402` and sends every resource URL on that host the check a payment
     would start, for each Stellar account its 402 names, on either network. A seeded listing has no
     settlement, so no `ledger`, and its attempt rows no `payer`. Nothing is read from another
-    catalog. The seed follows each host's `robots.txt` (RFC 9309) for the resource URLs it asks: a
-    disallowed URL is skipped and reported, and a host whose `robots.txt` answers 5xx or not at
+    catalog. The seed follows each host's `robots.txt` (RFC 9309) for every URL it asks, its file
+    included: a disallowed URL is skipped and reported, and a host whose `robots.txt` answers 5xx or not at
     all is not asked.
   - Nothing else is indexed, and there is no registration endpoint: a seller is listed after its
     first paid call, its own included (task 0063), or by the seed.
