@@ -3,7 +3,7 @@ id: "0070"
 title: "Mark catalog listings whose seller proves its payTo with stellar.toml"
 type: FEATURE
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0063"]
 tags: [bazaar, discovery, security, priority-low, effort-small]

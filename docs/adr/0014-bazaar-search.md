@@ -137,7 +137,8 @@ The measurements are in
   listing: the settlement's key, the network, `payTo`, method, listing URL, payer and the time the
   row is written. The settlement's key makes the row unique, since a success can be reported twice, by settle and by
   reconcile. The cataloger writes the row right after it derives the listing's key from the
-  payment, also when the listing's copy is unchanged. Rows are kept; the count reads the last 30
+  payment, also when the listing's copy is unchanged. A settlement recorded twice keeps its first
+  row. Rows are kept; the count reads the last 30
   days. The table starts empty when it ships. A failed write is logged.
 - **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
   0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
@@ -281,7 +282,9 @@ The measurements are in
 - A seller can repeat words in its listing to rise in the words ranking, since `ts_rank_cd` counts
   each occurrence. Parameters are capped above; name, tags and description only by ADR 0008's
   listing limit. Fusion takes ranks, not scores, which bounds the gain, but the effect of
-  repetition on the vector is not measured. The quality score does not limit it.
+  repetition on the vector is not measured. It stays a named risk, with no limit of its own: it
+  pays mainly while search answers by words alone, and on 2026-11-23 no Stellar listing in CDP's
+  catalog repeated a word 10 times in its description (17 of 39,577 did, all real services).
 - A new listing is found by search once its vector is written, later than `/discovery/resources`
   lists it. While the model can't be used, search answers by words alone.
 - Paging reaches every match. On the 0134 set a query has a median of 158 matches, 76 among the

@@ -35,7 +35,7 @@ last days of the milestone go to checking it, not to writing it.
 ## Context
 
 - Tranche #2 has six line items in the Panel Review response's budget (§1), 9.0 dev-weeks:
-  - D1: Bazaar search and ranking engine, with its nDCG@10 evaluation (0120, 0135, 0154);
+  - D1: Bazaar search and ranking engine, with its nDCG@10 evaluation (0120, 0135, 0154, 0070);
   - D2: MCP discovery server, search and paid-call tools (0042, 0068, 0085, 0137);
   - D3: `scheme_upto_stellar.md` finalized and submitted to the TSC (0034);
   - D4: SDK helpers, TypeScript (0102, 0092);

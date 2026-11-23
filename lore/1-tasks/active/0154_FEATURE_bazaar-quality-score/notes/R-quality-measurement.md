@@ -54,6 +54,9 @@ All of `GET /discovery/resources`, paged by 1,000: 39,579 items, 3,288 hosts.
 - Descriptions: 53 empty (after removing spaces), 100 shorter than 20 characters, mostly real short
   names such as "Search Reddit posts". None of either among the Stellar listings.
 - Stellar pubnet: 1,292 distinct resource URLs on 20 hosts; 580 (44.9%) on `workers.dev`.
+- Repeated words: 17 descriptions of 39,577 hold one word, stop words left out, 10 times or more,
+  all real services ("depth" in a marine-depth API); 0 of the Stellar listings do, 41 hold one 5
+  to 9 times.
 - This facilitator's testnet catalog: 1 listing, on `trycloudflare.com`, with a 30-character
   description.
 
