@@ -116,3 +116,11 @@ refused listing's reason is exact. As a buyer's agent, I want the same tool erro
 - **New tests**: guard `not_a_url`, `timeout` (stalled body), `redirect` (301/302/307),
   `network` (a server dropping the connection); facilitator: the attempt row's reason is
   `redirect`; `apps/mcp-local/test/results.test.ts`: every code's mapping.
+- **Testnet run kept apart from M1's evidence**: `catalog-smoke.ts` gained step 5 (the seller
+  answers the check with a 302; the attempt's reason is `redirect`), run on 2026-11-20 on commit
+  `8bf406e9`: `test/live/results/catalog-smoke-redirect-testnet.json`. It first overwrote
+  `catalog-smoke-testnet.json`, which `docs/scf/milestone-1-evidence.md` cites (the run of
+  2026-11-09 on `2bc55cc2`, task 0128), so that file is back as it was. The two runs' steps 1–4
+  differ: on 2026-11-09 the public testnet RPC answered in 7–9 s against the 10 s budget, so the
+  repeat payment and the new price got `402`, two settles have no transaction and the listing
+  stayed at `10000`; on 2026-11-20 every step settled, and the new price was listed (`20000`).
