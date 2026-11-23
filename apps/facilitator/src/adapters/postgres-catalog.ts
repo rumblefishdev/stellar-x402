@@ -110,9 +110,11 @@ export class PostgresCatalogStore implements CatalogStore {
    * The query's words are OR-ed, so a long sentence still matches a listing that holds one of
    * them, and ranked by `ts_rank_cd` with the field weights name 1.0, tags 0.67, description 0.5,
    * parameters 0.33 (ADR 0014, as 0134 measured it). Only the first 32 distinct words are looked
-   * for: each costs a pass over every listing that holds it. On 2,200 listings, 330 common words
-   * took 1.1–1.2 s and the first 32 of them 67 ms, against 10 ms for 7 words (measured locally);
-   * the longest of 0134's 40 real queries has 16, their median 4. The rank goes out and comes back as
+   * for: each costs a pass over every listing that holds it, so the cost grows with listings times
+   * matching words. On 2,200 listings 330 common words took 1.1–1.2 s and the first 32 of them
+   * 67 ms; on a catalog where every word matches nearly every listing, 32 took 170–620 ms at 2,200
+   * and about 2 s, the discovery pool's statement timeout, at 10,000 (measured locally). The
+   * longest of 0134's 40 real queries has 16 words, their median 4. The rank goes out and comes back as
    * PostgreSQL's text for the `real` it is, so the next page compares the same number. Only the
    * page's rows read `resource`, as in `list`.
    */
