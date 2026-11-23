@@ -70,6 +70,10 @@ doesn't block pubnet: until then the operator raises an account's limit by hand.
   - If it stays refused: the refusal says the payment creates `payTo`'s balance and that the seller
     creates it once from their own account (today it names only the fee and the ceiling), and ADR
     0007 and the threat model ("Fee inflation by rent") get the pubnet figures for `exact`.
+- Whether an operator's revoke should ban an owner (0106 decision 35). Today `pnpm keys revoke`
+  holds a new key back only until the month's end, as any revoke does, and nothing in the registry
+  blocks an owner. A ban alone doesn't stop a Sybil with many Discord accounts; with one, the
+  month's cap also gets its lock (0106 decision 34).
 
 ## Acceptance Criteria
 

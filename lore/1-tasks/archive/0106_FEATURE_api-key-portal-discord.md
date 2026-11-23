@@ -2,11 +2,11 @@
 id: "0106"
 title: "Issue API keys from our portal after Discord sign-in"
 type: FEATURE
-status: active
+status: completed
 owner: akot
 milestone: 2
 related_adr: ["0007"]
-related_tasks: ["0024", "0105", "0107"]
+related_tasks: ["0024", "0105", "0107", "0158", "0159"]
 tags: [facilitator, portal, security, before-pubnet, priority-high, effort-large, platform]
 links:
   - ../../../docs/adr/0007-fee-abuse-containment.md
@@ -41,6 +41,16 @@ history:
     note: >
       Resumed: the hub issues Prices' keys since 2026-11-18, and x402's keys move to the same
       contract. Design approved by akot the same day: "The hub's contract", decisions 23-33.
+  - date: "2026-11-23"
+    status: completed
+    who: akot
+    note: >
+      PRs #194, #213, #222 and #223 merged (#212 closed: the page moved into the hub). The
+      portal's backend is in production since 2026-11-20 and the hub's x402 tab is public at
+      sorobanscan.com/api/ since 2026-11-23, where akot got a key, was refused with the reason on
+      accounts that fail the gates, and revoked the key, all four criteria on production. 37
+      decisions. Left: the late fixes' deploy and the uptime alarms (0159), removing
+      `apps/portal-web` (0158), the ban question of decision 35 (0107).
 ---
 
 # Issue API keys from our portal after Discord sign-in
@@ -144,14 +154,17 @@ All made by akot on 2026-11-16.
 
 ## Acceptance Criteria
 
-- [ ] Given a Discord account that meets the gates, when it presses "Get API Key" in
+- [x] Given a Discord account that meets the gates, when it presses "Get API Key" in
       the hub's x402 tab, then it gets one pubnet key
-- [ ] Given an account outside Stellar Developers, still pending screening, or younger than 5
+- [x] Given an account outside Stellar Developers, still pending screening, or younger than 5
       minutes, when it asks for a key, then it is refused and told why
-- [ ] Given an account with a key, when it revokes it (the tab's Regenerate), then the old key
+- [x] Given an account with a key, when it revokes it (the tab's Regenerate), then the old key
       stops working, a new one can be had from the next calendar month (UTC, decision 24)
       and the account's quota use carries over
-- [ ] Given the portal, when it is live, then its privacy policy says which Discord data we keep
+- [x] Given the portal, when it is live, then its privacy policy says which Discord data we keep
+
+Checked by akot on production, 2026-11-23, in the hub at `https://sorobanscan.com/api/`; what each
+tick rests on is in "Implementation Notes", "On production".
 
 ## Implementation Notes
 
@@ -359,6 +372,41 @@ All made by akot on 2026-11-16.
   headers, from a workstation: the portal's `/health` `{"ready":true}` 200, the hub's
   `/api/hub/me` a `302` to `/api/` (the hub's backend isn't routed yet). Not deployed; never run
   from AWS.
+- **On production**, 2026-11-23. The backend runs at `x402-portal.sorobanscan.com` since
+  2026-11-20 (the fifth deploy, #208; the runbook's server steps and the first deploy that day),
+  and the hub is public at `sorobanscan.com/api/` since 2026-11-23, its x402 tab on. akot, in a
+  browser:
+  - Criterion 1: the tab showed the account's key, issued through the tab against this backend
+    on 2026-11-20; Copy worked. The key is in testnet's registry until 0126 (decision 19).
+  - Criterion 2: an account outside the server read "Stellar Discord membership required … Join
+    the server and try again"; one that had not accepted the rules, "Stellar Discord accept rules
+    required … accept the server's rules, then sign in again"; a refusal when asking for the key
+    read "You need to be a member of the Stellar Developers Discord to get an API key". akot
+    reports every path checked. The age gate's own text ("Your Discord account is too new …") was
+    not quoted in the session: `apps/portal`'s tests are what is on record for it.
+  - Criterion 3: Regenerate answered "Your key was revoked on 23 November 2026. A new key can be
+    issued from 1 December 2026." No request reads a pubnet key before 0126, so "stops working"
+    is the registry's `revoked` state and 0105's tests. No quota exists before 0107; the use will
+    stay with the account because the registry's owner, not the key, is what 0107 counts by.
+  - Criterion 4: `https://sorobanscan.com/api/privacy-policy` carries "x402 Facilitator API
+    keys", dated 20 November 2026: the registry's row with the Discord account ID, the sealed
+    copy, what the hub sends, what is logged, Hetzner, Cloudflare and CloudWatch.
+- **The last pull requests**, 2026-11-23: #213 (the OpenAPI document, brought up to 0086 and
+  0155 first), #223 (decisions 34 and 37: the revoke's copy and the log rotation; the root test on
+  PostgreSQL 22 of 22 tasks, the race test failing with the fix removed) and #222 (decision 21's
+  probes). #212 was closed unmerged: the landing page moved into the hub's bundle
+  (`sorobanscan-api-portal` #11, `soroban-block-explorer` #760), which carries its changes, so
+  `apps/portal-web` is served nowhere (0158).
+- **Not deployed when the task closed** (0159): the portal's image with #223's fix, the playbook
+  with the new rotation, and the Uptime and Alarms stacks with #222's probes, whose two alarm
+  groups are off. AWS Chatbot answered Slack `account_inactive` on 2026-11-23, so no alarm
+  reaches Slack until an admin authorizes the AWS app again.
+
+## Future Work
+
+- Deploy #223 and #222 and turn the two uptime alarm groups on: 0159.
+- Remove `apps/portal-web` once the hub serves the landing page: 0158.
+- Decision 35, whether an operator's revoke should ban an owner: 0107, before 0126 opens pubnet.
 
 ## Design Decisions
 
@@ -556,7 +604,8 @@ approved by akot the same day with the design.
 35. **A revoke by the operator's script is not a ban.** `pnpm keys revoke` (0105) holds back a
     new key only until the month's end, as any revoke does: the cap reads `revoked_at` in
     `api_keys`, whoever set it, and nothing in the registry blocks an owner. Whether pubnet needs
-    a ban is to decide before it opens. Claude's, from the final review; not yet seen by akot.
+    a ban is to decide before it opens, in 0107 (akot, 2026-11-20). Claude's, from the final
+    review.
 36. **A stranger's IPv6 address counts by its /56, and a store that failed is a `502`.** Decided
     by akot on 2026-11-19, from the review of #194. One /64 holds more addresses than any
     window, so a limit per address let one client rotate past it, with a `hub_call_refused` line
