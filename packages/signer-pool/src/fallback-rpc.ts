@@ -134,14 +134,14 @@ export class FallbackRpc implements SorobanRpc {
 
   getLedgerEntries: SorobanRpc["getLedgerEntries"] = (...a) =>
     this.hedged("getLedgerEntries", (r) => r.getLedgerEntries(...a));
-  getLatestLedger: SorobanRpc["getLatestLedger"] = (...a) =>
-    this.hedged("getLatestLedger", (r) => r.getLatestLedger(...a));
-  getFeeStats: SorobanRpc["getFeeStats"] = (...a) =>
-    this.hedged("getFeeStats", (r) => r.getFeeStats(...a));
   simulateTransaction: SorobanRpc["simulateTransaction"] = (...a) =>
     this.inTurn("simulateTransaction", (r) => r.simulateTransaction(...a));
   getTransaction: SorobanRpc["getTransaction"] = (...a) =>
     this.inTurn("getTransaction", (r) => r.getTransaction(...a));
+  getLatestLedger: SorobanRpc["getLatestLedger"] = (...a) =>
+    this.hedged("getLatestLedger", (r) => r.getLatestLedger(...a));
+  getFeeStats: SorobanRpc["getFeeStats"] = (...a) =>
+    this.hedged("getFeeStats", (r) => r.getFeeStats(...a));
 
   sendTransaction: SorobanRpc["sendTransaction"] = async (...a) => {
     const { index: from, token } = this.begin();
