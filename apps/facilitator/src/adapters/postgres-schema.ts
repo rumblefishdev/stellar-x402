@@ -316,6 +316,73 @@ ALTER TABLE catalog ALTER COLUMN ledger DROP NOT NULL;
 ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
 `,
   },
+  {
+    // 0120: search by words (ADR 0014). One function builds a listing's four fields from the
+    // stored listing, so every part of search reads the same text, and its words are a column
+    // PostgreSQL computes on every write, with a GIN index. The release before keeps working: it
+    // never names the column, and PostgreSQL fills it on its writes too. Adding the column
+    // rewrites the catalog under its write lock: 285–576 ms for 2,500 listings, 5.5 s for 35,000
+    // (measured locally on 18), so by those numbers it fits the group's 1 s a statement up to
+    // about 4,000 listings; a larger catalog fails the run, which rolls back. On 2026-11-23
+    // production held one listing, and the seed brings about 2,200 (0155). Computing the words per query instead, from an index
+    // on the function, took 210 ms for 2,500 matches against 4–14 ms from the column. Every field
+    // read returns NULL on an unexpected shape rather than failing the write. concat_ws is marked
+    // STABLE only because it takes any type; every argument here is text.
+    name: "0017_catalog_words",
+    sql: `
+CREATE FUNCTION catalog_search_fields(listing jsonb) RETURNS text[]
+  LANGUAGE sql IMMUTABLE PARALLEL SAFE
+RETURN ARRAY[
+  -- Name: the service name, an MCP tool's name and the words of the URL's path.
+  concat_ws(' ',
+    listing ->> 'serviceName',
+    replace(listing #>> '{extensions,bazaar,info,input,toolName}', '_', ' '),
+    regexp_replace(
+      substring(listing ->> 'resource' FROM '^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*([^?#]*)'),
+      '[^A-Za-z0-9]+', ' ', 'g')),
+  -- Tags.
+  (SELECT string_agg(tag #>> '{}', ' ')
+     FROM jsonb_path_query(listing, '$.tags[*] ? (@.type() == "string")', '{}', true) AS t(tag)),
+  -- Description: the listing's and its input schema's.
+  concat_ws(' ',
+    listing ->> 'description',
+    listing #>> '{extensions,bazaar,info,input,inputSchema,description}'),
+  -- Parameters: each input's name and description, at most 40, each cut at 300 characters.
+  (SELECT string_agg(word, ' ' ORDER BY part, n, sub) FROM (
+     SELECT src.part, q.n, w.sub, left(w.word, 300) AS word
+       FROM unnest(ARRAY[
+              '$.extensions.bazaar.info.input.queryParams.keyvalue()',
+              '$.extensions.bazaar.info.input.body.keyvalue()',
+              '$.extensions.bazaar.info.input.inputSchema.properties.keyvalue()',
+              '$.extensions.bazaar.schema.properties.input.properties.queryParams.properties.keyvalue()',
+              '$.extensions.bazaar.schema.properties.input.properties.body.properties.keyvalue()'
+            ]::jsonpath[]) WITH ORDINALITY AS src(path, part),
+            jsonb_path_query(listing, src.path, '{}', true) WITH ORDINALITY AS q(input, n),
+            LATERAL (VALUES
+              (0, q.input ->> 'key'),
+              (1, CASE WHEN jsonb_typeof(q.input -> 'value' -> 'description') = 'string'
+                       THEN q.input -> 'value' ->> 'description' END)
+            ) AS w(sub, word)
+      WHERE w.word IS NOT NULL
+      ORDER BY src.part, q.n, w.sub
+      LIMIT 40) params)
+];
+
+-- Weights A to D: name, tags, description, parameters; search ranks them 1.0, 0.67, 0.5, 0.33.
+CREATE FUNCTION catalog_search_words(listing jsonb) RETURNS tsvector
+  LANGUAGE sql IMMUTABLE PARALLEL SAFE
+RETURN (
+  SELECT setweight(to_tsvector('english', coalesce(fields[1], '')), 'A')
+      || setweight(to_tsvector('english', coalesce(fields[2], '')), 'B')
+      || setweight(to_tsvector('english', coalesce(fields[3], '')), 'C')
+      || setweight(to_tsvector('english', coalesce(fields[4], '')), 'D')
+    FROM catalog_search_fields(listing) AS f(fields));
+
+ALTER TABLE catalog
+  ADD COLUMN words tsvector GENERATED ALWAYS AS (catalog_search_words(resource)) STORED;
+CREATE INDEX catalog_words ON catalog USING gin (words);
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

@@ -1043,6 +1043,7 @@ describe("PostgreSQL stores", () => {
           "0014_api_key_copies",
           "0015_settlement_refused",
           "0016_catalog_seed",
+          "0017_catalog_words",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1078,6 +1079,7 @@ describe("PostgreSQL stores", () => {
         "0014_api_key_copies",
         "0015_settlement_refused",
         "0016_catalog_seed",
+        "0017_catalog_words",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

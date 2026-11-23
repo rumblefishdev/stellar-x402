@@ -1938,6 +1938,158 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
         total: 0,
       });
     });
+
+    describe("search by words (0120, ADR 0014)", () => {
+      type Search = Parameters<CatalogStore["search"]>[0];
+      const search = (text: string, query: Partial<Search> = {}) =>
+        store.search({ text, limit: 10, ...query });
+      const urls = async (text: string, query: Partial<Search> = {}) =>
+        (await search(text, query)).map((hit) => hit.resource.resource);
+      const listing = (url: string, overrides: Partial<DiscoveryResource>) =>
+        upsert({ key: key(url), resource: resource(url, overrides) });
+
+      it("finds a listing by any word of the query, and nothing when no listing holds one", async () => {
+        await listing("https://a.example/x", { description: "Weather forecast for a city" });
+        await listing("https://b.example/x", { description: "Stock prices" });
+        expect(await urls("weather in paris")).toEqual(["https://a.example/x"]);
+        expect(await urls("zebra")).toEqual([]);
+        // Only stop words: no word to look for.
+        expect(await urls("the of")).toEqual([]);
+      });
+
+      it("ranks a word in the name above tags, then description, then parameters", async () => {
+        await listing("https://params.example/x", {
+          extensions: {
+            bazaar: { info: { input: { type: "http", queryParams: { weather: "" } } } },
+          },
+        });
+        await listing("https://description.example/x", { description: "weather" });
+        await listing("https://tags.example/x", { tags: ["weather"] });
+        await listing("https://name.example/x", { serviceName: "Weather" });
+        expect(await urls("weather")).toEqual([
+          "https://name.example/x",
+          "https://tags.example/x",
+          "https://description.example/x",
+          "https://params.example/x",
+        ]);
+      });
+
+      it("reads the name from the URL path and an MCP tool's name", async () => {
+        await listing("https://a.example/v1/forecast?city=x", {});
+        await listing("mcp://tool/lookup", {
+          type: "mcp",
+          extensions: { bazaar: { info: { input: { type: "mcp", toolName: "get_tides" } } } },
+        });
+        expect(await urls("forecast")).toEqual(["https://a.example/v1/forecast?city=x"]);
+        expect(await urls("tides")).toEqual(["mcp://tool/lookup"]);
+        // The query string is not part of the name.
+        expect(await urls("city")).toEqual([]);
+      });
+
+      it("reads parameters' names and descriptions from the inputs and the schema", async () => {
+        await listing("mcp://tool/a", {
+          type: "mcp",
+          extensions: {
+            bazaar: {
+              info: {
+                input: {
+                  type: "mcp",
+                  toolName: "a",
+                  inputSchema: { properties: { zip: { description: "postal code" } } },
+                },
+              },
+            },
+          },
+        });
+        await listing("https://b.example/x", {
+          extensions: {
+            bazaar: {
+              schema: {
+                properties: {
+                  input: {
+                    properties: {
+                      body: { properties: { ticker: { description: "exchange symbol" } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+        expect(await urls("postal")).toEqual(["mcp://tool/a"]);
+        expect(await urls("zip")).toEqual(["mcp://tool/a"]);
+        expect(await urls("exchange")).toEqual(["https://b.example/x"]);
+        expect(await urls("ticker")).toEqual(["https://b.example/x"]);
+      });
+
+      it("stores a listing whose fields have unexpected shapes, and still finds it", async () => {
+        await listing("https://odd.example/x", {
+          description: "weather",
+          extensions: {
+            bazaar: { info: { input: "x" }, schema: { properties: { input: [] } } },
+          } as unknown as DiscoveryResource["extensions"],
+        });
+        expect(await urls("weather")).toEqual(["https://odd.example/x"]);
+      });
+
+      it("filters before ranking, and searches both networks without a network filter", async () => {
+        await upsert({
+          key: key("https://a.example/x"),
+          resource: resource("https://a.example/x", { description: "weather" }),
+        });
+        await upsert({
+          key: key("https://b.example/x", "GOTHER"),
+          resource: resource("https://b.example/x", { description: "weather", type: "mcp" }),
+        });
+        await upsert({
+          key: key("https://c.example/x", PAY_TO, "stellar:pubnet"),
+          resource: resource("https://c.example/x", { description: "weather" }),
+        });
+        expect((await urls("weather")).sort()).toEqual([
+          "https://a.example/x",
+          "https://b.example/x",
+          "https://c.example/x",
+        ]);
+        expect(await urls("weather", { type: "mcp" })).toEqual(["https://b.example/x"]);
+        expect(await urls("weather", { payTo: "GOTHER" })).toEqual(["https://b.example/x"]);
+        expect(await urls("weather", { network: "stellar:pubnet" })).toEqual([
+          "https://c.example/x",
+        ]);
+        expect(await urls("weather", { network: "eip155:8453" })).toEqual([]);
+      });
+
+      it("orders equal ranks by key and pages after a result without a repeat or a gap", async () => {
+        for (const host of ["e", "c", "a", "d", "b"])
+          await listing(`https://${host}.example/x`, { description: "weather" });
+        const seen: string[] = [];
+        let after: Search["after"];
+        for (let page = 0; page < 4; page++) {
+          const hits = await search("weather", { limit: 2, after });
+          seen.push(...hits.map((hit) => hit.resource.resource));
+          if (hits.length < 2) break;
+          const last = hits.at(-1)!;
+          after = { rank: last.rank, key: last.key };
+        }
+        expect(seen).toEqual(["a", "b", "c", "d", "e"].map((host) => `https://${host}.example/x`));
+      });
+
+      it("pages from a higher rank to a lower one", async () => {
+        await listing("https://name.example/x", { serviceName: "weather" });
+        await listing("https://description.example/x", { description: "weather" });
+        const [first] = await search("weather", { limit: 1 });
+        expect(first?.resource.resource).toBe("https://name.example/x");
+        const next = await urls("weather", { after: { rank: first!.rank, key: first!.key } });
+        expect(next).toEqual(["https://description.example/x"]);
+      });
+
+      it("searches the stored listing's words after an update", async () => {
+        const url = "https://a.example/x";
+        await upsert({ key: key(url), resource: resource(url, { description: "weather" }) }, 1);
+        await upsert({ key: key(url), resource: resource(url, { description: "stocks" }) }, 2);
+        expect(await urls("weather")).toEqual([]);
+        expect(await urls("stocks")).toEqual([url]);
+      });
+    });
   });
 }
 

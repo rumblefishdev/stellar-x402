@@ -1,3 +1,4 @@
+import type { StellarNetwork } from "@stellar-x402/config";
 import { PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type pg from "pg";
@@ -8,6 +9,8 @@ import type {
   CatalogKey,
   CatalogPage,
   CatalogQuery,
+  CatalogSearch,
+  CatalogSearchHit,
   CatalogStore,
   UpsertOutcome,
 } from "../ports/index.js";
@@ -101,6 +104,65 @@ export class PostgresCatalogStore implements CatalogStore {
     );
     const page = rows[0]!;
     return { items: page.items, total: Number(page.total) };
+  }
+
+  /**
+   * The query's words are OR-ed, so a long sentence still matches a listing that holds one of
+   * them, and ranked by `ts_rank_cd` with the field weights name 1.0, tags 0.67, description 0.5,
+   * parameters 0.33 (ADR 0014, as 0134 measured it). The rank goes out and comes back as
+   * PostgreSQL's text for the `real` it is, so the next page compares the same number. Only the
+   * page's rows read `resource`, as in `list`.
+   */
+  async search(query: CatalogSearch): Promise<CatalogSearchHit[]> {
+    const { text, type, payTo, network, limit, after } = query;
+    const { rows } = await this.listPool.query<{
+      rank: string;
+      network: StellarNetwork;
+      pay_to: string;
+      method: string;
+      resource_url: string;
+      resource: DiscoveryResource;
+    }>(
+      `SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
+         FROM (SELECT seq, network, pay_to, method, resource_url,
+                      ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query) AS rank
+                 FROM catalog,
+                      CAST(replace(plainto_tsquery('english', $1)::text, '&', '|') AS tsquery)
+                        AS words_query
+                WHERE words @@ words_query
+                  AND ($2::text IS NULL OR type = $2)
+                  AND ($3::text IS NULL OR pay_to = $3)
+                  AND ($4::text IS NULL OR network = $4)) p
+         JOIN catalog c USING (seq)
+        WHERE $5::real IS NULL
+           OR p.rank < $5::real
+           OR (p.rank = $5::real
+               AND (p.network, p.pay_to, p.method, p.resource_url) > ($6, $7, $8, $9))
+        ORDER BY p.rank DESC, p.network, p.pay_to, p.method, p.resource_url
+        LIMIT $10`,
+      [
+        text,
+        type ?? null,
+        payTo ?? null,
+        network ?? null,
+        after?.rank ?? null,
+        after?.key.network ?? null,
+        after?.key.payTo ?? null,
+        after?.key.method ?? null,
+        after?.key.resourceUrl ?? null,
+        limit,
+      ],
+    );
+    return rows.map((row) => ({
+      rank: row.rank,
+      key: {
+        network: row.network,
+        payTo: row.pay_to,
+        method: row.method,
+        resourceUrl: row.resource_url,
+      },
+      resource: row.resource,
+    }));
   }
 }
 
