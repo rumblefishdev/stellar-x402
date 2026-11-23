@@ -901,7 +901,12 @@ export class PostgresSpendStore implements SpendStore {
           ]);
           const usedStroops = BigInt(rows[0]!.used) + amount;
           if (usedStroops > limit.maxStroops) throw new LimitExceeded(limit.scope);
-          usage.push({ scope: limit.scope, usedStroops, maxStroops: limit.maxStroops });
+          usage.push({
+            scope: limit.scope,
+            usedStroops,
+            maxStroops: limit.maxStroops,
+            windowMs: limit.windowMs,
+          });
         }
         await client.query(
           `INSERT INTO spend_reservation_scopes (id, scope, at, amount)

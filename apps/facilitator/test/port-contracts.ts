@@ -1460,8 +1460,8 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(result).toEqual({
         reserved: true,
         usage: [
-          { scope: "global", usedStroops: 40n, maxStroops: 100n },
-          { scope: `payer:${PAYER}`, usedStroops: 40n, maxStroops: 500n },
+          { scope: "global", usedStroops: 40n, maxStroops: 100n, windowMs: DAY },
+          { scope: `payer:${PAYER}`, usedStroops: 40n, maxStroops: 500n, windowMs: DAY },
         ],
       });
     });

@@ -130,7 +130,7 @@ export function createSpendPolicy(deps: {
 
   /** Reports each budget at or past 80 %, at most once per scope in the cooldown. */
   function nearing(usage: ScopeUsage[], at: number) {
-    for (const { scope, usedStroops, maxStroops } of usage) {
+    for (const { scope, usedStroops, maxStroops, windowMs } of usage) {
       if (usedStroops * 100n < maxStroops * NEARING_PERCENT) continue;
       const last = nearingAt.get(scope);
       if (last !== undefined && at - last < NEARING_COOLDOWN_MS) continue;
@@ -146,7 +146,7 @@ export function createSpendPolicy(deps: {
         scope,
         used: usedStroops,
         max: maxStroops,
-        windowMs: budgets.windowMs,
+        windowMs,
       });
       metrics.increment("spend_budget_nearing_total", { budget: budgetKind(scope) });
     }

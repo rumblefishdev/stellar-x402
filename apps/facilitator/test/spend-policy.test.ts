@@ -492,13 +492,26 @@ describe("createSpendPolicy beforeSubmit", () => {
     expect(metrics.value("spend_budget_nearing_total", { budget: "payer" })).toBe(3);
   });
 
+  it("reports nearing with the limit's own window", async () => {
+    const store = overriding(db.stores().spend, {
+      breakersOpen: async () => new Set<SpendScope>(),
+      reserve: async () => ({
+        reserved: true,
+        usage: [{ scope: "global", usedStroops: 8n, maxStroops: 10n, windowMs: 123 }],
+      }),
+    });
+    const { policy, events } = setup({ store });
+    await policy.beforeSubmit(context());
+    expect(events("spend_budget_nearing")).toEqual([expect.objectContaining({ windowMs: 123 })]);
+  });
+
   it("forgets the oldest scope's report past 10,000 scopes", async () => {
     let next: SpendScope = "global";
     const store = overriding(db.stores().spend, {
       breakersOpen: async () => new Set<SpendScope>(),
       reserve: async () => ({
         reserved: true,
-        usage: [{ scope: next, usedStroops: 8n, maxStroops: 10n }],
+        usage: [{ scope: next, usedStroops: 8n, maxStroops: 10n, windowMs: WINDOW_MS }],
       }),
     });
     const { policy, metrics } = setup({ store });

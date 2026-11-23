@@ -34,6 +34,8 @@ export interface ScopeUsage {
   scope: SpendScope;
   usedStroops: bigint;
   maxStroops: bigint;
+  /** The limit's own window, as passed in `SpendLimit`, so a report names the window it sums. */
+  windowMs: number;
 }
 
 export type ReserveResult =
