@@ -562,6 +562,7 @@ describe("PostgreSQL stores", () => {
       expect(await spend.reserve({ id: "a", amount: 1n, limits, now: 0 })).toEqual({
         reserved: false,
         scope: "global",
+        limit: "stroops",
       });
       spy.mockRestore();
       expect(single.totalCount).toBe(0);
@@ -1273,7 +1274,28 @@ describe("PostgreSQL stores", () => {
     expect(await spend.reserve({ id: "b", amount: 60n, limits, now: 1 })).toEqual({
       reserved: false,
       scope: "global",
+      limit: "stroops",
     });
+  });
+
+  it("lets exactly maxCount of concurrent reserves past a count limit (0107)", async () => {
+    const { spend } = await stores();
+    // The account's scope alone, so only its lock serializes them: the count must run under it.
+    const scope = "account:discord:1" as const;
+    const limits = [{ scope, maxCount: 5, since: 0 }];
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        spend.reserve({ id: `r${i}`, amount: 1n, limits, now: 1 }),
+      ),
+    );
+    expect(results.filter((result) => result.reserved)).toHaveLength(5);
+    expect(results.filter((result) => !result.reserved)).toEqual(
+      Array.from({ length: 15 }, () => ({ reserved: false, scope, limit: "count" })),
+    );
+    const { rows } = await pool.query("SELECT id FROM spend_reservation_scopes WHERE scope = $1", [
+      scope,
+    ]);
+    expect(rows).toHaveLength(5);
   });
 
   it("prunes a reservation with its scope rows, and skips rows another transaction holds", async () => {

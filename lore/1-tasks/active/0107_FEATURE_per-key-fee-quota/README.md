@@ -188,3 +188,22 @@ Claude's calls in the design (14 to 25), approved with it. 26 is the plan's.
     a repeat agree. The plan is read in `beforeSubmit`, and a plan read that fails refuses as a
     store failure does. The plans are one setting, `ACCOUNT_PLANS`, read by both services. The
     pruner keeps the month's rows only on a network that requires a key.
+
+## Implementation Notes
+
+**The count limit's cost (Task 3, measured 2026-11-23).** The count runs under the global scope's
+lock, so its time is every reserve's wait. Approach A stands: fallback B isn't needed.
+
+- Setup: 100,000 reservations of one `account:` scope in the month, as a Pro account at its quota,
+  each also in `global`. Then 200 reserves one after another, after 10 warm-up ones, each with the
+  account's count, its 24 h fees and `global`. PostgreSQL 18.6.
+- Result, six runs, on fresh rows and after a VACUUM alike: median 13.8–16.1 ms, p99
+  16.3–26.0 ms, the slowest single reserve 33.7 ms. Without the count limit (the last three runs,
+  after that phase was added): median 2.3 ms, p99 3.7–3.8 ms.
+- So the count adds about 12 ms at 100,000 rows, below the plan's 50 ms at p99. A Free account
+  counts at most 1,000 rows.
+- Here the planner counts by a parallel sequential scan, since the account is half the table; the
+  test prints the plan.
+- Re-run against the test database (`127.0.0.1:15432` or `TEST_DATABASE_URL`). It uses a schema of
+  its own, dropped at the end:
+  `MEASURE_SPEND_COUNT=1 pnpm --filter @stellar-x402/facilitator exec vitest run test/spend-count.timing.test.ts --silent=false`
