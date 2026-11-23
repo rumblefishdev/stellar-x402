@@ -102,7 +102,8 @@ transport-only `RpcUnavailableError`, `fromUrls`' names (no longer used by `main
     deadline, so the settlement stays `pending` and its channel stays held;
   - each new settlement does the same, until the pool runs out and `/settle` refuses with
     `queue-timeout` or `no-channels`;
-  - nothing names the cause: `/health` checks only liveness, and there is no ledger-age metric.
+  - `rpc_stalled_seconds` and the `rpc-stalled` alarm (0027) name the cause within minutes, but
+    nothing moves calls off the frozen endpoint.
 
   Money stays safe. `NOT_FOUND` carries the endpoint's own `latestLedger`, so a frozen endpoint
   never makes a landed transaction look dead. A wall-clock deadline in `confirm()` would make it
@@ -182,11 +183,13 @@ mainnet, sorobanrpc.com first: 0%; Ankr first: 3.4%.
 | 5 | A probe counts as good only when the first endpoint answers within the hedge delay, besides the 2-ledger lag check | owner | changes it | no standard |
 | 6 | No cap on the number of `RPC_URLS`; one call takes at most 15 s whatever their number | owner | changes it (0045 decision 14 capped them at 3) | no standard |
 | 7 | This PR series does hedging only; the items above (frozen endpoints, transport-only errors, `fromUrls` names, the `Attempt.sent` split, the three review notes) follow as later PRs here | owner | changes it | — |
+| 8 | The endpoint that answers first becomes active, if it trails by at most 2 ledgers, and stays active until another one answers first; calls no longer return to `RPC_URLS[0]` on their own, so the probe goes. Replaces rows 4 and 5: the probe kept `RPC_URLS[0]` preferred, and production showed it bringing calls back to a slow endpoint (2026-11-10, 6 failovers and 5 failbacks in 10 minutes, every failback at 0 ledgers of lag) | owner, 2026-11-23 | changes it | viem `fallback` with `rank` and alloy `FallbackLayer` keep the best-ranked endpoint, with no return to the first |
+| 9 | After the hedge delay the read goes to every other endpoint at once, not to the next one only: with three endpoints and the first two slow, a fast third can still win. Replaces row 1's "the next endpoint" | owner, 2026-11-23 | changes it | alloy `FallbackLayer` sends to several at once |
 
 ### PR split
 
-1. `signer-pool`: `FallbackRpc` hedges its reads (rows 1-5), with a path that never hedges for a
-   transaction's lifecycle.
+1. `signer-pool`: `FallbackRpc` hedges its reads (rows 1-3, 8, 9) and drops the probe, with a
+   path that never hedges for a transaction's lifecycle.
 2. `facilitator`: upstream verify hedges across `RPC_URLS` (rows 1, 2), the 15 s deadline and no
    cap (row 6).
 
