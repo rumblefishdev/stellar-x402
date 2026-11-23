@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PaymentRequirements } from "@x402/core/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCataloger } from "../src/catalog/cataloger.js";
+import { createCataloger, type Cataloger } from "../src/catalog/cataloger.js";
 import {
   REQUEST_GAP_MS,
+  SEED_FILE_BYTES,
   fileResources,
   parseHosts,
   reportLines,
@@ -209,6 +210,53 @@ describe("seedHosts (0155)", () => {
     const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
     expect(report!.skipped).toEqual([]);
     expect(report!.results).toMatchObject([{ outcome: "refreshed" }]);
+  });
+
+  it("doesn't read the file of a host whose robots.txt disallows it", async () => {
+    seller.files["/robots.txt"] = "User-agent: *\nDisallow: /\n";
+    seller.files["/.well-known/x402"] = JSON.stringify({ resources: [`${seller.url}/a`] });
+    const { cataloger, wait } = setup();
+    const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
+    expect(report).toMatchObject({ file: "disallowed by robots.txt", results: [] });
+    expect(seller.requests.map((request) => request.url)).toEqual(["/robots.txt"]);
+  });
+
+  it("reads a robots.txt that answers 404 as no rules (RFC 9309 §2.3.1.3)", async () => {
+    seller.reply = async (request) => ({ status: request.url === "/robots.txt" ? 404 : 402 });
+    seller.files["/.well-known/x402"] = JSON.stringify({ resources: [`${seller.url}/a`] });
+    const { cataloger, wait } = setup();
+    const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
+    expect(report!.results).toMatchObject([{ url: `${seller.url}/a`, outcome: "refreshed" }]);
+  });
+
+  it("names our robot in every request (decision 8)", async () => {
+    seller.files["/.well-known/x402"] = JSON.stringify({ resources: [`${seller.url}/a`] });
+    const { cataloger, wait } = setup();
+    await seedHosts([seller.url], cataloger, { listLocal: true, wait });
+    expect(new Set(seller.userAgents)).toEqual(
+      new Set(["stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)"]),
+    );
+  });
+
+  it("refuses a seller file over 512 KiB (decision 11)", async () => {
+    seller.files["/.well-known/x402"] = JSON.stringify({
+      resources: [`${seller.url}/a`],
+      pad: "x".repeat(SEED_FILE_BYTES),
+    });
+    const { cataloger, wait } = setup();
+    const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
+    expect(report!.file).toMatch(/^response_too_large/);
+    expect(report!.results).toEqual([]);
+  });
+
+  it("waits longer after a URL that cost two requests (decision 12)", async () => {
+    seller.files["/.well-known/x402"] = JSON.stringify({
+      resources: [`${seller.url}/a`, `${seller.url}/b`],
+    });
+    const cataloger = { seed: async () => ({ results: [], requests: 2 }) } as unknown as Cataloger;
+    const wait = vi.fn(async () => {});
+    await seedHosts([seller.url], cataloger, { listLocal: true, wait });
+    expect(wait.mock.calls).toEqual([[2 * REQUEST_GAP_MS]]);
   });
 
   it("asks nothing of a host whose robots.txt answers a server error (RFC 9309 §2.3.1.4)", async () => {
