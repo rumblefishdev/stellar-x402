@@ -11,6 +11,7 @@ import {
   LeaseFencedError,
   type LeaseFence,
   type CatalogEntry,
+  type CatalogKey,
   type CatalogStore,
   type NewSettlement,
   type RateLimitStore,
@@ -1751,7 +1752,19 @@ export function rateLimitStoreContract(make: Make<RateLimitStore>) {
   });
 }
 
-export function catalogStoreContract(make: Make<CatalogStore>) {
+/** A settled payment of a listing as the adapter stores it (0154); the port has no read of them. */
+export interface StoredPayment {
+  key: CatalogKey;
+  payer: string;
+  settlementKey: string;
+  at: number;
+}
+
+/** `payments` reads the stored payments in settlement-key order, past the port. */
+export function catalogStoreContract(
+  make: Make<CatalogStore>,
+  payments: () => Promise<StoredPayment[]>,
+) {
   describe("CatalogStore contract", () => {
     let store: CatalogStore;
     beforeEach(async () => {
@@ -1968,6 +1981,18 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
           ),
         ),
       ).resolves.toHaveLength(10);
+    });
+
+    it("keeps the first write of a settlement recorded twice, its time and other fields (0154 behaviour 7)", async () => {
+      const first = payment("stellar:testnet:GPAYER:1", 1);
+      await store.recordPayment(first);
+      await store.recordPayment({
+        key: key("https://seller.example.com/other", "GOTHER"),
+        payer: "GOTHERPAYER",
+        settlementKey: first.settlementKey,
+        at: 2,
+      });
+      expect(await payments()).toEqual([first]);
     });
   });
 }

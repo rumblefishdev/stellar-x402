@@ -3,6 +3,7 @@ import { apiKeyStoreContract, sealedKeyStoreContract } from "@stellar-x402/api-k
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
+import type { StellarNetwork } from "@stellar-x402/config";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PostgresSpendStore, postgresStores } from "../src/adapters/postgres.js";
@@ -199,7 +200,26 @@ describe("PostgreSQL stores", () => {
   });
   spendStoreContract(async () => (await stores()).spend);
   rateLimitStoreContract(async () => (await stores()).rateLimits);
-  catalogStoreContract(async () => (await stores()).catalog);
+  catalogStoreContract(
+    async () => (await stores()).catalog,
+    async () =>
+      (
+        await pool.query<Record<string, string>>(
+          `SELECT settlement_key, network, pay_to, method, resource_url, payer, at
+           FROM catalog_payments ORDER BY settlement_key`,
+        )
+      ).rows.map((row) => ({
+        key: {
+          network: row.network as StellarNetwork,
+          payTo: row.pay_to!,
+          method: row.method!,
+          resourceUrl: row.resource_url!,
+        },
+        payer: row.payer!,
+        settlementKey: row.settlement_key!,
+        at: Number(row.at),
+      })),
+  );
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
   apiKeyStoreContract(async () => (await stores()).apiKeys);
   sealedKeyStoreContract(async () => ({
@@ -1385,11 +1405,14 @@ describe("PostgreSQL stores", () => {
       ]);
     });
 
-    it("keeps one row for a settlement recorded twice, by settle and by reconcile, in turn or at once (behaviour 2)", async () => {
+    it("keeps one row for a settlement recorded twice, by settle and by reconcile, in turn or at once, the first write kept (behaviours 2, 7)", async () => {
       const { catalog } = await stores();
       await catalog.recordPayment(payment("stellar:testnet:GPAYER:1", 1_000));
       await expect(
-        catalog.recordPayment(payment("stellar:testnet:GPAYER:1", 2_000)),
+        catalog.recordPayment({
+          ...payment("stellar:testnet:GPAYER:1", 2_000, "https://seller.example.com/other"),
+          payer: "GOTHERPAYER",
+        }),
       ).resolves.toBeUndefined();
       await Promise.all(
         Array.from({ length: 10 }, () =>
@@ -1400,6 +1423,16 @@ describe("PostgreSQL stores", () => {
         "stellar:testnet:GPAYER:1",
         "stellar:testnet:GPAYER:2",
       ]);
+      // The first write stands: its time and its other fields (behaviour 7).
+      expect((await rows())[0]).toEqual({
+        settlement_key: "stellar:testnet:GPAYER:1",
+        network: "stellar:testnet",
+        pay_to: "GPAYTO",
+        method: "GET",
+        resource_url: "https://seller.example.com/data",
+        payer: "GPAYER",
+        at: "1000",
+      });
     });
 
     it("stores a payment whose payTo is its payer (behaviour 4)", async () => {
