@@ -1,7 +1,7 @@
 ---
 title: "0107 design: a monthly quota and fee budget per account, as in Prices"
 type: synthesis
-status: developing
+status: mature
 spawned_from: notes/S-research.md
 spawns: []
 tags: [facilitator, fees, budgets, api-keys, portal, hub]

@@ -91,10 +91,17 @@ All made on 2026-11-23, in "Design Decisions" below:
 - [ ] Given many accounts on free quotas, when together they fill the shared free budget, then an
       account with a raised limit still settles
 - [ ] Given the quota and budget values, when this task ends, then they are config and recorded
+- [ ] Given an account with a key, when it opens the hub's x402 tab, then it sees this month's
+      payments, its limit, its plan and the reset date
+- [ ] Given an account that used part of its quota, when it revokes its key and gets a new one,
+      then its use carries over (0106's third criterion)
+- [ ] Given a payment to a C-address `payTo` with no balance of a SAC token, when `/verify` runs,
+      then it is refused with `invalid_exact_stellar_pay_to_balance_missing` and the fix
 
 ## Design Decisions
 
-Design: [S-design](notes/S-design.md), waiting for akot's approval.
+Design: [S-design](notes/S-design.md), approved by akot on 2026-11-23. Plan:
+[G-implementation-plan](notes/G-implementation-plan.md), to be carried out in a later session.
 
 ### From Plan
 
@@ -153,7 +160,7 @@ Design: [S-design](notes/S-design.md), waiting for akot's approval.
 
 ### Emerged
 
-Claude's calls in the design (14 to 25), waiting for akot's check.
+Claude's calls in the design (14 to 25), approved with it. 26 is the plan's.
 
 14. **Plans Basic (10,000 payments a month, 2.5 XLM of fees per 24 h) and Pro (100,000, 10 XLM),**
     beside Free (1,000, 2 XLM).
@@ -177,3 +184,7 @@ Claude's calls in the design (14 to 25), waiting for akot's check.
 23. **Three criteria are proposed:** the use in the hub, the use carrying over to a new key, and
     the balance-missing refusal (S-design, the end).
 24. **The pruner keeps rows for the longest window,** about 62 days.
+26. **In the plan:** `extra.resetsAt` comes from the record's creation time, so a first answer and
+    a repeat agree. The plan is read in `beforeSubmit`, and a plan read that fails refuses as a
+    store failure does. The plans are one setting, `ACCOUNT_PLANS`, read by both services. The
+    pruner keeps the month's rows only on a network that requires a key.
