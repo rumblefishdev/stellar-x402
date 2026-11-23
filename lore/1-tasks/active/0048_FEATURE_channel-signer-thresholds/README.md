@@ -9,8 +9,8 @@ related_adr: ["0003", "0005", "0011"]
 related_tasks: ["0047", "0007", "0016", "0020", "0026", "0027"]
 tags: [signer-pool, keys, security, mainnet, priority-high, effort-medium, payments]
 links:
-  - ../../../docs/architecture/m1-spine.md
-  - ../../../docs/threat-model.md
+  - ../../../../docs/architecture/m1-spine.md
+  - ../../../../docs/threat-model.md
 history:
   - date: "2026-10-15"
     status: backlog
@@ -53,7 +53,7 @@ Set thresholds so the hot key can settle but not change signers, and add a cold 
 that can. This holds whichever custody option 0047 picks, and is a mainnet blocker.
 
 > **Re-check before mainnet** (okarcz, 2026-10-19): 0047 decided on OpenBao Transit with **no cold
-> key**; only the hot key is kept ([ADR 0013](../../../docs/adr/0013-facilitator-key-custody.md)).
+> key**; only the hot key is kept ([ADR 0013](../../../../docs/adr/0013-facilitator-key-custody.md)).
 > The design below needs a cold key, so it is on hold. Before mainnet, decide again: a cold
 > recovery key, another way to keep the hot key below high, or accept the hot key's full power and
 > record why. What declining it costs: a stolen key can lock us out of every channel, and losing
@@ -76,6 +76,8 @@ that can. This holds whichever custody option 0047 picks, and is a mainnet block
 - Each extra signer adds 0.5 XLM of reserve per account, unless a cold account sponsors it.
 - A classic transaction holds up to 100 operations, so one cold signature can add or swap the hot
   key on many channels at once.
+- Option 2 (no cold key), checked on Stellar, Ethereum and Solana:
+  [R-hot-key-reach-without-cold-key](notes/R-hot-key-reach-without-cold-key.md).
 - Details and sources: 0047's report (`reports/Hetzner signer key custody.md`, on branch
   `lore-0047-hetzner-key-custody`), section "Stellar thresholds, not the custody product, decide
   the blast radius".
