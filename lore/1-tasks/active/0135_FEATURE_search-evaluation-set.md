@@ -13,7 +13,7 @@ links:
 history:
   - date: "2026-11-12"
     status: backlog
-    who: claude
+    who: okarcz
     note: >
       Created with okarcz from the Milestone 2 plan. The Panel Review response (§4) promises this
       evaluation; no task held it.
