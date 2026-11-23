@@ -17,6 +17,21 @@ export interface SpendBudgets {
   tierOtherStroops: bigint;
 }
 
+/** What an account's plan allows; replaced by the plan type of the plan catalog later. */
+interface AccountPlan {
+  name: string;
+  payments: number;
+  dailyFeeStroops: bigint;
+}
+
+/** The key's owner, as the account's quota and budget scopes need it. */
+export interface AccountBudget {
+  owner: string;
+  plan: AccountPlan;
+  /** Start of the current quota month, in epoch ms. */
+  monthStart: number;
+}
+
 /** Which budget a scope is, as the `budget` label and the refusal name it: a closed set. */
 export type BudgetKind = "payer" | "pay_to" | "asset" | "other" | "global";
 
@@ -48,7 +63,7 @@ export function assetScope(asset: string): SpendScope {
  * narrowest budget.
  */
 export function spendLimits(
-  ctx: { payer: string; payTo: string; asset: string },
+  ctx: { payer: string; payTo: string; asset: string; account?: AccountBudget },
   tier: AssetTier,
   budgets: SpendBudgets,
 ): SpendLimit[] {
@@ -75,7 +90,8 @@ export function budgetKind(scope: SpendScope): BudgetKind {
   if (scope === "tier:other") return "other";
   if (scope.startsWith("payer:")) return "payer";
   if (scope.startsWith("payTo:")) return "pay_to";
-  return "asset";
+  if (scope.startsWith("asset:")) return "asset";
+  throw new Error(`unknown spend scope: ${scope}`);
 }
 
 const SPEND_LIMIT_REASONS: Record<BudgetKind, string> = {
