@@ -1,7 +1,8 @@
 # ADR 0014: Search the Bazaar by words and by meaning in PostgreSQL, fused by rank
 
 - Status: accepted
-- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks)
+- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks) and 2026-11-23
+  (task 0154: the quality score)
 
 ## Context
 
@@ -110,10 +111,37 @@ The measurements are in
   the server) and while a new model's vectors are being written for the network. Every listing is
   then scored one way, so the answer includes listings with no current vector. Each fallback is
   logged with its cause and counted in a metric that monitoring can alert on.
-- **Quality score and curation.** Task 0154 adds them, and decides what a listing without a
-  quality score gets. Until then the fused score is the whole ranking.
-- **When the ranking is served.** As §4 promises (task 0135), the ranking replaces curation-only
-  mode only once 0135's run reaches nDCG@10 ≥ 0.75. Curation-only mode is 0154's to define.
+- **Quality score.** A listing's score is its fused score times a quality factor q (task 0154), in
+  the fused ranking and in words alone:
+  - q = (1 + 0.2 × p / (p + 2)) × 0.9 on a tunnel host × 0.9 with an empty description, where p is
+    the number of distinct wallets that paid for the listing through this facilitator in the last
+    30 days. q is at most 1.2, so quality only reorders listings that match about equally.
+  - A listing with no payments, on its own host and with a description, gets q = 1: it is neither
+    hidden nor raised, as §4.3 asks for new listings.
+  - p's bonus grows quickly at first and then flattens: 1 wallet gives q = 1.07, 10 give 1.17,
+    50 give 1.19.
+  - A wallet paying its own `payTo` is not counted. Wallets the seller funded are counted.
+  - Only distinct wallets count, not the number of payments.
+  - The 30-day window is the recency: a listing last paid 31 days ago has p = 0.
+  - Each network counts its own payments, testnet the same way as pubnet.
+  - A tunnel host is one whose name ends in `trycloudflare.com`, `ts.net`, `serveo.net`,
+    `serveousercontent.com`, `ngrok.io`, `ngrok.app`, `ngrok-free.app`, `ngrok-free.dev`,
+    `loca.lt`, `lhr.life`, `lhr.rocks`, `pinggy.link` or `pinggy-free.link`. Shared hosting such
+    as `workers.dev` or `vercel.app` gets no penalty.
+  - An empty description is a missing one, an empty one or one of spaces only. A short
+    description gets no penalty.
+  - q is computed when the search runs, from the payments stored at that moment.
+- **How a payment reaches its listing.** A table holds one row per settled payment that names a
+  listing: the network, `payTo`, method, listing URL, payer and the time the row is written. The
+  settlement's key makes the row unique, since a success can be reported twice, by settle and by
+  reconcile. The cataloger writes the row right after it derives the listing's key from the
+  payment, also when the listing's copy is unchanged. Rows are kept; the count reads the last 30
+  days. The table starts empty when it ships. A failed write is logged.
+- **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
+  0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
+- **When the ranking is served.** There is no separate curation-only mode. 0135's run decides
+  when search is offered on pubnet (task 0120): not before it reaches nDCG@10 ≥ 0.75, as §4
+  promises.
 - **Network.** A search reads the one catalog, which holds both networks (task 0155): without a
   `network` filter it ranks both, as `/discovery/resources` lists both.
 - **Cursor.** Opaque to the client; it carries the last result's score and listing key, and the
@@ -158,6 +186,37 @@ The measurements are in
   CPU off the `/settle` path, and lets search fall back to words when it is down.
 - **A listing joins search whole.** A listing ranked by words only, among listings ranked by both,
   would sit too low; holding it back until its vector exists keeps one scoring for all.
+- **Quality is a small correction, not a second ranking.** Adding CDP's payer counts to the fused
+  score on 0134's set moved nDCG@10 from 0.726 to 0.731 at a weight of about 40% of the top fused
+  score, then lowered it to 0.719 at 80% and to 0.632 at 200%. A 20% bound sits where it did no
+  harm. Relevance grades can't show what quality is for, a service that works, so the
+  measurement bounds the harm, not the gain. A bounded, saturating term is how search engines
+  add a document's own evidence to its text score (Elasticsearch's `rank_feature` saturation,
+  S / (S + pivot); Craswell et al., SIGIR 2005, for PageRank).
+- **Fake buyers buy little.** A seller can pay itself from fresh wallets, and the facilitator pays
+  each network fee. Excluding wallets the seller funded would drop real buyers too: 50 of 99 real
+  pubnet payers were funded within two hops by the payee or its funder, as facilitators fund
+  accounts for their users (task 0129, `notes/R-network-index-measurements.md`). The saturation
+  bounds the gain instead: 40 more wallets above 10 add 0.02 to q. A seller paying its own
+  `payTo` is cheap to tell apart, and it made 44% of the pubnet USDC payments shaped like x402
+  settlements in the 30 days to 2026-11-23.
+- **Volume is left out** because repeating payments from one wallet costs the seller nothing: the
+  money returns to it and the facilitator pays the fee.
+- **In M2 the payer term is almost always 1.** This facilitator settles testnet only (pubnet is
+  refused, `apps/facilitator/src/config.ts`), with 2 paying wallets in the 30 days to 2026-11-23;
+  the seeded pubnet listings have no payments through it. On pubnet, 34 `payTo` accounts had any
+  paying wallet besides themselves in those 30 days, across all facilitators.
+- **Tunnels and empty descriptions are rare.** On 2026-11-23, CDP's public catalog held 84
+  listings on the tunnel hosts above out of 39,579 and 53 with an empty description, none of them
+  on Stellar; the testnet catalog's one listing is on `trycloudflare.com`. `workers.dev` holds
+  57.5% of the Stellar listings there, so a penalty for shared hosting would lower most real
+  listings.
+- **A table, because reading payments per search does not scale.** Deriving each payment's
+  listing key from the stored settlements at search time took 36 ms at 155 payments in 30 days,
+  219 ms at 2,539 (pubnet's 30-day volume across all facilitators) and 2.2 s at 25,000; the table
+  answers in 0.9, 6.5 and 7.8 ms (local PostgreSQL, synthetic payments of 4.3 KB).
+- **Curation needs a proof, not a judgement.** A list kept by hand would have the operator vouch
+  for sellers; a `stellar.toml` proof is checkable.
 
 ## Alternatives considered
 
@@ -182,6 +241,29 @@ The measurements are in
   server shows the scan is too slow.
 - **Listing a new listing at once, ranked by words only, with `partialResults: true`** (§3's
   reading). Mixes two scorings and changes the spec's meaning of the field. Rejected.
+- **Quality as the first sort key.** A popular listing would beat a far better match. Rejected.
+- **Quality only as a tie-break.** Fused scores rarely tie exactly, so it would change nothing.
+  Rejected.
+- **Transaction volume as an input, as §4.3 lists.** Free to fake. Rejected.
+- **Leaving out wallets the seller funded.** Drops half the real buyers, and needs a chain history
+  Stellar RPC does not keep. Rejected for now.
+- **A separate recency term.** The 30-day window already is one. Rejected.
+- **A penalty for shared hosting**, as §4.3 says ("shared/tunneling infrastructure"). Lowers most
+  real listings. Rejected.
+- **A penalty for short descriptions.** Real short names such as "Search Reddit posts" would lose.
+  Rejected.
+- **Recomputing every 6 hours, as §4 plans.** Counting at search time is cheaper and always
+  current. Rejected.
+- **Counting from the settlements at search time, without a table.** No migration, but too slow
+  past about 1,000 payments in 30 days (above). Rejected.
+- **CDP's per-listing activity fields.** The catalog reads no other catalog (task 0155), and they
+  count CDP's traffic only. Rejected.
+- **Payments across all facilitators, from the chain.** Real pubnet data today, but per `payTo`,
+  not per listing, and the work of task 0129. Not in this grant.
+- **A cap on listings from one host on a page.** It depends on the page, so the cursor can't carry
+  it; the share of one host in the top 10 is measured once ranking runs. Not now.
+- **A curation-only mode until 0135 passes.** With no curated listing it would equal the fused
+  order. Rejected.
 
 ## Consequences
 
@@ -193,7 +275,7 @@ The measurements are in
 - A seller can repeat words in its listing to rise in the words ranking, since `ts_rank_cd` counts
   each occurrence. Parameters are capped above; name, tags and description only by ADR 0008's
   listing limit. Fusion takes ranks, not scores, which bounds the gain, but the effect of
-  repetition on the vector is not measured. Limits on it belong with the quality score (0154).
+  repetition on the vector is not measured. The quality score does not limit it.
 - A new listing is found by search once its vector is written, later than `/discovery/resources`
   lists it. While the model can't be used, search answers by words alone.
 - Paging reaches every match. On the 0134 set a query has a median of 158 matches, 76 among the
@@ -201,6 +283,11 @@ The measurements are in
 - Changing the model means embedding every listing again: about 5 minutes for 34,782 listings at
   granite's speed on an M4, while search answers by words alone. A model of another size also
   changes the column's type.
+- The cursor carries the score with q in it. A payment between two pages can move a listing, as a
+  new listing can.
+- Changing how a payment's listing key is derived leaves old rows under the old key; the rows can
+  be rebuilt from the settlements, which are kept.
+- A listing whose seller stops answering keeps its place; task 0069 decides what it gets.
 - Differences from the Panel Review response go to the M2 evidence (task 0132).
 
 ## References
