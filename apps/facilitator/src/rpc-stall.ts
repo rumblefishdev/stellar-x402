@@ -5,8 +5,6 @@ export const RPC_STALL_POLL_MS = 30_000;
 
 /** The shared client as the tracker reads it: `FallbackRpc` fits. */
 export interface StallRpc {
-  /** The active endpoint's name; a plain read. */
-  readonly active: string;
   getLatestLedger(): Promise<{ sequence: number }>;
 }
 
@@ -23,8 +21,9 @@ export interface RpcStallTracker {
  * `rpc_stalled_seconds` (0027 AD-5): the time since the ledger sequence last changed, read every
  * `RPC_STALL_POLL_MS` through the shared `FallbackRpc`, so it measures what settlement sees; a failed read
  * can move the active endpoint, which is accepted. The age is `now − lastChangeAt` at the read, so
- * a frozen endpoint, failing reads or a dead poller all show as a rising value. A different active
- * endpoint or a lower sequence (a lagging fallback, testnet's reset) starts a new baseline. Before
+ * a frozen endpoint, failing reads or a dead poller all show as a rising value. Any other sequence
+ * starts a new baseline, a lower one too (a lagging endpoint answering first, testnet's reset);
+ * the same sequence from another endpoint does not, since the ledger has not moved. Before
  * the first good read the age counts from `start()`. A tick that finds a read still under way is
  * skipped, so reads never stack. Pure at the read: `stalledSeconds()` makes no call.
  */
@@ -35,8 +34,8 @@ export function createRpcStallTracker(deps: {
 }): RpcStallTracker {
   const { rpc, now } = deps;
   const schedule = deps.schedule ?? unrefTimers;
-  /** The last good read's sequence and the endpoint that served it. */
-  let last: { sequence: number; endpoint: string } | undefined;
+  /** The last good read's sequence. */
+  let last: number | undefined;
   let lastChangeAt = now();
   let reading = false;
   let running = false;
@@ -51,12 +50,8 @@ export function createRpcStallTracker(deps: {
       return;
     }
     if (!running) return;
-    // Read after the call, which may have moved it: the endpoint that answered.
-    const endpoint = rpc.active;
-    if (last === undefined || endpoint !== last.endpoint || sequence !== last.sequence) {
-      lastChangeAt = now();
-    }
-    last = { sequence, endpoint };
+    if (sequence !== last) lastChangeAt = now();
+    last = sequence;
   }
 
   function tick() {

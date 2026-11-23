@@ -29,10 +29,9 @@ function fakeScheduler() {
   return { schedule, tick, ms, pending: () => timers.size };
 }
 
-/** The shared client as the tracker reads it: its active endpoint's name and the latest ledger. */
+/** The shared client as the tracker reads it: only the latest ledger. */
 function fakeRpc() {
   const rpc = {
-    active: "rpc-0",
     sequence: 100,
     fail: false,
     reads: 0,
@@ -96,7 +95,7 @@ describe("createRpcStallTracker", () => {
     tracker.stop();
   });
 
-  test("active endpoint change resets the baseline; a sequence drop resets it", async () => {
+  test("only a different sequence resets the age, higher or lower; the same one again does not", async () => {
     const { rpc, tracker, step } = setup();
     tracker.start();
     await settle();
@@ -104,14 +103,11 @@ describe("createRpcStallTracker", () => {
     await step();
     expect(tracker.stalledSeconds()).toBe(60);
 
-    // A failover to an endpoint at the same sequence: a new baseline, not a stall carried over.
-    rpc.active = "rpc-1";
+    // The same sequence again, even if another endpoint served it: the stall carries on.
     await step();
-    expect(tracker.stalledSeconds()).toBe(0);
-    await step();
-    expect(tracker.stalledSeconds()).toBe(30);
+    expect(tracker.stalledSeconds()).toBe(90);
 
-    // A lagging fallback, or testnet's reset: the sequence drops, and counts from there.
+    // A lagging endpoint, or testnet's reset: the sequence drops, and counts from there.
     rpc.sequence = 50;
     await step();
     expect(tracker.stalledSeconds()).toBe(0);

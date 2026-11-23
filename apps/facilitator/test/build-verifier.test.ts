@@ -20,14 +20,7 @@ import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/
 import { describe, expect, it, vi } from "vitest";
 import { parseConfig, type Config } from "../src/config.js";
 import { createEd25519Signer } from "@x402/stellar";
-import {
-  FAILBACK_MAX_LAG_LEDGERS,
-  PRIMARY_PROBE_INTERVAL_MS,
-  buildChecks,
-  buildRpc,
-  buildVerifier,
-  settleCheck,
-} from "../src/main.js";
+import { buildChecks, buildRpc, buildVerifier, settleCheck } from "../src/main.js";
 import { rpcEndpointName } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { feeSettings, type FeeSettings } from "../src/settlement/fees.js";
@@ -400,70 +393,6 @@ describe("buildVerifier (the /verify wiring in main)", () => {
     expect(schemes.map((s) => s.options.inclusionFeeStroops)).toEqual([500, 500, 600, 600]);
   });
 
-  it("returns to the first RPC URL after a probe every PRIMARY_PROBE_INTERVAL_MS", async () => {
-    vi.useFakeTimers();
-    try {
-      let firstDown = true;
-      const { verify, logger } = setup((url) => {
-        if (url === "https://rpc-a.example" && firstDown) throw new Error("connect ECONNREFUSED");
-        return { isValid: true, payer };
-      });
-      await verify(payload(), requirements);
-      firstDown = false;
-      vi.advanceTimersByTime(PRIMARY_PROBE_INTERVAL_MS - 1);
-      await verify(payload(), requirements);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(logger.info).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1);
-      await verify(payload(), requirements);
-      await vi.waitFor(() =>
-        expect(logger.info).toHaveBeenCalledExactlyOnceWith("rpc_failback", {
-          component: "rpc",
-          network: config.network,
-          from: rpc(1),
-          to: rpc(0),
-          lagLedgers: 0,
-        }),
-      );
-      const trace: VerifyTrace = {};
-      await verify(payload(), requirements, trace);
-      expect(trace).toEqual({ rpc: rpc(0) });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it(`stays off a first RPC URL more than ${FAILBACK_MAX_LAG_LEDGERS} ledgers behind`, async () => {
-    vi.useFakeTimers();
-    try {
-      const { verify, logger } = setup(
-        (url) => {
-          if (url === "https://rpc-a.example") throw new Error("connect ECONNREFUSED");
-          return { isValid: true, payer };
-        },
-        {
-          latestLedger: async (url) =>
-            url === "https://rpc-a.example" ? CURRENT - FAILBACK_MAX_LAG_LEDGERS - 1 : CURRENT,
-        },
-      );
-      await verify(payload(), requirements);
-      vi.advanceTimersByTime(PRIMARY_PROBE_INTERVAL_MS);
-      await verify(payload(), requirements);
-      await vi.waitFor(() =>
-        expect(logger.warn).toHaveBeenCalledWith("rpc_probe_failed", {
-          component: "rpc",
-          network: config.network,
-          rpc: rpc(0),
-          reason: "lagging",
-          lagLedgers: FAILBACK_MAX_LAG_LEDGERS + 1,
-        }),
-      );
-      expect(logger.info).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("gives each RPC URL its own deadline, so a slow second URL still answers", async () => {
     vi.useFakeTimers();
     try {
@@ -497,13 +426,15 @@ describe("buildVerifier (the /verify wiring in main)", () => {
       });
       await vi.advanceTimersByTimeAsync(2 * UPSTREAM_TIMEOUT_MS);
       await settled;
-      // [0]'s timeout moved the shared client to [1]; [1]'s keeps it there, since only the probe
-      // returns to [0].
+      // Each URL's timeout moves the shared client on to the next one: [0] → [1] → [0].
       expect(
         logger.warn.mock.calls
           .filter(([event]) => event === "rpc_failover")
           .map(([, fields]) => [fields.from, fields.to, fields.reason]),
-      ).toEqual([[rpc(0), rpc(1), "timeout"]]);
+      ).toEqual([
+        [rpc(0), rpc(1), "timeout"],
+        [rpc(1), rpc(0), "timeout"],
+      ]);
       expect(logger.warn).toHaveBeenCalledWith("rpc_exhausted", {
         component: "verify",
         network: config.network,

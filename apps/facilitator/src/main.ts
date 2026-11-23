@@ -59,12 +59,6 @@ import {
   type Verify,
 } from "./settlement/verify.js";
 
-/** How often the shared `FallbackRpc` probes `RPC_URLS[0]` while calls are off it (AD-3). */
-export const PRIMARY_PROBE_INTERVAL_MS = 60_000;
-
-/** How many ledgers `RPC_URLS[0]` may trail the active URL by when calls return to it (AD-3). */
-export const FAILBACK_MAX_LAG_LEDGERS = 2;
-
 /** The statement timeout of the public listings' pool, against the other pools' 10 s. */
 export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
 
@@ -72,10 +66,10 @@ export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
  * The one RPC client over `RPC_URLS` (AD-3): the pool, the AD-22 ledger read and the fee-stats bid
  * read go through it, and upstream verify shares its active URL ({@link buildUpstream}), so one
  * outage moves them all once. Each URL is named `RPC_URLS[i]#<fingerprint>` (ADR 0011); a call
- * gives up on a URL after `UPSTREAM_TIMEOUT_MS`, and calls return to `RPC_URLS[0]` after a probe
- * every `PRIMARY_PROBE_INTERVAL_MS` finds it within `FAILBACK_MAX_LAG_LEDGERS`. Logs, each with
- * `component: "rpc"` and the network: `rpc_failover` (warn) on a switch, with `by`, the method or
- * caller that saw the failure; `rpc_failback` (info) on the return; `rpc_probe_failed` (warn).
+ * gives up on a URL after `UPSTREAM_TIMEOUT_MS`, and a read the active URL is slow to answer
+ * moves calls to the URL that answers first (0049). Logs, with `component: "rpc"` and the
+ * network: `rpc_failover` (warn) on a switch, with `by`, the method or caller that saw the failure
+ * or was answered elsewhere first.
  * `makeRpc` and `timeoutMs` are test seams: the client of one URL, and how long a call may take on
  * it.
  */
@@ -91,19 +85,8 @@ export function buildRpc(
     config.rpcUrls.map((url, i) => ({ name: rpcEndpointName(url, i), rpc: makeRpc(url) })),
     {
       timeoutMs,
-      failback: { intervalMs: PRIMARY_PROBE_INTERVAL_MS, maxLagLedgers: FAILBACK_MAX_LAG_LEDGERS },
       onSwitch: (from, to, error, by) =>
         logger.warn("rpc_failover", { ...fields, by, from, to, reason: failureReason({ error }) }),
-      onFailback: (from, to, lagLedgers) =>
-        logger.info("rpc_failback", { ...fields, from, to, lagLedgers }),
-      onProbeFailed: (rpc, failure) =>
-        logger.warn("rpc_probe_failed", {
-          ...fields,
-          rpc,
-          ...("lagLedgers" in failure
-            ? { reason: "lagging", lagLedgers: failure.lagLedgers }
-            : { reason: failureReason(failure) }),
-        }),
     },
   );
 }
