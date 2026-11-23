@@ -801,3 +801,47 @@ version on: a local catalog written before it keeps its old entries until `docke
 | Setting              | Default | Meaning                                                                    |
 | -------------------- | ------- | -------------------------------------------------------------------------- |
 | `CATALOG_LIST_LOCAL` | `false` | `true` lists those URLs too, for a local run or the e2e gate; testnet only |
+
+### Seeding the catalog
+
+`pnpm seed <hosts file>` fills the catalog once with the sellers that exist, without waiting for a
+payment through us (task 0155). It reads every listing from the seller itself, never from another
+catalog:
+
+1. The hosts file has one host a line (`api.seller.example`, or a whole origin); blank lines and
+   `#` comments are skipped, and a host named twice is asked once. A line that isn't a host stops
+   the command before any request, naming the line. Keep the file outside the repository.
+2. For each host it reads `https://<host>/.well-known/x402` (at most 512 KiB) and keeps the
+   resource URLs on that host, with GET or POST. Other hosts' URLs, other methods and entries with
+   no readable URL are skipped, each named in the report with its reason.
+3. Each URL gets one unpaid request, by the file's method or GET. Its 402 names the listing's
+   method, example and Stellar accounts; each account then gets the check a payment would start,
+   on that same 402, so a seeded listing passes the same gates. Only when the 402 declares another
+   method, or an MCP tool, is the seller asked once more that way. It has no `ledger` and its
+   attempt rows no `payer`; a listing a settlement wrote keeps its `ledger`.
+4. Hosts run at once; within a host the seed waits 3 s after each request, 20 a minute, below the
+   30 checks a minute a host's checks after payments may use. A URL that fails never stops the
+   next, nor a host the others.
+
+The seed follows each host's `robots.txt` (RFC 9309) under the name `stellar-bazaar`: a URL it
+disallows is skipped and reported as `robots`; a 4xx means no rules; a 5xx or no answer means the
+host is not asked. Every request says `User-Agent: stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
+so a seller can block it by name. The report goes to stdout: a tab-separated line per URL and
+account (URL, method, network, `payTo`, outcome, reason, detail), a line per skipped entry
+(outcome `skipped`), a line per host, the totals, and each `payTo` seen on more than one host. As
+with `pnpm keys`, it runs the built `dist/seed.js` against the database `DATABASE_URL` names, after
+`pnpm migrate`.
+
+On the server it runs inside the running `facilitator` container, the only one that reaches both
+the sellers and the database (the `migrate` services have no internet). The hosts file, kept by the
+operator outside the repository, goes in on stdin and the report comes out on stdout:
+
+```sh
+sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator \
+  node dist/seed.js /dev/stdin < seed-hosts.txt > seed-report.tsv
+```
+
+The report is printed once, at the end, and a large host takes tens of minutes at the seed's pace.
+Run it in `tmux` on the server, so a dropped SSH session doesn't lose the report, and not during a
+deploy, which recreates the container and stops the seed. A testnet reset empties the catalog,
+seeded mainnet listings included (ADR 0012): run it again.

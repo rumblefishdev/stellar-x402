@@ -18,7 +18,7 @@ const SESSION_END_MS = 2_000;
  * §2.2.1 spells it, so a seller can tell our checks apart in its logs and block them by name.
  */
 export const SELLER_USER_AGENT =
-  "stellar-x402-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)";
+  "stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)";
 
 /** Why a seller gave no usable answer; `detail` is for logs and the attempt's row only. */
 export type SellerAnswer =

@@ -306,6 +306,16 @@ ALTER TABLE settlements ADD COLUMN expiration_ledger bigint;
 CREATE INDEX settlements_refused ON settlements (created_at) WHERE state = 'refused';
 `,
   },
+  {
+    // 0155: a seeded listing has no settlement behind it, so neither a ledger nor a payer. Each
+    // statement only changes the catalog, without a scan. The release before keeps working: it
+    // always writes both, and never reads either.
+    name: "0016_catalog_seed",
+    sql: `
+ALTER TABLE catalog ALTER COLUMN ledger DROP NOT NULL;
+ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

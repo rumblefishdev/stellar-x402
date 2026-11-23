@@ -18,7 +18,10 @@ export const DISCOVERY_LIMIT = { default: 20, max: 100 } as const;
 export const MAX_OFFSET = 1_000_000;
 /** A `G…` address is 56 characters and a CAIP-2 id a few dozen; anything longer is noise. */
 const MAX_VALUE_LENGTH = 256;
-/** Entries come only from our own settlements, and T1 settles `exact` alone (0015 adds `upto`). */
+/**
+ * T1 settles `exact` alone (0015 adds `upto`). Entries come from settlements and from the seed
+ * (0155), which keeps a seller's `upto` offers too: 2 of 2,659 known offers on 2026-11-19.
+ */
 const CATALOGED_SCHEMES: readonly string[] = ["exact"];
 /**
  * Every entry's extensions are `bazaar` alone: `@stellar-x402/bazaar`'s validator, the only way
