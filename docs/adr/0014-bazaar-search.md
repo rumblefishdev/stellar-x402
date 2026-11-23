@@ -134,8 +134,9 @@ The measurements are in
     description gets no penalty.
   - q is computed when the search runs, from the payments stored at that moment.
 - **How a payment reaches its listing.** A table holds one row per settled payment that names a
-  listing: the settlement's key, the network, `payTo`, method, listing URL, payer and the time the
-  row is written. The settlement's key makes the row unique, since a success can be reported twice, by settle and by
+  listing: the settlement's key, the network, `payTo`, method, listing URL, payer, the paid asset and
+  amount, and the time the row is written. The asset is kept because the payment's terms come from
+  its caller, not from the listing: a seller can pay itself in a token its listing never offers. The settlement's key makes the row unique, since a success can be reported twice, by settle and by
   reconcile. The cataloger writes the row right after it derives the listing's key from the
   payment, also when the listing's copy is unchanged. A settlement recorded twice keeps its first
   row. Rows are kept; the count reads the last 30
