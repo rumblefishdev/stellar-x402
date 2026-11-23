@@ -265,6 +265,18 @@ export function createCataloger({
       const key = echoed.key as CatalogKey;
       const tried = { ...attempt, key, contentHash: contentHash(echoed.resource) };
       known = { ...known, ...tried };
+      // The search's quality score counts this payer (ADR 0014), so the row is written whatever
+      // the copy holds. A failed write loses one payer from the score, and cataloging goes on.
+      try {
+        await store.recordPayment({
+          key,
+          payer: record.payer,
+          settlementKey: record.key,
+          at: now(),
+        });
+      } catch (error) {
+        report(() => logger.error("catalog_payment_write_failed", { ...fields, error }));
+      }
       // Upstream's default `mcp://tool/<name>` names the tool, not a server to ask (row 6).
       if (result.resourceUrl.startsWith("mcp:")) {
         const toolUrl = {

@@ -7,6 +7,7 @@ import type {
   CatalogEntry,
   CatalogKey,
   CatalogPage,
+  CatalogPayment,
   CatalogQuery,
   CatalogStore,
   UpsertOutcome,
@@ -101,6 +102,16 @@ export class PostgresCatalogStore implements CatalogStore {
     );
     const page = rows[0]!;
     return { items: page.items, total: Number(page.total) };
+  }
+
+  async recordPayment(payment: CatalogPayment): Promise<void> {
+    const { network, payTo, method, resourceUrl } = payment.key;
+    await this.pool.query(
+      `INSERT INTO catalog_payments (settlement_key, network, pay_to, method, resource_url, payer, at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (settlement_key) DO NOTHING`,
+      [payment.settlementKey, network, payTo, method, resourceUrl, payment.payer, payment.at],
+    );
   }
 }
 

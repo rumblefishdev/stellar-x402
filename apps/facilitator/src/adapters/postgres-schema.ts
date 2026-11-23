@@ -316,6 +316,22 @@ ALTER TABLE catalog ALTER COLUMN ledger DROP NOT NULL;
 ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
 `,
   },
+  {
+    // 0154: one row per settled payment for a listing, which the search's quality score counts
+    // (ADR 0014). A new, empty table: the release before never reads it.
+    name: "0017_catalog_payments",
+    sql: `
+CREATE TABLE catalog_payments (
+  settlement_key text PRIMARY KEY,
+  network text NOT NULL,
+  pay_to text NOT NULL,
+  method text NOT NULL,
+  resource_url text NOT NULL,
+  payer text NOT NULL,
+  at bigint NOT NULL
+);
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

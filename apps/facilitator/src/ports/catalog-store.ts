@@ -47,6 +47,16 @@ export interface CatalogPage {
   total: number;
 }
 
+/** A settled payment for a listing, counted by the search's quality score (ADR 0014, 0154). */
+export interface CatalogPayment {
+  key: CatalogKey;
+  payer: string;
+  /** The settlement's key, so a success reported twice, by settle and by reconcile, is one row. */
+  settlementKey: string;
+  /** App clock, ms, when the row is written. */
+  at: number;
+}
+
 /** `stale`: the stored entry came from a check that started later; nothing was written. */
 export type UpsertOutcome = "inserted" | "updated" | "stale";
 
@@ -66,6 +76,8 @@ export interface CatalogStore {
    * place, so offset paging doesn't shift each time a resource settles again.
    */
   list(query: CatalogQuery): Promise<CatalogPage>;
+  /** Idempotent by `settlementKey`. Rows are kept; the score reads the last 30 days. */
+  recordPayment(payment: CatalogPayment): Promise<void>;
 }
 
 /** Where a listing attempt ended: the payment's copy, or the check of the seller's 402. */

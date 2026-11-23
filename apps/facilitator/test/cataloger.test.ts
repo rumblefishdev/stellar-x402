@@ -783,3 +783,139 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     await vi.waitFor(() => expect(mcp.openStreams()).toBe(0), { timeout: 1_000 });
   });
 });
+
+describe("cataloger, the payments of a listing (0154)", () => {
+  /** The stored payments, in settlement-key order. */
+  const payments = async () =>
+    (
+      await db.pool.query<Record<string, unknown>>(
+        `SELECT settlement_key, network, pay_to, method, resource_url, payer, at
+         FROM catalog_payments ORDER BY settlement_key`,
+      )
+    ).rows;
+  /** The `n`th settlement of `GPAYER`'s, each with a key of its own. */
+  const settled = (n: number, bazaar: unknown = valid, resource: object = {}) =>
+    record(bazaar, { key: `stellar:testnet:GPAYER:${n}`, nonce: String(n) }, resource);
+  const row = (n: number, at: number) => ({
+    settlement_key: `stellar:testnet:GPAYER:${n}`,
+    network: "stellar:testnet",
+    pay_to: "GPAYTO",
+    method: "GET",
+    resource_url: `${seller.url}/users/:`,
+    payer: "GPAYER",
+    at: String(at),
+  });
+
+  it("stores the payment with its listing key, payer, settlement key and the app clock at the write (behaviour 1)", async () => {
+    const { cataloger, clock } = setup();
+    clock.now = START + 1_234;
+    // The seller answers a minute later: the payment row was written before it was asked.
+    seller.reply = async (request) => {
+      clock.now = START + MINUTE;
+      return { status: 402, body: seller.paymentRequired(`${seller.url}${request.url}`) };
+    };
+    await cataloger.onSuccess(settled(1), "settle");
+    expect(await payments()).toEqual([row(1, START + 1_234)]);
+  });
+
+  it("keeps one row and logs no failure when settle and reconcile report one settlement (behaviour 2)", async () => {
+    const { cataloger, logger, clock } = setup();
+    await cataloger.onSuccess(settled(1), "settle");
+    clock.now += MINUTE;
+    await cataloger.onSuccess(settled(1), "resolved");
+    await Promise.all([
+      cataloger.onSuccess(settled(1), "settle"),
+      cataloger.onSuccess(settled(1), "resolved"),
+    ]);
+    const rows = await payments();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.settlement_key).toBe("stellar:testnet:GPAYER:1");
+    expect(logger.error).not.toHaveBeenCalledWith(
+      "catalog_payment_write_failed",
+      expect.anything(),
+    );
+  });
+
+  it("stores the payment when the copy is unchanged against the stored listing (behaviour 3)", async () => {
+    const { cataloger, counted } = setup();
+    await cataloger.onSuccess(settled(1), "settle");
+    await cataloger.onSuccess(settled(2), "settle");
+    expect(counted("payment", "unchanged")).toBe(1);
+    expect(await payments()).toEqual([row(1, START), row(2, START)]);
+  });
+
+  it("stores the payment when the seller check is over budget (behaviour 3)", async () => {
+    const { cataloger, counted } = setup();
+    await cataloger.onSuccess(settled(1), "settle");
+    await cataloger.onSuccess(settled(2, valid, { description: "Changed" }), "settle");
+    expect(counted("payment", "over_budget", "key")).toBe(1);
+    expect(seller.requests).toHaveLength(1);
+    expect(await payments()).toEqual([row(1, START), row(2, START)]);
+  });
+
+  it("stores the payment of an MCP tool listing whose URL names the tool, though the seller isn't asked (behaviour 3)", async () => {
+    const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };
+    const { cataloger, counted } = setup();
+    await cataloger.onSuccess(settled(1, tool, { url: "mcp://tool/weather" }), "settle");
+    expect(counted("seller", "not_askable", "mcp_tool_url")).toBe(1);
+    // The same key the attempt row carries.
+    const {
+      rows: [attempt],
+    } = await db.pool.query<{ method: string; resource_url: string }>(
+      `SELECT method, resource_url FROM catalog_attempts`,
+    );
+    expect(attempt).toEqual({ method: "weather", resource_url: expect.stringMatching(/^mcp:/) });
+    expect(await payments()).toEqual([
+      { ...row(1, START), method: "weather", resource_url: attempt?.resource_url },
+    ]);
+  });
+
+  it("writes no row for a payment whose copy fails validation (behaviour 4)", async () => {
+    const { cataloger, counted } = setup();
+    await cataloger.onSuccess(settled(1, { info: {} }), "settle");
+    expect(counted("payment", "rejected", "invalid_info")).toBe(1);
+    expect(await payments()).toEqual([]);
+  });
+
+  it("stores a payment whose payTo is its payer (behaviour 4)", async () => {
+    const { cataloger } = setup();
+    await cataloger.onSuccess(
+      record(valid, { key: "stellar:testnet:GPAYTO:1", payer: "GPAYTO" }),
+      "settle",
+    );
+    expect(await payments()).toEqual([
+      { ...row(1, START), settlement_key: "stellar:testnet:GPAYTO:1", payer: "GPAYTO" },
+    ]);
+  });
+
+  it("logs catalog_payment_write_failed with the error, counts nothing for it, and catalogs on (behaviour 6)", async () => {
+    // The same payment with a working store, to compare against.
+    const working = setup();
+    const workingIncrements = vi.spyOn(working.metrics, "increment");
+    await working.cataloger.onSuccess(settled(1), "settle");
+    const listed = await working.list();
+    const attempted = await working.attempts();
+    const requests = seller.requests.length;
+    await db.empty();
+
+    const failing = setup();
+    vi.spyOn(failing.store, "recordPayment").mockRejectedValue(new Error("down"));
+    const failingIncrements = vi.spyOn(failing.metrics, "increment");
+    await expect(failing.cataloger.onSuccess(settled(1), "settle")).resolves.toBeUndefined();
+    expect(failing.logger.error).toHaveBeenCalledWith(
+      "catalog_payment_write_failed",
+      expect.objectContaining({ error: expect.any(Error) }),
+    );
+    expect(failingIncrements.mock.calls).toEqual(workingIncrements.mock.calls);
+    for (const name of [
+      "catalog_upsert_failures_total",
+      "catalog_attempt_write_failures_total",
+    ] as const)
+      expect(failing.metrics.value(name, { origin: "settle" })).toBe(0);
+    // The attempt row and the seller check happen as before.
+    expect(seller.requests).toHaveLength(2 * requests);
+    expect(await failing.attempts()).toEqual(attempted);
+    expect(await failing.list()).toEqual(listed);
+    expect(await payments()).toEqual([]);
+  });
+});

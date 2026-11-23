@@ -1938,6 +1938,37 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
         total: 0,
       });
     });
+
+    // 0154: a settled payment that names a listing.
+    const payment = (settlementKey: string, at = 1) => ({
+      key: key("https://seller.example.com/data"),
+      payer: PAYER,
+      settlementKey,
+      at,
+    });
+
+    it("records a settled payment of a listing (0154 behaviour 1)", async () => {
+      await expect(
+        store.recordPayment(payment("stellar:testnet:GPAYER:1")),
+      ).resolves.toBeUndefined();
+      await expect(
+        store.recordPayment(payment("stellar:testnet:GPAYER:2")),
+      ).resolves.toBeUndefined();
+    });
+
+    it("records one settlement twice, in turn or at once, without throwing (0154 behaviour 2)", async () => {
+      await store.recordPayment(payment("stellar:testnet:GPAYER:1", 1));
+      await expect(
+        store.recordPayment(payment("stellar:testnet:GPAYER:1", 2)),
+      ).resolves.toBeUndefined();
+      await expect(
+        Promise.all(
+          Array.from({ length: 10 }, () =>
+            store.recordPayment(payment("stellar:testnet:GPAYER:2")),
+          ),
+        ),
+      ).resolves.toHaveLength(10);
+    });
   });
 }
 

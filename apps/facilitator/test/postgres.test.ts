@@ -1106,6 +1106,7 @@ describe("PostgreSQL stores", () => {
           "0014_api_key_copies",
           "0015_settlement_refused",
           "0016_catalog_seed",
+          "0017_catalog_payments",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1141,6 +1142,7 @@ describe("PostgreSQL stores", () => {
         "0014_api_key_copies",
         "0015_settlement_refused",
         "0016_catalog_seed",
+        "0017_catalog_payments",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
@@ -1337,5 +1339,90 @@ describe("PostgreSQL stores", () => {
     await catalog.upsert(catalogEntry());
     const { rows } = await pool.query("SELECT key_version FROM catalog");
     expect(rows).toEqual([{ key_version: CATALOG_KEY_VERSION }]);
+  });
+
+  describe("the payments of a listing (0154)", () => {
+    const key = (resourceUrl = "https://seller.example.com/data") => ({
+      network: "stellar:testnet" as const,
+      payTo: "GPAYTO",
+      method: "GET",
+      resourceUrl,
+    });
+    const payment = (settlementKey: string, at = 1, resourceUrl?: string) => ({
+      key: key(resourceUrl),
+      payer: "GPAYER",
+      settlementKey,
+      at,
+    });
+    const rows = async () =>
+      (
+        await pool.query(
+          `SELECT settlement_key, network, pay_to, method, resource_url, payer, at
+           FROM catalog_payments ORDER BY settlement_key`,
+        )
+      ).rows;
+
+    it("stores each settled payment as one row with its listing key, payer, settlement key and time (behaviour 1)", async () => {
+      const { catalog } = await stores();
+      await catalog.recordPayment(payment("stellar:testnet:GPAYER:1", 1_000));
+      await catalog.recordPayment(payment("stellar:testnet:GPAYER:2", 2_000));
+      await catalog.recordPayment(
+        payment("stellar:testnet:GPAYER:3", 3_000, "https://seller.example.com/other"),
+      );
+      const row = (n: number, at: number, resourceUrl = "https://seller.example.com/data") => ({
+        settlement_key: `stellar:testnet:GPAYER:${n}`,
+        network: "stellar:testnet",
+        pay_to: "GPAYTO",
+        method: "GET",
+        resource_url: resourceUrl,
+        payer: "GPAYER",
+        at: String(at),
+      });
+      expect(await rows()).toEqual([
+        row(1, 1_000),
+        row(2, 2_000),
+        row(3, 3_000, "https://seller.example.com/other"),
+      ]);
+    });
+
+    it("keeps one row for a settlement recorded twice, by settle and by reconcile, in turn or at once (behaviour 2)", async () => {
+      const { catalog } = await stores();
+      await catalog.recordPayment(payment("stellar:testnet:GPAYER:1", 1_000));
+      await expect(
+        catalog.recordPayment(payment("stellar:testnet:GPAYER:1", 2_000)),
+      ).resolves.toBeUndefined();
+      await Promise.all(
+        Array.from({ length: 10 }, () =>
+          catalog.recordPayment(payment("stellar:testnet:GPAYER:2", 3_000)),
+        ),
+      );
+      expect((await rows()).map((row) => row.settlement_key)).toEqual([
+        "stellar:testnet:GPAYER:1",
+        "stellar:testnet:GPAYER:2",
+      ]);
+    });
+
+    it("stores a payment whose payTo is its payer (behaviour 4)", async () => {
+      const { catalog } = await stores();
+      await catalog.recordPayment({ ...payment("stellar:testnet:GPAYTO:1"), payer: "GPAYTO" });
+      expect(await rows()).toMatchObject([{ pay_to: "GPAYTO", payer: "GPAYTO" }]);
+    });
+
+    it("never deletes a payment when catalog attempts are pruned (behaviour 5)", async () => {
+      const { catalog, catalogAttempts } = await stores();
+      await catalog.recordPayment(payment("stellar:testnet:GPAYER:1", 1));
+      await catalogAttempts.record({
+        at: 1,
+        network: "stellar:testnet",
+        payTo: "GPAYTO",
+        payer: "GPAYER",
+        transaction: "tx1",
+        key: key(),
+        stage: "payment",
+        outcome: "unchanged",
+      });
+      expect(await catalogAttempts.prune(Number.MAX_SAFE_INTEGER, 1_000)).toBe(1);
+      expect(await rows()).toHaveLength(1);
+    });
   });
 });

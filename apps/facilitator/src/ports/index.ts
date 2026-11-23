@@ -13,6 +13,7 @@ export type {
   CatalogEntry,
   CatalogKey,
   CatalogPage,
+  CatalogPayment,
   CatalogQuery,
   CatalogStore,
   UpsertOutcome,

@@ -95,6 +95,35 @@ describe("pruner", () => {
     expect(rows).toEqual([{ at: String(NOW - 30 * DAY) }]);
   });
 
+  it("never deletes the payments of a listing while it prunes listing attempts (0154 behaviour 5)", async () => {
+    const { catalog, catalogAttempts } = db.stores();
+    const key = {
+      network: "stellar:testnet" as const,
+      payTo: "GPAYTO",
+      method: "GET",
+      resourceUrl: "https://seller.example.com/data",
+    };
+    await catalog.recordPayment({
+      key,
+      payer: "GPAYER",
+      settlementKey: "stellar:testnet:GPAYER:1",
+      at: NOW - 365 * DAY,
+    });
+    await catalogAttempts.record({
+      at: NOW - 365 * DAY,
+      network: "stellar:testnet",
+      payTo: "GPAYTO",
+      payer: "GPAYER",
+      key,
+      stage: "payment",
+      outcome: "unchanged",
+    });
+    await createPruner(deps({ catalogAttempts })).runOnce();
+    expect((await db.pool.query("SELECT at FROM catalog_attempts")).rows).toEqual([]);
+    const { rows } = await db.pool.query("SELECT settlement_key FROM catalog_payments");
+    expect(rows).toEqual([{ settlement_key: "stellar:testnet:GPAYER:1" }]);
+  });
+
   const refusedAt = (nonce: string, createdAt: number) => ({
     key: `stellar:testnet:GPAYER:${nonce}` as const,
     network: "stellar:testnet" as const,
