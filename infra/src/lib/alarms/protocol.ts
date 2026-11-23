@@ -4,11 +4,11 @@
 // ledgers; no alarm saw it. `Maximum`, so a forged lower point from the server can't hide a real
 // higher one (G-alarm-list, "Statistics").
 import type { EnvironmentConfig } from "../config.js";
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
 const NO_DATA = "Keeps its state; watch-errors and watch-no-invocations cover the check.";
 
-export function addProtocolAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
+export function addProtocolAlarms(f: Alarms, c: EnvironmentConfig): void {
   for (const [key, watched] of Object.entries(c.watch.protocol)) {
     const network = key as keyof typeof c.watch.protocol;
     const { expected, supported } = watched!;

@@ -30,6 +30,20 @@ history:
       Step 4: the log-only fields of 21 metrics become labels through the catalog's
       `fieldValues`, the rest stay in app lines, and Adam's three points from #200 are recorded
       ([S-log-only-fields](notes/S-log-only-fields.md)).
+  - date: "2026-11-19"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Step 6, the rules: `make rules` in `infra/` writes `deploy/metrics/rules/x402-production.yml`
+      from the alarm rows, `network` a label and the Event rows one rule, with the server rules
+      for liveness, stamps, textfiles and the agent. Alertmanager's routes and the heartbeat come
+      next.
+  - date: "2026-11-20"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Severity and repeat intervals decided for Alertmanager's routes (Design Decisions 1 and 2),
+      after Karol's review of #211. His points for the switch are under "For the switch".
 ---
 
 # Carry out the monitoring decision for the facilitator, with every alarm fired again
@@ -71,3 +85,28 @@ losing an alarm that protects money or a payment.
 - [ ] Given the monitoring VM or its Alertmanager stops, then a CloudWatch alarm fires from
       outside it, shown once
 - [ ] `docs/monitoring.md` and the runbook describe the new setup, and ADR 0011 matches it
+
+## Design Decisions
+
+1. **`severity` on every rule (2026-11-20).** `critical` for what would page on mainnet,
+   `warning` for Slack only, `none` for the Watchdog (kube-prometheus' values, Karol's point 7 on
+   #211). `critical`: `pending`, the three `breaker-opened-*`, `budget-nearing` (ADR 0011's money
+   alerts), `sweeps-stopped`, `landed-after-expired`, `commit-unmatched` (0138's D1 default),
+   `facilitator-silent`, `gauge-stale` (D2's default). It is a field of the alarm row, next to
+   its threshold, default `warning`, which CloudWatch ignores; on the Event rule each branch sets
+   it, as `check`. The phone route (D11) then matches `severity="critical"`, not a list of checks.
+2. **Repeat intervals (2026-11-20).** `warning` 24 h, `critical` 1 h; the Watchdog's route keeps
+   1 min (ADR 0011). CloudWatch never repeats, so a day is the nearest to what the team has, and a
+   standing alert still comes back once a day. An Event alert resolves after its 15-minute window
+   with no resolved message, so it never repeats. All routes: `group_wait` 30 s,
+   `group_interval` 5 min, `group_by` `[alertname, check, network, project]`.
+
+## For the switch
+
+From Karol's review of #211:
+- The split of what moves and what stays lives only in `rules.ts` (`STAYS`, `REPLACED`); the
+  switch must turn off exactly the CloudWatch alarms that moved.
+- No rule reads `prometheus_remote_storage_*`, which `deploy/metrics/prometheus.yml` names "for
+  the VM's rules".
+- `docs/monitoring.md`'s `facilitator-silent` and `gauges-silent` sections describe the CloudWatch
+  alarms, while the Prometheus rules of those names point at them.

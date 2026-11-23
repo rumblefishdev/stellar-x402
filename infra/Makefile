@@ -17,7 +17,7 @@ CDK := pnpm exec cdk --app "$(PRODUCTION_APP)"
 	diff-production-alarms deploy-production-alarms \
 	diff-production-watch deploy-production-watch \
 	diff-production-heartbeat deploy-production-heartbeat \
-	fire-test check-series check-emf-disabled telemetry-arns
+	fire-test check-series check-emf-disabled telemetry-arns rules
 
 # The catalog and the config package first: turbo builds what infra imports.
 build:
@@ -103,6 +103,11 @@ fire-test:
 	aws cloudwatch describe-alarm-history --region $(REGION) --alarm-name "$(ALARM)" \
 		--history-item-type Action --max-records 3 \
 		--query 'AlarmHistoryItems[].[Timestamp,HistorySummary]' --output table
+
+# The monitoring VM's rule file, from the same rows as the alarms (lore 0139 step 6). A test fails
+# while the committed file differs from what this writes.
+rules: build
+	node dist/bin/rules.js > ../deploy/metrics/rules/x402-production.yml
 
 # Before a group goes on: every series it reads that is written all the time has data
 # (decision 26). GROUP is one of the alarmGroups in envs/production.json.
