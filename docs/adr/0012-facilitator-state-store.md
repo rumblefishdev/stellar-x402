@@ -8,7 +8,8 @@
   (task 0032: a pool for listings; task 0064: no memory store, tests run on PostgreSQL) and
   2026-10-27 (task 0067: online migrations) and 2026-10-29 (task 0077: one facilitator for both
   networks, still with a database per network) and 2026-11-16 (task 0105: a pool for the API key
-  registry's reads) and 2026-11-18 (task 0106: the portal's sealed key copies and its role)
+  registry's reads) and 2026-11-18 (task 0106: the portal's sealed key copies and its role) and
+  2026-11-20 (task 0155: one catalog for both networks)
 
 ## Context
 
@@ -49,7 +50,9 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     and `catalog_attempts` carry the network, but `settlement_hashes` (AD-16's lookup by any of a
     settlement's hashes), `leases`, `rate_limits` and the three spend tables don't, so a shared
     database would need it in their keys and queries. A testnet reset wipes only testnet's
-    database, and backups, restores and migrations stay per network.
+    database, and backups, restores and migrations stay per network. The catalog is the exception
+    while it lives in testnet's database and holds both networks (task 0155): a reset takes the
+    seeded mainnet listings with it, and `pnpm seed` lists them again.
     - The API key registry (`api_keys`, task 0105) carries no network either: a key is for the
       callers of the network whose database holds it. Only pubnet requires one, so only pubnet's
       registry is read; testnet's holds only the keys the portal issues for testing until pubnet
@@ -62,9 +65,11 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
       facilitator connects as the database's owner and never reads the copies, so they are
       closed to it by the encryption, not by grants.
     - Each network's spend budgets count only its own fees, paid from its own fee account.
-    - Still open, decided with the code in 0126: which database holds the catalog, since
-      `/discovery/resources` without a `network` filter lists both networks with an exact
-      `total` and an `offset` up to 1 000 000, and the IP rate limiter's counters. Since 0105
+    - The catalog is one table for both networks, each listing with its network, whatever
+      network the process settles on (task 0155): `/discovery/resources` without a `network`
+      filter lists both, and `network` narrows it. Still open, decided with the code in 0126:
+      which database holds that table once one process serves both networks, and the IP rate
+      limiter's counters. Since 0105
       `/verify` and `/settle` count a request after its body named the network, so their counters
       can sit in that network's database; `/discovery/*` and a body that names no network still
       count before any network is known.

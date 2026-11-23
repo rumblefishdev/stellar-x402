@@ -89,8 +89,9 @@ describe("list_resources", () => {
     });
   });
 
+  // Without a network the agent names, the network this server pays on (0155): testnet.
   it.each([
-    [{}, 5],
+    [{}, 4],
     [{ type: "mcp" }, 2],
     [{ type: "http", network: "stellar:pubnet" }, 1],
     [{ payTo: "GSELLERB" }, 2],
@@ -98,7 +99,7 @@ describe("list_resources", () => {
     [{ extensions: "bazaar" }, 4],
     [{ extensions: "constructor" }, 0],
     [{ type: "mcp", network: "stellar:pubnet" }, 0],
-    [{ scheme: "exact" }, 5],
+    [{ scheme: "exact" }, 4],
     [{ scheme: "upto" }, 0],
     [{ limit: 1, offset: 1 }, 1],
   ])(
@@ -106,8 +107,9 @@ describe("list_resources", () => {
     async (args, count) => {
       const { structuredContent } = await call("list_resources", args);
       expect(structuredContent.items).toHaveLength(count);
+      const sent = { network: "stellar:testnet", ...args };
       expect(Object.fromEntries(catalog.queries[0]!)).toEqual(
-        Object.fromEntries(Object.entries(args).map(([k, v]) => [k, String(v)])),
+        Object.fromEntries(Object.entries(sent).map(([k, v]) => [k, String(v)])),
       );
     },
   );

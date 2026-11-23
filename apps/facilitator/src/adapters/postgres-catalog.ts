@@ -42,7 +42,7 @@ export class PostgresCatalogStore implements CatalogStore {
    * the row it then finds, so of concurrent writes the latest `checkedAt` stays.
    */
   async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
-    assertCount(entry.ledger, "ledger");
+    if (entry.ledger !== null) assertCount(entry.ledger, "ledger");
     assertCount(entry.checkedAt, "checkedAt");
     // The one function that writes the catalog: no offer outside the upstream schema is stored.
     for (const offer of entry.resource.accepts) PaymentRequirementsV2Schema.parse(offer);
@@ -65,9 +65,10 @@ export class PostgresCatalogStore implements CatalogStore {
       values,
     );
     if (inserted.rowCount === 1) return "inserted";
-    // `seq` is untouched, so the entry keeps its place in the listing.
+    // `seq` is untouched, so the entry keeps its place in the listing. A seed's check (no ledger)
+    // keeps the ledger a settlement wrote (0155).
     const updated = await this.pool.query(
-      `UPDATE catalog SET key_version = $5, ledger = $6, checked_at = $7, resource = $8, type = $9,
+      `UPDATE catalog SET key_version = $5, ledger = coalesce($6, ledger), checked_at = $7, resource = $8, type = $9,
          extension_keys = $10
        WHERE ${CATALOG_KEY_WHERE} AND coalesce(checked_at, 0) <= $7`,
       values,
@@ -125,7 +126,7 @@ export class PostgresCatalogAttemptStore implements CatalogAttemptStore {
         attempt.key?.method ?? null,
         attempt.key?.resourceUrl ?? null,
         attempt.url ?? null,
-        attempt.payer,
+        attempt.payer ?? null,
         attempt.transaction ?? null,
         attempt.stage,
         attempt.outcome,
