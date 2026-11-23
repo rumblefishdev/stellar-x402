@@ -60,10 +60,11 @@ last days of the milestone go to checking it, not to writing it.
 | D1 | §3: `partialResults` true while the ranking pass hasn't finished | the spec's meaning, "additional matches were truncated"; a listing joins search only once its vector is stored | ADR 0014 |
 | D1 | §4.3: transaction volume is a quality input | only distinct paying wallets count | ADR 0014: repeating payments from one wallet costs the seller nothing |
 | D1 | §4.3: recency of activity is a quality input | the 30-day window of paying wallets is the recency | ADR 0014 |
-| D1 | §4.3: a hosting penalty for shared or tunnelling hosts | tunnel hosts only; shared hosting such as `workers.dev` gets none | ADR 0014: 57.5% of Stellar listings in CDP's catalog are on `workers.dev` |
+| D1 | §4.3: a hosting penalty for shared or tunnelling hosts | tunnel hosts only; shared hosting such as `workers.dev` gets none | ADR 0014: 580 of 1,292 Stellar listings in CDP's catalog (44.9%) are on `workers.dev` |
 | D1 | §4: the quality score recomputed on a 6-hour cycle | computed at each search, from a table of payments per listing | ADR 0014 |
 | D1 | §4: "curated ordering is used instead" until nDCG@10 ≥ 0.75 | no curation-only mode; search is not offered on pubnet until the run passes | ADR 0014: with no curated listing, a curated order equals the fused one |
-| D1 | §4.3: a curation boost for verified, health-checked listings | curated = the seller proved its `payTo` with `stellar.toml` (0070); health stays with 0069 | ADR 0014 |
+| D1 | §4.3: a curation boost for verified, health-checked listings; §4: a bump for manually vetted listings | curated = the seller proved its `payTo` with `stellar.toml` (0070), checked by the facilitator, not vetted by hand; health stays with 0069; until 0070 lands no listing is curated | ADR 0014 |
+| D1 | §4.3: metadata completeness, penalizing placeholder descriptions | only an empty description is penalized; placeholder text and other missing metadata are not | ADR 0014: no Stellar listing in CDP's catalog had an empty or placeholder description on 2026-11-23 |
 | D1 | §4.3: buyer reach as a ranking input | added by 0154, but in M2 the factor is 1 for almost every listing: pubnet is refused and testnet had 2 paying wallets in 30 days | ADR 0014 |
 
 ## Implementation Plan

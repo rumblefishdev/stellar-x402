@@ -115,7 +115,8 @@ The measurements are in
   the fused ranking and in words alone:
   - q = (1 + 0.2 × p / (p + 2)) × 0.9 on a tunnel host × 0.9 with an empty description, where p is
     the number of distinct wallets that paid for the listing through this facilitator in the last
-    30 days. q is at most 1.2, so quality only reorders listings that match about equally.
+    30 days. q is at most 1.2, so it moves a listing only a few places: with 10 paying wallets
+    the 4th match by meaning passes the 1st.
   - A listing with no payments, on its own host and with a description, gets q = 1: it is neither
     hidden nor raised, as §4.3 asks for new listings.
   - p's bonus grows quickly at first and then flattens: 1 wallet gives q = 1.07, 10 give 1.17,
@@ -124,16 +125,17 @@ The measurements are in
   - Only distinct wallets count, not the number of payments.
   - The 30-day window is the recency: a listing last paid 31 days ago has p = 0.
   - Each network counts its own payments, testnet the same way as pubnet.
-  - A tunnel host is one whose name ends in `trycloudflare.com`, `ts.net`, `serveo.net`,
-    `serveousercontent.com`, `ngrok.io`, `ngrok.app`, `ngrok-free.app`, `ngrok-free.dev`,
-    `loca.lt`, `lhr.life`, `lhr.rocks`, `pinggy.link` or `pinggy-free.link`. Shared hosting such
-    as `workers.dev` or `vercel.app` gets no penalty.
+  - A tunnel host is one of `trycloudflare.com`, `ts.net`, `serveo.net`, `serveousercontent.com`,
+    `ngrok.io`, `ngrok.app`, `ngrok-free.app`, `ngrok-free.dev`, `loca.lt`, `lhr.life`,
+    `lhr.rocks`, `pinggy.link` and `pinggy-free.link`, or a name ending in a dot and one of them:
+    `x.ts.net` is a tunnel host, `getbits.net` is not. Shared hosting such as `workers.dev` or
+    `vercel.app` gets no penalty.
   - An empty description is a missing one, an empty one or one of spaces only. A short
     description gets no penalty.
   - q is computed when the search runs, from the payments stored at that moment.
 - **How a payment reaches its listing.** A table holds one row per settled payment that names a
-  listing: the network, `payTo`, method, listing URL, payer and the time the row is written. The
-  settlement's key makes the row unique, since a success can be reported twice, by settle and by
+  listing: the settlement's key, the network, `payTo`, method, listing URL, payer and the time the
+  row is written. The settlement's key makes the row unique, since a success can be reported twice, by settle and by
   reconcile. The cataloger writes the row right after it derives the listing's key from the
   payment, also when the listing's copy is unchanged. Rows are kept; the count reads the last 30
   days. The table starts empty when it ships. A failed write is logged.
@@ -187,17 +189,18 @@ The measurements are in
 - **A listing joins search whole.** A listing ranked by words only, among listings ranked by both,
   would sit too low; holding it back until its vector exists keeps one scoring for all.
 - **Quality is a small correction, not a second ranking.** Adding CDP's payer counts to the fused
-  score on 0134's set moved nDCG@10 from 0.726 to 0.731 at a weight of about 40% of the top fused
-  score, then lowered it to 0.719 at 80% and to 0.632 at 200%. A 20% bound sits where it did no
-  harm. Relevance grades can't show what quality is for, a service that works, so the
+  score on 0134's set raised nDCG@10 from 0.726 to 0.733 at a weight of about 20% of the top fused
+  score and kept it at 0.731 at 40%, then lowered it to 0.719 at 80% and to 0.632 at 200%. A 20%
+  bound sits where it did no harm. Relevance grades can't show what quality is for, a service that works, so the
   measurement bounds the harm, not the gain. A bounded, saturating term is how search engines
   add a document's own evidence to its text score (Elasticsearch's `rank_feature` saturation,
   S / (S + pivot); Craswell et al., SIGIR 2005, for PageRank).
-- **Fake buyers buy little.** A seller can pay itself from fresh wallets, and the facilitator pays
-  each network fee. Excluding wallets the seller funded would drop real buyers too: 50 of 99 real
+- **Fake payers buy little.** A seller can pay itself from fresh wallets, and the facilitator pays
+  each network fee. Excluding wallets the seller funded would drop real payers too: 50 of 99 real
   pubnet payers were funded within two hops by the payee or its funder, as facilitators fund
   accounts for their users (task 0129, `notes/R-network-index-measurements.md`). The saturation
-  bounds the gain instead: 40 more wallets above 10 add 0.02 to q. A seller paying its own
+  bounds the gain instead: the first 10 fake wallets buy most of the bonus (q 1.17), and 40 more
+  add 0.026. A seller paying its own
   `payTo` is cheap to tell apart, and it made 44% of the pubnet USDC payments shaped like x402
   settlements in the 30 days to 2026-11-23.
 - **Volume is left out** because repeating payments from one wallet costs the seller nothing: the
@@ -208,13 +211,17 @@ The measurements are in
   paying wallet besides themselves in those 30 days, across all facilitators.
 - **Tunnels and empty descriptions are rare.** On 2026-11-23, CDP's public catalog held 84
   listings on the tunnel hosts above out of 39,579 and 53 with an empty description, none of them
-  on Stellar; the testnet catalog's one listing is on `trycloudflare.com`. `workers.dev` holds
-  57.5% of the Stellar listings there, so a penalty for shared hosting would lower most real
-  listings.
+  on Stellar; the testnet catalog's one listing is on `trycloudflare.com`. `workers.dev` holds 580
+  of the 1,292 Stellar listings there (44.9%), so a penalty for shared hosting would lower many
+  real listings.
 - **A table, because reading payments per search does not scale.** Deriving each payment's
   listing key from the stored settlements at search time took 36 ms at 155 payments in 30 days,
   219 ms at 2,539 (pubnet's 30-day volume across all facilitators) and 2.2 s at 25,000; the table
-  answers in 0.9, 6.5 and 7.8 ms (local PostgreSQL, synthetic payments of 4.3 KB).
+  answers in 0.9, 6.5 and 7.8 ms (local PostgreSQL, synthetic payments of 4.3 KB). The table ran
+  with an index on all its columns; it ships with its key only, and an index comes when a
+  measurement of the shipped search query needs it.
+- **The numbers above** are in
+  [R-quality-measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md).
 - **Curation needs a proof, not a judgement.** A list kept by hand would have the operator vouch
   for sellers; a `stellar.toml` proof is checkable.
 
@@ -245,8 +252,7 @@ The measurements are in
 - **Quality only as a tie-break.** Fused scores rarely tie exactly, so it would change nothing.
   Rejected.
 - **Transaction volume as an input, as §4.3 lists.** Free to fake. Rejected.
-- **Leaving out wallets the seller funded.** Drops half the real buyers, and needs a chain history
-  Stellar RPC does not keep. Rejected for now.
+- **Leaving out wallets the seller funded.** Drops half the real payers. Rejected for now.
 - **A separate recency term.** The 30-day window already is one. Rejected.
 - **A penalty for shared hosting**, as §4.3 says ("shared/tunneling infrastructure"). Lowers most
   real listings. Rejected.
@@ -292,11 +298,15 @@ The measurements are in
 
 ## References
 
-- [ADR 0008](0008-bazaar-catalog-integrity.md), [ADR 0011](0011-facilitator-hosting.md),
-  [ADR 0012](0012-facilitator-state-store.md)
+- [ADR 0007](0007-fee-abuse-containment.md), [ADR 0008](0008-bazaar-catalog-integrity.md),
+  [ADR 0011](0011-facilitator-hosting.md), [ADR 0012](0012-facilitator-state-store.md)
 - [Task 0134](../../lore/1-tasks/archive/0134_RESEARCH_search-in-postgres/README.md) and its
   [measurement](../../lore/1-tasks/archive/0134_RESEARCH_search-in-postgres/notes/R-search-measurement.md);
   tasks 0120 (the route), 0126 (both networks in one process), 0135 (the evaluation set), 0154
-  (quality score and curation)
+  (quality score and curation) and its
+  [measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md),
+  0069 (dead listings), 0070 (the verified seller), 0129 (x402 payments across Stellar)
+- Elasticsearch, `rank_feature` query, saturation function; N. Craswell, S. Robertson, H. Zaragoza,
+  M. Taylor, "Relevance weighting for query independent evidence", SIGIR 2005
 - ToolRet: `mangopy/ToolRet-Queries`, `mangopy/ToolRet-Tools` (MTEB task `ToolRetrieval`)
 - pgvector: `github.com/pgvector/pgvector`, README (storage, exact search)
