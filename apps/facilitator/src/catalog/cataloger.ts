@@ -265,8 +265,8 @@ export function createCataloger({
       const key = echoed.key as CatalogKey;
       const tried = { ...attempt, key, contentHash: contentHash(echoed.resource) };
       known = { ...known, ...tried };
-      // The search's quality score counts this payer (ADR 0014), so the row is written whatever
-      // the copy holds. A failed write loses one payer from the score, and cataloging goes on.
+      // The search's quality score counts this payer (ADR 0014), so the row is written whether or
+      // not the copy changes the listing. A failed write loses one payer, and cataloging goes on.
       try {
         await store.recordPayment({
           key,

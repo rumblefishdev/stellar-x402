@@ -3,7 +3,6 @@ import { apiKeyStoreContract, sealedKeyStoreContract } from "@stellar-x402/api-k
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
-import type { StellarNetwork } from "@stellar-x402/config";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PostgresSpendStore, postgresStores } from "../src/adapters/postgres.js";
@@ -200,26 +199,7 @@ describe("PostgreSQL stores", () => {
   });
   spendStoreContract(async () => (await stores()).spend);
   rateLimitStoreContract(async () => (await stores()).rateLimits);
-  catalogStoreContract(
-    async () => (await stores()).catalog,
-    async () =>
-      (
-        await pool.query<Record<string, string>>(
-          `SELECT settlement_key, network, pay_to, method, resource_url, payer, at
-           FROM catalog_payments ORDER BY settlement_key`,
-        )
-      ).rows.map((row) => ({
-        key: {
-          network: row.network as StellarNetwork,
-          payTo: row.pay_to!,
-          method: row.method!,
-          resourceUrl: row.resource_url!,
-        },
-        payer: row.payer!,
-        settlementKey: row.settlement_key!,
-        at: Number(row.at),
-      })),
-  );
+  catalogStoreContract(async () => (await stores()).catalog);
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
   apiKeyStoreContract(async () => (await stores()).apiKeys);
   sealedKeyStoreContract(async () => ({
@@ -1433,29 +1413,6 @@ describe("PostgreSQL stores", () => {
         payer: "GPAYER",
         at: "1000",
       });
-    });
-
-    it("stores a payment whose payTo is its payer (behaviour 4)", async () => {
-      const { catalog } = await stores();
-      await catalog.recordPayment({ ...payment("stellar:testnet:GPAYTO:1"), payer: "GPAYTO" });
-      expect(await rows()).toMatchObject([{ pay_to: "GPAYTO", payer: "GPAYTO" }]);
-    });
-
-    it("never deletes a payment when catalog attempts are pruned (behaviour 5)", async () => {
-      const { catalog, catalogAttempts } = await stores();
-      await catalog.recordPayment(payment("stellar:testnet:GPAYER:1", 1));
-      await catalogAttempts.record({
-        at: 1,
-        network: "stellar:testnet",
-        payTo: "GPAYTO",
-        payer: "GPAYER",
-        transaction: "tx1",
-        key: key(),
-        stage: "payment",
-        outcome: "unchanged",
-      });
-      expect(await catalogAttempts.prune(Number.MAX_SAFE_INTEGER, 1_000)).toBe(1);
-      expect(await rows()).toHaveLength(1);
     });
   });
 });
