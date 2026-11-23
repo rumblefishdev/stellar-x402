@@ -328,6 +328,8 @@ CREATE TABLE catalog_payments (
   method text NOT NULL,
   resource_url text NOT NULL,
   payer text NOT NULL,
+  asset text NOT NULL,
+  amount text NOT NULL,
   at bigint NOT NULL
 );
 `,

@@ -107,6 +107,8 @@ describe("pruner", () => {
       key,
       payer: "GPAYER",
       settlementKey: "stellar:testnet:GPAYER:1",
+      asset: "CUSDC",
+      amount: "10000",
       at: NOW - 365 * DAY,
     });
     await catalogAttempts.record({

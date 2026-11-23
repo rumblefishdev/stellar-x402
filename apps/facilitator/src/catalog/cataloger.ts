@@ -272,6 +272,8 @@ export function createCataloger({
           key,
           payer: record.payer,
           settlementKey: record.key,
+          asset: record.paymentRequirements.asset,
+          amount: record.paymentRequirements.amount,
           at: now(),
         });
       } catch (error) {

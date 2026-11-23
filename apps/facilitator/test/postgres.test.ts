@@ -1348,16 +1348,19 @@ describe("PostgreSQL stores", () => {
       method: "GET",
       resourceUrl,
     });
+    const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
     const payment = (settlementKey: string, at = 1, resourceUrl?: string) => ({
       key: key(resourceUrl),
       payer: "GPAYER",
       settlementKey,
       at,
+      asset: USDC,
+      amount: "10000",
     });
     const rows = async () =>
       (
         await pool.query(
-          `SELECT settlement_key, network, pay_to, method, resource_url, payer, at
+          `SELECT settlement_key, network, pay_to, method, resource_url, payer, at, asset, amount
            FROM catalog_payments ORDER BY settlement_key`,
         )
       ).rows;
@@ -1377,6 +1380,8 @@ describe("PostgreSQL stores", () => {
         resource_url: resourceUrl,
         payer: "GPAYER",
         at: String(at),
+        asset: USDC,
+        amount: "10000",
       });
       expect(await rows()).toEqual([
         row(1, 1_000),
@@ -1392,6 +1397,8 @@ describe("PostgreSQL stores", () => {
         catalog.recordPayment({
           ...payment("stellar:testnet:GPAYER:1", 2_000, "https://seller.example.com/other"),
           payer: "GOTHERPAYER",
+          asset: "CSELFISSUED",
+          amount: "1",
         }),
       ).resolves.toBeUndefined();
       await Promise.all(
@@ -1412,7 +1419,37 @@ describe("PostgreSQL stores", () => {
         resource_url: "https://seller.example.com/data",
         payer: "GPAYER",
         at: "1000",
+        asset: USDC,
+        amount: "10000",
       });
+    });
+
+    it("stores the paid requirement's asset and amount as recorded, an asset no listing offers and a 39-digit amount included (behaviour 8)", async () => {
+      const { catalog } = await stores();
+      // A self-issued token's contract id: stored as it came, filtering is the count's job.
+      const selfIssued = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+      // The largest i128 amount: kept to the digit, never as a float.
+      const huge = "170141183460469231731687303715884105727";
+      await catalog.recordPayment({ ...payment("stellar:testnet:GPAYER:1"), amount: "1" });
+      await catalog.recordPayment({
+        ...payment("stellar:testnet:GPAYER:2"),
+        asset: selfIssued,
+        amount: huge,
+      });
+      expect((await rows()).map(({ asset, amount }) => ({ asset, amount }))).toEqual([
+        { asset: USDC, amount: "1" },
+        { asset: selfIssued, amount: huge },
+      ]);
+      const { rows: columns } = await pool.query(
+        `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'catalog_payments'
+           AND column_name IN ('asset', 'amount')
+         ORDER BY column_name`,
+      );
+      expect(columns).toEqual([
+        { column_name: "amount", data_type: "text", is_nullable: "NO" },
+        { column_name: "asset", data_type: "text", is_nullable: "NO" },
+      ]);
     });
   });
 });

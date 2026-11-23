@@ -789,7 +789,7 @@ describe("cataloger, the payments of a listing (0154)", () => {
   const payments = async () =>
     (
       await db.pool.query<Record<string, unknown>>(
-        `SELECT settlement_key, network, pay_to, method, resource_url, payer, at
+        `SELECT settlement_key, network, pay_to, method, resource_url, payer, at, asset, amount
          FROM catalog_payments ORDER BY settlement_key`,
       )
     ).rows;
@@ -804,6 +804,8 @@ describe("cataloger, the payments of a listing (0154)", () => {
     resource_url: `${seller.url}/users/:`,
     payer: "GPAYER",
     at: String(at),
+    asset: requirements.asset,
+    amount: requirements.amount,
   });
 
   it("stores the payment with its listing key, payer, settlement key and the app clock at the write (behaviour 1)", async () => {
@@ -816,6 +818,37 @@ describe("cataloger, the payments of a listing (0154)", () => {
     };
     await cataloger.onSuccess(settled(1), "settle");
     expect(await payments()).toEqual([row(1, START + 1_234)]);
+  });
+
+  it("stores the settlement's paid asset and amount, also an asset the stored listing never offered (behaviour 8)", async () => {
+    const { cataloger, list } = setup();
+    await cataloger.onSuccess(settled(1), "settle");
+    // The listing, from the seller's 402, offers only `requirements.asset`.
+    expect((await list())[0]?.accepts).toEqual([requirements]);
+    // A self-issued token's contract id the listing never offered, and an amount it never asked.
+    const selfIssued = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+    await cataloger.onSuccess(
+      record(valid, {
+        key: "stellar:testnet:GPAYER:2",
+        nonce: "2",
+        paymentRequirements: { ...requirements, asset: selfIssued, amount: "1" },
+      }),
+      "settle",
+    );
+    // The same offered asset with a paid amount other than the offer's: the paid one is kept.
+    await cataloger.onSuccess(
+      record(valid, {
+        key: "stellar:testnet:GPAYER:3",
+        nonce: "3",
+        paymentRequirements: { ...requirements, amount: "170141183460469231731687303715884105727" },
+      }),
+      "settle",
+    );
+    expect(await payments()).toEqual([
+      row(1, START),
+      { ...row(2, START), asset: selfIssued, amount: "1" },
+      { ...row(3, START), amount: "170141183460469231731687303715884105727" },
+    ]);
   });
 
   it("keeps one row and logs no failure when settle and reconcile report one settlement (behaviour 2)", async () => {

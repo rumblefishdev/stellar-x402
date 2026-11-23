@@ -107,10 +107,21 @@ export class PostgresCatalogStore implements CatalogStore {
   async recordPayment(payment: CatalogPayment): Promise<void> {
     const { network, payTo, method, resourceUrl } = payment.key;
     await this.pool.query(
-      `INSERT INTO catalog_payments (settlement_key, network, pay_to, method, resource_url, payer, at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO catalog_payments (settlement_key, network, pay_to, method, resource_url, payer,
+         asset, amount, at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (settlement_key) DO NOTHING`,
-      [payment.settlementKey, network, payTo, method, resourceUrl, payment.payer, payment.at],
+      [
+        payment.settlementKey,
+        network,
+        payTo,
+        method,
+        resourceUrl,
+        payment.payer,
+        payment.asset,
+        payment.amount,
+        payment.at,
+      ],
     );
   }
 }

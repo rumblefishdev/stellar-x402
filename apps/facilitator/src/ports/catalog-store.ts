@@ -53,6 +53,9 @@ export interface CatalogPayment {
   payer: string;
   /** The settlement's key, so a success reported twice, by settle and by reconcile, is one row. */
   settlementKey: string;
+  /** The paid requirement's asset and amount, so the score can keep payments in an offered asset. */
+  asset: string;
+  amount: string;
   /** App clock, ms, when the row is written. */
   at: number;
 }
