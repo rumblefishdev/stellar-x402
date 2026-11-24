@@ -475,6 +475,62 @@ describe("createSpendPolicy beforeSubmit", () => {
     expect(metrics.value("spend_commit_unmatched_total", { state: "success" })).toBe(0);
   });
 
+  it("a reopened claim gives up the earlier claim's reservation, so the payment counts once", async () => {
+    // `global` holds one ceiling: a reopen counted beside the earlier claim would be refused.
+    const { policy, store } = setup({ budgets: { ...budgets, globalStroops: CEILING } });
+    const first = context();
+    const reopened = { ...first, reopened: 1 };
+    expect(await policy.beforeSubmit(first)).toEqual({ allow: true });
+    // Before the first claim's `onFinal`, which may come late or never (0073 decision 26).
+    expect(await policy.beforeSubmit(reopened)).toEqual({ allow: true });
+    expect(await used(store, "global")).toBe(CEILING);
+
+    // That claim's late `onFinal` and late reserve change nothing.
+    await policy.onFinal(finalRecord(first, "rejected"), "settle");
+    expect(await policy.beforeSubmit(first)).toEqual({
+      allow: false,
+      errorReason: SETTLE_REASONS.refused,
+    });
+    expect(await used(store, "global")).toBe(CEILING);
+  });
+
+  it("a reopen keeps out the late reserve of a claim that never reserved", async () => {
+    const { policy, store } = setup();
+    const first = context();
+    // The first claim ended before its reserve reached the store, which is still on its way.
+    expect(await policy.beforeSubmit({ ...first, reopened: 1 })).toEqual({ allow: true });
+    expect(await policy.beforeSubmit(first)).toEqual({
+      allow: false,
+      errorReason: SETTLE_REASONS.refused,
+    });
+    expect(await used(store, "global")).toBe(CEILING);
+  });
+
+  it("refuses a reopen as a store failure when the earlier claim's release fails", async () => {
+    const real = db.stores().spend;
+    const { policy, metrics, events } = setup({
+      store: overriding(real, {
+        release: async () => {
+          throw new Error("connection timeout");
+        },
+      }),
+    });
+    const first = context();
+    expect(await policy.beforeSubmit(first)).toEqual({ allow: true });
+
+    // Fail closed, with a reason the payment reopens on: nothing new was reserved.
+    expect(await policy.beforeSubmit({ ...first, reopened: 1 })).toEqual({
+      allow: false,
+      errorReason: SETTLE_REASONS.spendStoreUnavailable,
+    });
+    expect(UNSENT_REASONS).toContain(SETTLE_REASONS.spendStoreUnavailable);
+    expect(metrics.value("spend_store_failures_total", { op: "release" })).toBe(1);
+    expect(events("spend_store_failed")).toEqual([
+      expect.objectContaining({ op: "release", key: first.key }),
+    ]);
+    expect(await used(real, "global")).toBe(CEILING);
+  });
+
   it("refuses an id that was released, as the record is already final", async () => {
     const { policy, store } = setup();
     const ctx = context();
@@ -744,10 +800,10 @@ describe("createSpendPolicy beforeSubmit for an account (0107)", () => {
     const { policy, store, reservations } = recorded({ keyed: true });
     const first = keyed({ caller: { owner: "discord:1" } });
     expect(await policy.beforeSubmit(first)).toEqual({ allow: true });
-    // The first claim ended with nothing sent, and its `onFinal` released its reservation.
-    await policy.onFinal(finalRecord(first, "rejected"), "settle");
 
-    // Whoever's request sends the payment pays for it (decision 9): the repeat's own caller.
+    // Whoever's request sends the payment pays for it (decision 9): the repeat's own caller. The
+    // first claim ended with nothing sent, and the reopen gives its reservation up without
+    // waiting for that claim's `onFinal`, so the first caller's account is charged nothing.
     const reopened = { ...first, caller: { owner: "discord:2" }, reopened: 1 };
     expect(await policy.beforeSubmit(reopened)).toEqual({ allow: true });
     expect(reservations.map(({ id, limits }) => [id, limits.map((limit) => limit.scope)])).toEqual([
@@ -756,6 +812,65 @@ describe("createSpendPolicy beforeSubmit for an account (0107)", () => {
     ]);
     expect(await usedNow(store, "account:discord:1")).toBe(0n);
     expect(await usedNow(store, "account:discord:2")).toBe(CEILING);
+  });
+
+  describe("a reopened payment counts once in the account's month (review of #236)", () => {
+    /** The free plan allows 2 payments a month, and one is already used. */
+    async function oneUsed() {
+      const made = setup({ keyed: true, accountPlans: parseAccountPlans("free:2:20000000") });
+      expect(await made.policy.beforeSubmit(keyed())).toEqual({ allow: true });
+      return made;
+    }
+    const quotaSpent = { allow: false, errorReason: SETTLE_REASONS.quotaExhausted };
+
+    it("before the earlier claim's onFinal, at the month's last payment", async () => {
+      const { policy, store } = await oneUsed();
+      const first = keyed();
+      expect(await policy.beforeSubmit(first)).toEqual({ allow: true });
+
+      // The first claim ended with nothing sent, and its `onFinal` hasn't released it yet, or
+      // never will (0073 decision 26). The reopen is the same payment, not a third one.
+      expect(await policy.beforeSubmit({ ...first, reopened: 1 })).toEqual({ allow: true });
+      expect(await usedNow(store, `account:${OWNER}`)).toBe(2n * CEILING);
+      // The month is spent all the same: a new payment is refused.
+      expect(await policy.beforeSubmit(keyed())).toMatchObject(quotaSpent);
+
+      // The first claim's late `onFinal` takes nothing from the reopened claim.
+      await policy.onFinal(finalRecord(first, "rejected"), "settle");
+      expect(await usedNow(store, `account:${OWNER}`)).toBe(2n * CEILING);
+      expect(await policy.beforeSubmit(keyed())).toMatchObject(quotaSpent);
+    });
+
+    it("while the earlier claim's reserve still waits on a slow store", async () => {
+      const { policy, store } = await oneUsed();
+      const first = keyed();
+      const wait = () => new Promise((resolve) => setTimeout(resolve, 50));
+      // Something holds the account's scope row, so the first claim's reserve waits on it; the
+      // settle budget ends meanwhile, and the repeat reopens the payment.
+      const locker = await db.pool.connect();
+      let answers: Awaited<ReturnType<typeof policy.beforeSubmit>>[];
+      try {
+        await locker.query("BEGIN");
+        await locker.query("SELECT 1 FROM spend_scopes WHERE scope = $1 FOR UPDATE", [
+          `account:${OWNER}`,
+        ]);
+        const waiting = policy.beforeSubmit(first);
+        await wait();
+        const reopening = policy.beforeSubmit({ ...first, reopened: 1 });
+        await wait();
+        await locker.query("COMMIT");
+        answers = await Promise.all([waiting, reopening]);
+      } finally {
+        await locker.query("ROLLBACK").catch(() => {});
+        locker.release();
+      }
+
+      // Whichever of the two the store served first, the reopened claim holds the payment's one
+      // reservation: the month has 2 payments, not 3, and the reopen wasn't refused for a third.
+      expect(answers[1]).toEqual({ allow: true });
+      expect(await usedNow(store, `account:${OWNER}`)).toBe(2n * CEILING);
+      expect(await policy.beforeSubmit(keyed())).toMatchObject(quotaSpent);
+    });
   });
 });
 

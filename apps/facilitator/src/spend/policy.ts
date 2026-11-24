@@ -262,6 +262,22 @@ export function createSpendPolicy(deps: {
         };
       }
 
+      // A reopened record's earlier claim ended with nothing sent, so its reservation can never be
+      // charged. This claim gives it up before it reserves: that claim's `onFinal` may still be on
+      // its way, or never come (0073 decision 26), and until it does the one payment would count
+      // twice, in the account's month too. A reservation never made gets its `released` row, which
+      // also keeps that claim's late `reserve` out.
+      if (ctx.reopened > 0) {
+        try {
+          await store.release(reservationId(key, ctx.reopened - 1), ctx.now);
+        } catch (error) {
+          // Fail closed, as for a breaker: nothing was reserved, and the payment reopens.
+          metrics.increment("spend_store_failures_total", { op: "release" });
+          logger.warn("spend_store_failed", { op: "release", key, error });
+          return refuse(SETTLE_REASONS.spendStoreUnavailable);
+        }
+      }
+
       const id = reservationId(key, ctx.reopened);
       const reservation = {
         id,
@@ -295,8 +311,9 @@ export function createSpendPolicy(deps: {
           await sleep(RESERVE_RETRY_MS);
         }
       }
-      // A reservation whose answer was lost would count until it leaves the window: release it.
-      // The refusal ends the record without `onFinal`, so nothing else will.
+      // A reservation whose answer was lost would count until it leaves its windows, the account's
+      // month among them: release it. The refusal ends the record without `onFinal`, so only a
+      // reopen of the payment would.
       try {
         await store.release(id, now());
       } catch (error) {
@@ -370,8 +387,10 @@ export function createSpendPolicy(deps: {
 /**
  * One claim's reservation. A reopened record claims again while the earlier claim's `onFinal` may
  * still be on its way, so that call gives up only its own reservation, and a reserve is refused
- * after its own claim's release (0073 decisions 16, 26). A reservation no `onFinal` reaches counts
- * until it leaves the rolling window.
+ * after its own claim's release (0073 decisions 16, 26). The reopened claim gives up the one before
+ * it, so a payment holds one reservation at a time (0107). A reservation that neither an `onFinal`
+ * nor a reopen reaches counts until it leaves each window: 24 h of an account's fees and of the
+ * shared budgets, and the rest of the calendar month of an account's payments.
  */
 export function reservationId(key: string, reopened: number): string {
   return `${key}#${reopened}`;

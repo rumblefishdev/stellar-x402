@@ -3183,14 +3183,16 @@ describe("an account's quota and fee budget (0107)", () => {
    * `/settle` with the real spend policy, over the test database's spend store and account plans,
    * on a network that requires an API key; the free plan allows 2 payments a month. Each payment
    * the pool gets ends as `outcomes` says in turn, then `success`, under a hash of its own, and is
-   * charged `fee`.
+   * charged `fee`; for `noChannel` the pool finds no channel in time, so nothing is sent.
+   * `onFinal`, if given, decides when the policy's `onFinal` runs, if at all.
    */
   function keyed(
     opts: {
       freeStroops?: bigint;
       fee?: bigint;
-      outcomes?: SubmitResult["status"][];
+      outcomes?: (SubmitResult["status"] | "noChannel")[];
       check?: Check;
+      onFinal?: (run: () => Promise<void>) => Promise<void>;
     } = {},
   ) {
     const clock = { now: NOVEMBER };
@@ -3221,14 +3223,19 @@ describe("an account's quota and fee budget (0107)", () => {
     let sent = 0;
     const { settle, submit } = setup(
       async (submitOpts) => {
+        const outcome = outcomes.shift() ?? "success";
+        if (outcome === "noChannel") throw new QueueTimeoutError("x");
         const hash = (++sent).toString(16).padStart(64, "0");
         await submitOpts.onSigned?.(hash, BOUNDS);
-        return { ...result(outcomes.shift() ?? "success", hash), feeCharged: opts.fee ?? 41_000n };
+        return { ...result(outcome, hash), feeCharged: opts.fee ?? 41_000n };
       },
       {
         hooks: {
           beforeSubmit: policy.beforeSubmit,
-          onFinal: policy.onFinal,
+          onFinal: (record, origin) => {
+            const run = () => policy.onFinal(record, origin);
+            return opts.onFinal ? opts.onFinal(run) : run();
+          },
           onSuccess: async () => {},
         },
         now: () => clock.now,
@@ -3380,6 +3387,42 @@ describe("an account's quota and fee budget (0107)", () => {
     expect((await pay(4)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
     // Nor does the quota's own refusal count.
     expect(await payments()).toBe(2);
+  });
+
+  // The review of #236: `/settle` doesn't wait for a claim's `onFinal`, and a claim may never get
+  // one (0073 decision 26), so the reopened claim gives up the earlier claim's reservation itself.
+  it.each([
+    ["comes after the repeat", true],
+    ["never comes", false],
+  ])("a reopened payment counts once when the earlier claim's onFinal %s", async (_, late) => {
+    const held: (() => Promise<void>)[] = [];
+    let hold = false;
+    const { pay, submit } = keyed({
+      outcomes: ["success", "noChannel"],
+      onFinal: async (run) => {
+        if (hold) held.push(run);
+        else await run();
+      },
+    });
+    const payments = () =>
+      new PostgresAccountUsageReader(db.pool).paymentsSince(OWNER, Date.UTC(2026, 10, 1));
+    expect((await pay(1)).response.success).toBe(true);
+
+    // The month's last payment: reserved, then the pool finds no channel, so nothing is sent.
+    hold = true;
+    expect((await pay(2)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.noChannelInTime,
+      extra: { retryable: true },
+    });
+    hold = false;
+    // The client repeats it, as the answer says: the same payment, not a third one.
+    expect((await pay(2)).response.success).toBe(true);
+    expect(held).toHaveLength(1);
+    if (late) await held[0]!();
+
+    expect(await payments()).toBe(2);
+    expect((await pay(3)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    expect(submit).toHaveBeenCalledTimes(3);
   });
 });
 
