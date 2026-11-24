@@ -98,6 +98,16 @@ describe("validateConfig", () => {
       (c) => (m(c).logging.sessionHours = 13),
       /sessionHours/,
     ],
+    [
+      "a bad monitoring VM CN",
+      (c) => (m(c).monitoringVm.certificateCn = "X402 VM"),
+      /monitoringVm\.certificateCn/,
+    ],
+    [
+      "a relative monitoring VM SSM name",
+      (c) => (m(c).monitoringVm.ipSsmParam = "x402/vm-ip"),
+      /monitoringVm\.ipSsmParam/,
+    ],
     ["an http uptime URL", (c) => (m(c).uptime.url = "http://example.com/health"), /uptime.url/],
     [
       "an http portal URL",
