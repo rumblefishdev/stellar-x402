@@ -907,6 +907,108 @@ implementation notes have the run of 2026-11-05: a snapshot, the restore of it i
 OpenBao through a copy of the repository with its key imported from the export, and the same
 Transit key after it.
 
+## Lost access to the facilitator's accounts
+
+The key keeps its full power on the fee account and the channels
+([ADR 0015](adr/0015-hot-key-full-power.md)), so a thief can add a signer, remove ours and take
+the float. This section moves the facilitator to a new key, a new fee account and new channels,
+and abandons the old ones with their XLM (about 130 XLM at launch). Shown for testnet; mainnet's
+names come with 0038.
+
+**When:**
+
+- The facilitator refuses to start with `extra-signer` from `checkChannel`, or a channel or the fee
+  account has a signer, threshold or weight nobody on the team set.
+- XLM left the fee account that no settlement or top-up explains (`balance-critical`, the theft
+  alarm once 0127 turns it on).
+- OpenBao's data is lost and a restore from a snapshot failed.
+
+Not for a planned rotation while our key still works: that one keeps the accounts (ADR 0013, 0099;
+not here yet).
+
+1. **Stop the facilitator** and note the time:
+
+   ```sh
+   sudo systemctl stop x402@production
+   ```
+
+2. **Decide whether this server stays.** A new key in an OpenBao that someone else can read is
+   stolen the same way.
+
+   | What leaked                                                                     | Then                                                                                                                                                                                                                 |
+   | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | A credential, and you know which (a secret ID or token seen outside the server) | The server stays. Step 3 cuts that credential off.                                                                                                                                                                   |
+   | Root on the server, code in the facilitator's container, or you don't know      | The server doesn't stay. Stop here: a clean server, set up with "Before the first deploy" and OpenBao's steps 1–6, and every secret the server held rotated ([Credentials](#credentials)). Then steps 6 and 7 below. |
+   | OpenBao's disk, with no break-in, and the restore failed                        | The server stays. OpenBao's steps 1–5 make a new `stellar-testnet` at version 1; skip step 3.                                                                                                                        |
+
+3. **A new version of the key, and new credentials.** In a root shell with a root token ([A new
+   root token](#openbao)), one line at a time, as in OpenBao's step 4. The key keeps its name, so
+   the AppRole's policy (`transit/sign/stellar-testnet`) still fits and nothing in the repo
+   changes. `min_encryption_version` stops anyone signing with an older version; then every token
+   the AppRole issued is revoked and every secret ID destroyed, and a new secret ID goes into the
+   facilitator's credential.
+
+   ```sh
+   sudo -i
+   cd /srv/x402/openbao
+   read -rs BAO_TOKEN && export BAO_TOKEN   # paste the root token, Enter
+   bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
+   n=testnet
+   bao write -f transit/keys/stellar-$n/rotate </dev/null
+   v=$(bao read -field=latest_version transit/keys/stellar-$n </dev/null) && echo "version $v"
+   bao write transit/keys/stellar-$n/config min_encryption_version=$v </dev/null
+   bao write -f sys/leases/revoke-prefix/auth/approle/login </dev/null
+   for a in $(bao list -format=json auth/approle/role/x402-$n/secret-id </dev/null | python3 -c 'import json, sys; print(" ".join(json.load(sys.stdin)))'); do bao write auth/approle/role/x402-$n/secret-id-accessor/destroy secret_id_accessor=$a </dev/null && echo "destroyed $a"; done
+   s=$(bao write -f -field=secret_id auth/approle/role/x402-$n/secret-id </dev/null) && [ -n "$s" ] &&
+     printf %s "$s" | systemd-creds encrypt --with-key=host --name=approle-secret-id.$n - \
+       /srv/x402/production/creds/approle-secret-id.$n.cred
+   unset s
+   bao read -format=json transit/keys/stellar-$n </dev/null   # .data.keys["<v>"].public_key
+   bao token revoke -self; unset BAO_TOKEN
+   ```
+
+   The address comes from that public key with OpenBao's step 4 `node -e` line. Note `v`: it goes
+   into `.env` in step 5.
+
+4. **A new fee account and new channels** for that address: OpenBao's step 6. On testnet Friendbot
+   funds the fee account with 10,000 XLM; mainnet's float comes from the company's exchange account
+   ([Topping up the fee account](#topping-up-the-fee-account)).
+
+5. **The four values in `.env`**, written whole, with the version from step 3:
+
+   ```sh
+   printf 'OPENBAO_KEY_TESTNET=%s\nOPENBAO_KEY_VERSION_TESTNET=%s\nFACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' \
+     stellar-testnet VERSION ADDRESS CHANNELS |
+     ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+   ```
+
+6. **Start it, and check the signer.** A wrong version or address doesn't stop the start: the
+   facilitator runs, `/health` says `signer: failed`, the log has `signer_failed` with its reason
+   (`address_mismatch`, `denied`), and every settle fails until it is fixed.
+
+   ```sh
+   sudo systemctl start x402@production
+   sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator \
+     node -e "fetch('http://127.0.0.1:4021/health').then((r) => r.text()).then(console.log)"
+   curl -s https://x402-facilitator.sorobanscan.com/supported   # signers: the new address
+   ```
+
+   `ready`, `listed` and `signer: "ok"`, and one paid request settles.
+
+7. **The alarms on the new fee account:** a pull request that changes `feeAccounts` in
+   `infra/envs/production.json`, then `make diff-production-watch` and `make deploy-production-watch`
+   in `infra/`. Until then `balance-low` and `balance-critical` read the old account and fire as it
+   drains: expected. The facilitator doesn't wait for this.
+
+**After it:**
+
+- The old addresses stay under the old key for good. Nothing may trust them: no contract may take a
+  channel address as an authority, and `upto`'s receiver authorizer is always the current key
+  (ADR 0015).
+- Open `upto` authorizations bound to the old address can't be revoked; they expire within their
+  window (threat model, "A stolen key charges open `upto` authorizations").
+- Record the time, the abandoned addresses and the XLM left behind in the weekly review.
+
 ## Topping up the fee account
 
 `balance-low` (below 25 XLM, about 5 days of settlements) and `balance-critical` (below 10 XLM,

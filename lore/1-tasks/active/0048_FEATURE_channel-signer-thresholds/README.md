@@ -126,8 +126,10 @@ no longer apply):
       Closes once the production server's `.env` holds both names, the playbook has copied this
       `compose.yaml`, and `x402@` has started from it with `signer: ok`. `x402-deploy` never copies
       `compose.yaml`, so a deploy before that playbook run proves nothing about `.env`.
-- [ ] `docs/runbook.md` has a "lost access" section: new key, fee account, channels, `.env`,
+- [x] `docs/runbook.md` has a "lost access" section: new key, fee account, channels, `.env`,
       restart, alarms, and when the same server may stay
+      (2026-11-24, "Lost access to the facilitator's accounts"; step 3's OpenBao commands are
+      unproven until the drill)
 - [ ] A testnet drill moves the facilitator to a new key, fee account and channels with that
       section, timed, and the result recorded
 
@@ -216,7 +218,8 @@ today's setup"). Each one holds whichever option the re-check picks.
 - **OpenBao's backup doesn't run yet.** `snapshot_age_seconds` on `x402-host` reads 1e9 (no
   snapshot ever succeeded), and steps 3–5 of the runbook's "OpenBao snapshots → Setting it up"
   never ran. Until they do, losing OpenBao's data loses the key for good. Owned by 0026.
-- **No runbook for "we lost access".** ADR 0013's theft steps assume our key still works on the
+- ~~**No runbook for "we lost access".**~~ Written 2026-11-24 (`docs/runbook.md`, "Lost access to
+  the facilitator's accounts"); the drill is still open. ADR 0013's theft steps assume our key still works on the
   accounts (it adds the new key and merges the old fee account). When a thief has removed our
   key, nothing covers it: a new key, fee account and channels, the config switch, the alarms, and
   the rule that the same server stays only if the leak didn't come from it. Needs its own steps
