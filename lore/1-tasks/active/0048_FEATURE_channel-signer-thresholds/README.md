@@ -173,6 +173,27 @@ contract that named a channel as an authority would hand a thief that power fore
    channel-address check, the key name moved to `.env`, the "lost access" runbook and its testnet
    drill. OpenBao's backup stays with 0026.
 
+### Emerged
+
+5. **The key's name and version move to the server's `.env`** (okarcz, 2026-11-24), as
+   `OPENBAO_KEY_TESTNET` and `OPENBAO_KEY_VERSION_TESTNET` next to `FACILITATOR_ADDRESS_TESTNET`
+   and `CHANNELS_TESTNET`, required by `deploy/production/compose.yaml`.
+   - **Why:** after a theft OpenBao usually survives with the old key in it, so the new key gets a
+     new name or version 2. With the name in `compose.yaml`, the rebuild waits for an approved pull
+     request and a playbook run, which can take hours at night, while ADR 0015 counts on about an
+     hour. In `.env`, a rebuild is: write four values, restart.
+   - **No new risk:** only someone with access to the server can edit `.env`, and that person can
+     already change `FACILITATOR_ADDRESS` and `CHANNELS` the same way, and reach OpenBao. A wrong
+     key name stops the facilitator at startup, since the signer check against
+     `FACILITATOR_ADDRESS` and each channel fails (`apps/facilitator/src/main.ts:548`). What goes is
+     the review of a change to the name, which gave no protection the server access doesn't
+     already bypass.
+   - **Also:** the four values that describe the key and its accounts always change together, so
+     they now live in one place instead of split between the repo and the server.
+   - **Rollout:** a server set up before this has only the address and the channels in `.env`. Add
+     the two new lines before the deploy that carries the change, or `x402@` stops at
+     interpolation (`docs/runbook.md`, "Before the first deploy").
+
 ## Open Gaps
 
 Found on 2026-11-24 while walking through a theft of the hot key with today's setup
