@@ -19,6 +19,10 @@ history:
     status: active
     who: akot
     note: "Work starts, with a design first: the decisions in \"Decisions to make here\"."
+  - date: "2026-11-24"
+    status: active
+    who: akot
+    note: "Built and reviewed on the branch (the workspace's tests pass). Left: the hub's card, a pull request of its own in sorobanscan-api-portal."
 ---
 
 # Give each API key holder a free quota and a fee budget apart from the shared ones
@@ -36,11 +40,8 @@ doesn't block pubnet: until then the operator raises an account's limit by hand.
 
 Summary and inputs to the design: [S-research](notes/S-research.md). The notes:
 
-- [R-codebase-map](notes/R-codebase-map.md): where the budgets are counted, the reservation, repeats
-  and reopens, and the seams an owner scope fits into.
 - [R-fee-numbers](notes/R-fee-numbers.md): pubnet's typical settlement (12,203 stroops, measured), the
-  ceiling, a new balance's rent, and the arithmetic for the defaults. Scripts in
-  [notes/fee-scan](notes/fee-scan/).
+  ceiling, a new balance's rent, and the arithmetic for the defaults.
 - [R-prior-art](notes/R-prior-art.md): CDP, PayAI, OpenZeppelin Channels, Launchtube, paymasters and
   free-tier APIs, with their sources.
 - [R-prices-api](notes/R-prices-api.md): how stellar-prices-api counts its monthly quota.
@@ -59,8 +60,9 @@ Summary and inputs to the design: [S-research](notes/S-research.md). The notes:
   the float (ADR 0013).
 - Past the quota, `/settle` refuses with a reason of its own before anything is signed; the
   operator raises one account's limit (config or the registry, to decide).
-- Events for 0027: an account nearing and reaching its quota, the shared free budget nearing its
-  limit.
+- Events for 0027: the shared free budget nearing its limit, through the existing `budget-nearing`
+  alarm. ~~An account nearing and reaching its quota~~: dropped by decision 11, nothing is
+  reported per account.
 - From 0105: the spend policy's `beforeSubmit` gets the key's owner as `ctx.caller.owner`
   (`operator:<name>` or `discord:<id>`), `undefined` on testnet. The owner is not stored with the
   settlement: `onFinal` gets the record, and a reservation keeps its scopes. The rate limiter
@@ -84,24 +86,38 @@ All made on 2026-11-23, in "Design Decisions" below:
 
 ## Acceptance Criteria
 
-- [ ] Given a pubnet settlement with a key, when it reserves, then it counts in its account's
+Nothing settles on pubnet before 0126, so the ticked ones rest on tests, and the last on a testnet
+run too. Each names what it rests on.
+
+- [x] Given a pubnet settlement with a key, when it reserves, then it counts in its account's
       budget and in `global`, not in the shared asset and tier budgets
-- [ ] Given an account past its quota, when it calls `/settle`, then it is refused with nothing
+      (`spend-policy.test.ts`, "a keyed settlement on the free plan reserves account, free and
+      global")
+- [x] Given an account past its quota, when it calls `/settle`, then it is refused with nothing
       signed, until the month rolls or the operator raises its limit
-- [ ] Given many accounts on free quotas, when together they fill the shared free budget, then an
+      (`settle.test.ts` on PostgreSQL: "an account past its quota…", "the month's roll gives the
+      quota back", "a raised plan settles at once")
+- [x] Given many accounts on free quotas, when together they fill the shared free budget, then an
       account with a raised limit still settles
-- [ ] Given the quota and budget values, when this task ends, then they are config and recorded
+      (`settle.test.ts`, "free accounts fill free; a raised account still settles")
+- [x] Given the quota and budget values, when this task ends, then they are config and recorded
+      (`SPEND_FREE_STROOPS`, `ACCOUNT_PLANS`; `config.test.ts`; the facilitator README's table)
 - [ ] Given an account with a key, when it opens the hub's x402 tab, then it sees this month's
       payments, its limit, its plan and the reset date
-- [ ] Given an account that used part of its quota, when it revokes its key and gets a new one,
+      (the portal answers `details.usage`, `apps/portal/test/app.test.ts`; the card is a pull
+      request of its own in sorobanscan-api-portal)
+- [x] Given an account that used part of its quota, when it revokes its key and gets a new one,
       then its use carries over (0106's third criterion)
-- [ ] Given a payment to a C-address `payTo` with no balance of a SAC token, when `/verify` runs,
+      (`settle.test.ts`, "the quota carries over to a new key")
+- [x] Given a payment to a C-address `payTo` with no balance of a SAC token, when `/verify` runs,
       then it is refused with `invalid_exact_stellar_pay_to_balance_missing` and the fix
+      (`verify.test.ts`, and the testnet run in "Implementation Notes")
 
 ## Design Decisions
 
-Design: [S-design](notes/S-design.md), approved by akot on 2026-11-23. Plan:
-[G-implementation-plan](notes/G-implementation-plan.md), to be carried out in a later session.
+Design: [S-design](notes/S-design.md), approved by akot on 2026-11-23. The build
+plan was carried out on 2026-11-23 and 24, and removed with the pre-build code map once used: both
+are in this branch's history.
 
 ### From Plan
 
@@ -189,39 +205,64 @@ Claude's calls in the design (14 to 25), approved with it. 26 is the plan's.
     store failure does. The plans are one setting, `ACCOUNT_PLANS`, read by both services. The
     pruner keeps the month's rows only on a network that requires a key.
 
+27 to 33 came up in the build (2026-11-23 and 24), without akot. He should read them.
+
+27. **A caller picks the account's scopes; `keyed` only refuses a missing caller.** `admit` sets a
+    caller only where a key is required, so the two can't disagree today.
+28. **`SPEND_FREE_STROOPS` must stay within `SPEND_GLOBAL_STROOPS` only where a key is required,**
+    so a self-hosted testnet with a lowered `global` still starts.
+29. **The view `account_usage` reaches an account's rows through its `spend_scopes` row,** so the
+    window index serves one owner's read. After a narrow race with the pruner the hub can show
+    fewer payments than the store counts, until the account's next reservation.
+30. **A refusal's message is stored in the record's `error_message`,** which a reopen clears.
+31. **For the balance-missing refusal, the fee upstream measured goes to the log field
+    `upstreamMessage`.** The client's message names no amount.
+32. **The portal answers `usage: null` rather than refusing to start** when the table, the view or
+    the grant is missing.
+33. **The pubnet refusal names 0048 alone.** 0027's signer alarm has landed, but pubnet's own
+    instance exists only once infra lists the network (0126).
+
 ## Implementation Notes
 
-**The count limit's cost (Task 3, measured 2026-11-23).** The count runs under the global scope's
-lock, so its time is every reserve's wait. Approach A stands: fallback B isn't needed.
+Built on 2026-11-23 and 24: the spend store's count limit; plans, migration `0017_account_plans`
+and `keys plan`; the policy's account scopes and refusals; the balance-missing refusal; the
+portal's `details.usage`; the config, the alarm's `free` and the docs. The hub's card is not done.
 
-- Setup: 100,000 reservations of one `account:` scope in the month, as a Pro account at its quota,
-  each also in `global`. Then 200 reserves one after another, after 10 warm-up ones, each with the
-  account's count, its 24 h fees and `global`. PostgreSQL 18.6.
-- Result, six runs, on fresh rows and after a VACUUM alike: median 13.8–16.1 ms, p99
-  16.3–26.0 ms, the slowest single reserve 33.7 ms. Without the count limit (the last three runs,
-  after that phase was added): median 2.3 ms, p99 3.7–3.8 ms.
-- So the count adds about 12 ms at 100,000 rows, below the plan's 50 ms at p99. A Free account
-  counts at most 1,000 rows.
-- Here the planner counts by a parallel sequential scan, since the account is half the table; the
-  test prints the plan.
-- Re-run against the test database (`127.0.0.1:15432` or `TEST_DATABASE_URL`). It uses a schema of
-  its own, dropped at the end:
-  `MEASURE_SPEND_COUNT=1 pnpm --filter @stellar-x402/facilitator exec vitest run test/spend-count.timing.test.ts --silent=false`
+- **A payment, precisely:** one the network charged a fee for, a failed one too, or one still in
+  flight. One sent and never included stops counting, so the hub's `used` can go down.
+- **The count limit's cost** (measured 2026-11-23, PostgreSQL 18.6): with 100,000 rows of one
+  account in the month, a reserve took 13.8–16.1 ms at the median and 16.3–26.0 ms at p99 over
+  six runs, against 2.3 ms and 3.8 ms without the count. That is under the 50 ms the build plan
+  set, so approach A stands.
+- **The balance-missing refusal on testnet** (run 2026-11-24, `MAX_FEE_STROOPS=100000`): the first
+  payment to a fresh contract cost 128,027 stroops and was refused with the reason. One transfer
+  of 1 XLM from the seller's own account created the balance, and the next payment settled.
+  Hashes and fees:
+  [pay-to-balance-missing-testnet.json](../../../../apps/facilitator/test/live/results/pay-to-balance-missing-testnet.json).
+  Re-run in `apps/facilitator`: `DATABASE_URL=<url> npx tsx test/live/pay-to-balance-missing.ts`
 
-**The balance-missing refusal on testnet (Task 6, run 2026-11-24).** The refusal and its fix both
-work. The run: a local facilitator with `MAX_FEE_STROOPS=100000`, payments of 1,000 stroops of XLM
-through its SAC, and a fresh contract as `payTo`. Results:
-[pay-to-balance-missing-testnet.json](../../../../apps/facilitator/test/live/results/pay-to-balance-missing-testnet.json).
+**To do at the deploy or in 0126** (noted in 0126 too): run
+`deploy/scripts/check-production-portal.sh` (changed, only syntax-checked here); run the role's
+grant step again (it sets a new password, so the portal restarts); the runbook's Logs Insights
+query and `keys plan` through `docker exec`; the `free` alarm's fire-test; the size of the
+`apiKeys` pool, where the plan read now waits.
 
-- The first payment's resource fee was 128,027 stroops, over the ceiling, with no archived entry.
-  `/verify` refused it with `invalid_exact_stellar_pay_to_balance_missing` and the fix. `/settle`
-  answered the same from its record.
-- The seller sent `payTo` 1 XLM from its own account in one transfer
-  (`b2c6339a219ba763e7d522a81154e9249b35dd0be7c111f899bb088b6ecef9e3`, 104,829 stroops charged).
-  That created the balance. The key the facilitator reads, the SAC's persistent
-  `Balance(payTo)`, was in the transfer's read-write footprint and on the ledger after it.
-- The payer's next payment cost 14,730 stroops of resources. It verified and settled
-  (`86fc98415a36f603484fdb2196a97e6d7c0bc19eee53214b0d549878c971d0ef`, 9,940 stroops charged). The
-  first payment stays refused, from its record.
-- Re-run in `apps/facilitator`, against a migrated database of its own:
-  `DATABASE_URL=<url> npx tsx test/live/pay-to-balance-missing.ts`
+**Open for akot.**
+
+- The count has no upper bound on `at`: within milliseconds of a month's start it can refuse one
+  payment too many, and never lets one too many through. Accept it, or bound it by the month's
+  end.
+- Decision 33: whether the pubnet refusal names the signer alarm again until infra lists pubnet.
+- Left out, not spawned as tasks: a warning from `keys plan` for an owner that never had a key; a
+  cooldown on `account_plan_unknown`; a log line when the balance read fails;
+  `apps/portal/src/cap.ts` on the shared month helpers.
+
+## Issues Encountered
+
+- `advance` did not take `errorMessage`, as the build plan assumed (decision 30).
+- `catalog-values.test.ts` compares the catalog with the code, so a new reason is listed in the
+  commit whose code writes it.
+- `LIKE 'account:%'` can't use the index under `en_US.utf8`, hence the join in decision 29.
+- Existing tests changed on purpose: `spend-policy.test.ts` lost "an owner like any other, until
+  0107"; two whole-`usage` assertions gained `windowMs`; `main.test.ts`'s pruner test follows the
+  new window rule.

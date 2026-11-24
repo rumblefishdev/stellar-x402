@@ -56,7 +56,7 @@ room of accounts the operator raised.
 - A budget is exceeded under concurrency, or a fee paid on chain counts in no window.
 - A settlement on pubnet counts in no account.
 
-## Constraints (from the code, R-codebase-map)
+## Constraints (from the code, before the build)
 
 - Order in `settle()`: checks, claim, `beforeSubmit`, submit, final record, `onFinal`. A
   `beforeSubmit` refusal sends nothing, signs nothing and gets no `onFinal`.

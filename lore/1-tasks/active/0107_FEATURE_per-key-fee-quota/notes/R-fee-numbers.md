@@ -16,8 +16,8 @@ Research for 0107, 2026-11-23. Read-only: nothing sent, nothing signed. Labels: 
 **D** derived from measured numbers by arithmetic, **E** estimated, **A** assumed. 1 XLM = 10^7
 stroops. Pubnet calls were made 12:45–13:06 UTC to `mainnet.sorobanrpc.com`,
 `soroban-rpc.mainnet.stellar.gateway.fm`, `rpc.lightsail.network` and `horizon.stellar.org`.
-Scripts: [`fee-scan/`](fee-scan/) (`scan-usdc-fees.mjs`, `horizon-fee-account.mjs`, `state-size.mjs`); their
-raw output is not kept.
+The scripts (`scan-usdc-fees.mjs`, `horizon-fee-account.mjs`, `state-size.mjs`) were removed after
+the build and are in this branch's history; their raw output is not kept.
 
 ## 1. A typical pubnet settlement
 

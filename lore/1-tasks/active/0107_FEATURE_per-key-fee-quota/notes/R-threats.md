@@ -15,7 +15,7 @@ history:
 The threats are `docs/threat-model.md`'s: "Shared budget exhaustion by Sybil self-payments",
 "Targeted `payTo` budget exhaustion", "Fee inflation by rent", and from "API keys": "A key leaks"
 and "A new key for a new budget". Each section says what the options for 0107's decisions close
-and what they leave. The code facts are from [R-codebase-map](R-codebase-map.md), the numbers from
+and what they leave. The code facts are from the codebase map (in this branch's history), the numbers from
 [R-fee-numbers](R-fee-numbers.md).
 
 > **After the design (2026-11-23).** This note assumed a monthly fee budget of 5 XLM per account

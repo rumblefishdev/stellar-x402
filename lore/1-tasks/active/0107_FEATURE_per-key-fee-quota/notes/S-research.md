@@ -15,7 +15,7 @@ history:
 
 Five notes, cited by letter below:
 
-- **A** [R-codebase-map](R-codebase-map.md): the code
+- **A** R-codebase-map: the code as it was before the build (removed once the build had used it; it is in this branch's history)
 - **B** [R-fee-numbers](R-fee-numbers.md): pubnet measurements
 - **C** [R-prior-art](R-prior-art.md): other facilitators and APIs
 - **D** [R-prices-api](R-prices-api.md): stellar-prices-api
