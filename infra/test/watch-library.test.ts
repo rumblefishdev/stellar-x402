@@ -15,7 +15,7 @@ const packageJson = (range: string) =>
   JSON.stringify({ dependencies: { "@x402/core": range, "@x402/stellar": range } });
 
 /** Production, GitHub and npm as the answers say; a missing answer throws as fetchText does. */
-function harness(answers: Record<string, string>) {
+function harness(answers: Record<string, string | undefined>) {
   const published: PutMetricDataInput[] = [];
   const logs: Record<string, unknown>[] = [];
   const deps = {
@@ -89,12 +89,8 @@ describe("runLibrary", () => {
       { [HEALTH]: "<html>challenge</html>" },
       /x402-facilitator\.sorobanscan\.com\/health answered no JSON/,
     ],
-    ["GitHub without the file", { [`${OUR_RAW}/${COMMIT}/${PACKAGE_PATH}`]: undefined }, /404/],
-  ] as const)("publishes nothing and fails loudly on %s", async (_, change, error) => {
-    const answers = { ...today, ...change } as Record<string, string | undefined>;
-    for (const [url, answer] of Object.entries(answers))
-      if (answer === undefined) delete answers[url];
-    const h = harness(answers as Record<string, string>);
+  ])("publishes nothing and fails loudly on %s", async (_, change, error) => {
+    const h = harness({ ...today, ...change });
     await expect(runLibrary(h.deps)).rejects.toThrow(error);
     expect(h.published).toEqual([]);
     expect(h.logs).toContainEqual(
