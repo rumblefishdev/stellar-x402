@@ -580,8 +580,9 @@ export async function main(
     pruner.start();
     const searchCards = createSearchCardWriter({ store: stores.searchCards, logger, metrics });
     searchCards.start();
-    // Catalog writes and a prune already under way finish before the process exits, and before
-    // the pools end, even if closing the server fails; the pools end even if draining fails.
+    // Catalog writes, a prune and a search card pass already under way finish before the process
+    // exits, and before the pools end, even if closing the server fails; the pools end even if
+    // draining fails.
     // The metrics' final flush comes last, after every part that counts, and is awaited:
     // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
     const closeOnce = async () => {
@@ -610,8 +611,6 @@ export async function main(
       pools,
       /** For tests, which run a tick instead of waiting a minute. */
       pruner,
-      /** For tests, which run a pass instead of waiting for one. */
-      searchCards,
       /** The logger every part writes to: for tests. */
       logger,
       /** Settles once the first sweep has ended: for tests. */

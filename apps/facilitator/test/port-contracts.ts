@@ -2243,9 +2243,23 @@ export function searchCardStoreContract(
       expect(await urls(2)).toEqual(["https://a.example", "https://b.example"]);
     });
 
-    it("returns at most `limit` listings, in catalog order", async () => {
+    it("returns at most `limit` listings, those without a card first, then in catalog order", async () => {
       for (const host of ["a", "b", "c"]) await list(`https://${host}.example`, 1);
       expect(await urls(1, 2)).toEqual(["https://a.example", "https://b.example"]);
+      await writeAll(1);
+      await list("https://d.example", 1);
+      // Every card is older than rules 2, and the new listing, with none, still comes first.
+      expect(await urls(2, 2)).toEqual(["https://d.example", "https://a.example"]);
+    });
+
+    it("leaves a card newer rules built when older rules write it, and doesn't name it stale", async () => {
+      await list("https://a.example", 1);
+      const [listing] = await cards.stale(2, 10);
+      const newer = { ...fields, name: "rules 2" };
+      await cards.write({ seq: listing!.seq, checkedAt: 1, rules: 2, fields: newer });
+      await cards.write({ seq: listing!.seq, checkedAt: 1, rules: 1, fields });
+      expect(await urls(1)).toEqual([]);
+      expect(await urls(2)).toEqual([]);
     });
 
     it("replaces a listing's card", async () => {

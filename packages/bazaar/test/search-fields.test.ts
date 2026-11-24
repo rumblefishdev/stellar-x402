@@ -1,6 +1,6 @@
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { describe, expect, it } from "vitest";
-import { searchFields } from "../src/index.js";
+import { SEARCH_FIELDS_VERSION, searchFields } from "../src/index.js";
 
 const listing = (fields: Partial<DiscoveryResource>): DiscoveryResource => ({
   resource: "https://seller.example/x",
@@ -89,7 +89,33 @@ describe("searchFields", () => {
     expect(searchFields(body).parameters).toBe("ticker symbol");
   });
 
-  it("caps the parameters at 40 words of 300 characters", () => {
+  it("reads an HTTP listing's example values as no description", () => {
+    const shop = listing({
+      extensions: {
+        bazaar: {
+          info: {
+            input: {
+              type: "http",
+              method: "POST",
+              body: { product: { description: "Blue shirt size XL" } },
+            },
+          },
+          schema: {
+            properties: {
+              input: {
+                properties: {
+                  body: { properties: { product: { description: "The product to buy" } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(searchFields(shop).parameters).toBe("product The product to buy");
+  });
+
+  it("caps the parameters at 40 entries, a name or a description each, of 300 characters", () => {
     const queryParams = Object.fromEntries(
       Array.from({ length: 30 }, (_, i) => [`p${i}`, { description: "d".repeat(400) }]),
     );
@@ -116,6 +142,40 @@ describe("searchFields", () => {
       tags: "",
       description: "weather",
       parameters: "",
+    });
+  });
+
+  // Cards built by another version are rewritten only when the version changes, so an output
+  // pinned here changes together with the version beside it.
+  it("pins its output to the rules version", () => {
+    const sample = listing({
+      resource: "https://a.example/v1/forecast?city=x",
+      serviceName: "Forecast",
+      tags: ["weather"],
+      description: "Daily forecast",
+      extensions: {
+        bazaar: {
+          info: { input: { type: "http", method: "GET", queryParams: { city: "Gdansk" } } },
+          schema: {
+            properties: {
+              input: {
+                properties: {
+                  queryParams: { properties: { city: { description: "City name" } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect({ version: SEARCH_FIELDS_VERSION, fields: searchFields(sample) }).toEqual({
+      version: 1,
+      fields: {
+        name: "Forecast v1 forecast",
+        tags: "weather",
+        description: "Daily forecast",
+        parameters: "city City name",
+      },
     });
   });
 });
