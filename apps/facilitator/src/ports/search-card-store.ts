@@ -1,4 +1,3 @@
-import type { SearchFields } from "@stellar-x402/bazaar";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 
 /** A catalog listing as the card rewrite reads it. */
@@ -13,11 +12,12 @@ export interface CardListing {
  * step with its listing; this store lets a starting release rewrite every card with its own rules.
  */
 export interface SearchCardStore {
-  /** Up to `limit` listings after `after` (a `seq`, or `null` from the start), in catalog order. */
-  listings(after: string | null, limit: number): Promise<CardListing[]>;
+  /** Up to `limit` listings after `after` (a `seq`; `"0"` from the start), in catalog order. */
+  listings(after: string, limit: number): Promise<CardListing[]>;
   /**
-   * Writes the card built from this copy of the listing, unless the listing has changed since:
-   * then the catalog's write has already written the newer listing's card. True when written.
+   * Writes the card built (`searchFields`) from this copy of the listing, unless the listing has
+   * changed since: then the catalog's write has already written the newer listing's card. True
+   * when written.
    */
-  write(listing: CardListing, fields: SearchFields): Promise<boolean>;
+  write(listing: CardListing): Promise<boolean>;
 }

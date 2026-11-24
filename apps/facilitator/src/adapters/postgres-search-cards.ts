@@ -1,16 +1,13 @@
-import type { SearchFields } from "@stellar-x402/bazaar";
+import { searchFields } from "@stellar-x402/bazaar";
 import type pg from "pg";
 import type { CardListing, SearchCardStore } from "../ports/index.js";
 
 export class PostgresSearchCardStore implements SearchCardStore {
   constructor(private readonly pool: pg.Pool) {}
 
-  async listings(after: string | null, limit: number): Promise<CardListing[]> {
+  async listings(after: string, limit: number): Promise<CardListing[]> {
     const { rows } = await this.pool.query<CardListing>(
-      `SELECT seq, resource FROM catalog
-        WHERE $1::bigint IS NULL OR seq > $1::bigint
-        ORDER BY seq
-        LIMIT $2`,
+      `SELECT seq, resource FROM catalog WHERE seq > $1 ORDER BY seq LIMIT $2`,
       [after, limit],
     );
     return rows;
@@ -21,7 +18,8 @@ export class PostgresSearchCardStore implements SearchCardStore {
    * a listing changed meanwhile writes no card; one this write holds waits for it, and then writes
    * its own card over this one.
    */
-  async write(listing: CardListing, fields: SearchFields): Promise<boolean> {
+  async write(listing: CardListing): Promise<boolean> {
+    const fields = searchFields(listing.resource);
     const { rowCount } = await this.pool.query(
       `WITH listing AS (
          SELECT seq FROM catalog WHERE seq = $1 AND resource = $2::jsonb FOR SHARE)
