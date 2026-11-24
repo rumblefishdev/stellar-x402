@@ -2057,6 +2057,17 @@ export function searchCardStoreContract(
       expect(await urls(2)).toEqual([]);
     });
 
+    it("leaves a card newer rules built to them, also once its listing is checked again", async () => {
+      await list("https://a.example", 1);
+      const [listing] = await cards.stale(2, 10);
+      expect(await cards.write({ seq: listing!.seq, checkedAt: 1, rules: 2, fields })).toBe(true);
+      await list("https://a.example", 2);
+      // A release rolled back to rules 1 neither names it nor overwrites it.
+      expect(await urls(1)).toEqual([]);
+      expect(await cards.write({ seq: listing!.seq, checkedAt: 2, rules: 1, fields })).toBe(false);
+      expect(await urls(2)).toEqual(["https://a.example"]);
+    });
+
     it("replaces a listing's card", async () => {
       await list("https://a.example", 1);
       const [listing] = await cards.stale(1, 10);

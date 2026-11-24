@@ -999,6 +999,20 @@ describe("PostgreSQL stores", () => {
          VALUES (-1, 1, '', '', '', '')`,
       ),
     ).rejects.toThrow(/foreign key/);
+    // The store writes each field to its column, and a listing never checked keeps a null check.
+    await db.stores().searchCards.write({
+      seq,
+      checkedAt: null,
+      rules: 1,
+      fields: { name: "N", tags: "T", description: "D", parameters: "P" },
+    });
+    const card = await pool.query(
+      "SELECT checked_at, name, tags, description, parameters FROM catalog_search WHERE seq = $1",
+      [seq],
+    );
+    expect(card.rows).toEqual([
+      { checked_at: null, name: "N", tags: "T", description: "D", parameters: "P" },
+    ]);
     await pool.query("DELETE FROM catalog WHERE seq = $1", [seq]);
     const left = await pool.query("SELECT count(*)::int AS n FROM catalog_search");
     expect(left.rows).toEqual([{ n: 0 }]);
