@@ -317,75 +317,32 @@ ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
 `,
   },
   {
-    // 0120: search by words (ADR 0014). One function builds a listing's four fields from the
-    // stored listing, so every part of search reads the same text, and its words are a column
-    // PostgreSQL computes on every write, with a GIN index. The release before keeps working: it
-    // never names the column, and PostgreSQL fills it on its writes too. Adding the column
-    // rewrites the catalog under ACCESS EXCLUSIVE, which holds its reads and writes but no
-    // payment's (a settlement writes the catalog after `/settle` answers): with the index,
-    // 285–576 ms for 2,500 listings and 5.5 s for 35,000 (measured locally on 18). The 500 ms
-    // rule above would make it online from about 2,000 listings, and no migration is online
-    // until 0080, so it is transactional: production held one listing on 2026-11-23, and the
-    // seed brings about 2,200 (0155). Past the group's 1 s a statement or 1.5 s in all, the run
-    // fails and rolls back. A later change to either function must rewrite the column too:
-    // replacing a function leaves the words already stored as they were. Computing the words per
-    // query instead, from an index on the function, took 210 ms for 2,500 matches against 4–14 ms
-    // from the column. Every field read returns NULL on an unexpected shape rather than failing
-    // the write. concat_ws is marked STABLE only because it takes any type; every argument here
-    // is text.
-    name: "0017_catalog_words",
+    // 0120: each listing's search card (ADR 0014): its four fields, built by `searchFields` in
+    // `@stellar-x402/bazaar`, and their weighted words. A table of its own, which a background
+    // loop fills from the catalog, so a change to the field rules or the model is a rewrite of
+    // cards by that loop, never a rewrite of `catalog` under its lock. `checked_at` and `rules`
+    // say which listing check and which rules version a card was built from; the loop rewrites a
+    // card whose listing was checked since or whose rules are older. A new table, so the release
+    // before keeps working: it never reads it. No index on the words: on 35,000 listings the
+    // fallback ranking took 142 ms with a GIN index and 138 ms without (0120 premise review).
+    name: "0017_catalog_search",
     sql: `
-CREATE FUNCTION catalog_search_fields(listing jsonb) RETURNS text[]
-  LANGUAGE sql IMMUTABLE PARALLEL SAFE
-RETURN ARRAY[
-  -- Name: the service name, an MCP tool's name and the words of the URL's path.
-  concat_ws(' ',
-    listing ->> 'serviceName',
-    replace(listing #>> '{extensions,bazaar,info,input,toolName}', '_', ' '),
-    regexp_replace(
-      substring(listing ->> 'resource' FROM '^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*([^?#]*)'),
-      '[^A-Za-z0-9]+', ' ', 'g')),
-  -- Tags.
-  (SELECT string_agg(tag #>> '{}', ' ')
-     FROM jsonb_path_query(listing, '$.tags[*] ? (@.type() == "string")', '{}', true) AS t(tag)),
-  -- Description: the listing's and its input schema's.
-  concat_ws(' ',
-    listing ->> 'description',
-    listing #>> '{extensions,bazaar,info,input,inputSchema,description}'),
-  -- Parameters: each input's name and description, at most 40, each cut at 300 characters.
-  (SELECT string_agg(word, ' ' ORDER BY part, n, sub) FROM (
-     SELECT src.part, q.n, w.sub, left(w.word, 300) AS word
-       FROM unnest(ARRAY[
-              '$.extensions.bazaar.info.input.queryParams.keyvalue()',
-              '$.extensions.bazaar.info.input.body.keyvalue()',
-              '$.extensions.bazaar.info.input.inputSchema.properties.keyvalue()',
-              '$.extensions.bazaar.schema.properties.input.properties.queryParams.properties.keyvalue()',
-              '$.extensions.bazaar.schema.properties.input.properties.body.properties.keyvalue()'
-            ]::jsonpath[]) WITH ORDINALITY AS src(path, part),
-            jsonb_path_query(listing, src.path, '{}', true) WITH ORDINALITY AS q(input, n),
-            LATERAL (VALUES
-              (0, q.input ->> 'key'),
-              (1, CASE WHEN jsonb_typeof(q.input -> 'value' -> 'description') = 'string'
-                       THEN q.input -> 'value' ->> 'description' END)
-            ) AS w(sub, word)
-      WHERE w.word IS NOT NULL
-      ORDER BY src.part, q.n, w.sub
-      LIMIT 40) params)
-];
-
--- Weights A to D: name, tags, description, parameters; search ranks them 1.0, 0.67, 0.5, 0.33.
-CREATE FUNCTION catalog_search_words(listing jsonb) RETURNS tsvector
-  LANGUAGE sql IMMUTABLE PARALLEL SAFE
-RETURN (
-  SELECT setweight(to_tsvector('english', coalesce(fields[1], '')), 'A')
-      || setweight(to_tsvector('english', coalesce(fields[2], '')), 'B')
-      || setweight(to_tsvector('english', coalesce(fields[3], '')), 'C')
-      || setweight(to_tsvector('english', coalesce(fields[4], '')), 'D')
-    FROM catalog_search_fields(listing) AS f(fields));
-
-ALTER TABLE catalog
-  ADD COLUMN words tsvector GENERATED ALWAYS AS (catalog_search_words(resource)) STORED;
-CREATE INDEX catalog_words ON catalog USING gin (words);
+CREATE TABLE catalog_search (
+  seq bigint PRIMARY KEY REFERENCES catalog (seq) ON DELETE CASCADE,
+  checked_at bigint,
+  rules integer NOT NULL,
+  name text NOT NULL,
+  tags text NOT NULL,
+  description text NOT NULL,
+  parameters text NOT NULL,
+  -- Weights A to D; search ranks them 1.0, 0.67, 0.5, 0.33.
+  words tsvector GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', name), 'A')
+      || setweight(to_tsvector('english', tags), 'B')
+      || setweight(to_tsvector('english', description), 'C')
+      || setweight(to_tsvector('english', parameters), 'D')
+  ) STORED
+);
 `,
   },
 ];

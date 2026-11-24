@@ -351,6 +351,16 @@ export const CATALOG = [
     },
     emit: "aggregated",
   },
+  // The search card writer (0120) fills one table shared by both networks, so process-scoped.
+  {
+    namespace: FAC,
+    name: "search_card_failures_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
   {
     namespace: FAC,
     name: "catalog_internal_errors_total",
