@@ -74,9 +74,11 @@ The measurements are in
     Apache-2.0, CLS pooling, no query prefix, inputs cut at 512 tokens. Listings and queries are
     embedded the same way and the vectors normalized. The meaning part reads the fields joined,
     cut at 2,000 characters.
-  - Vectors are a `vector` column of the card, from `pgvector`, with no fixed dimension, so a model
-    of another size needs no migration. Each stores the model that made it and the hash of the
-    text it was made from; search reads only vectors of the current model.
+  - Vectors, from `pgvector`, are kept per listing and model, with the hash of the text each was
+    made from, so a new model's vectors can fill beside the current one's and a model of another
+    size needs no migration; search reads only vectors of the current model. Task 0120's meaning
+    part decides their table: one vector column per card could not serve the current model while
+    the next one fills, and would mix dimensions.
   - Search compares the query's vector with every listing's that passes the filters (an exact
     scan, no index).
   - A listing whose cosine similarity to the query is below 0.60 is not a match, so a query
@@ -288,7 +290,9 @@ The measurements are in
   its lock (285–576 ms for 2,500 listings, 5.5 s for 35,000), and so would every later change to
   the fields, past what ADR 0012 lets a transactional migration hold.
 - A new listing, or a listing checked again, is searched as its card says until the loop's next
-  pass, a few seconds later.
+  pass, a few seconds later; a listing without a card comes before every rewrite of old cards. A
+  listing written twice within one millisecond of check time can keep the first write's card until
+  it is checked again, since a card follows the check time it was built from.
 - A seller can repeat words in its listing to rise in the words ranking, since `ts_rank_cd` counts
   each occurrence. Parameters are capped above; name, tags and description only by ADR 0008's
   listing limit. Fusion takes ranks, not scores, which bounds the gain, but the effect of
