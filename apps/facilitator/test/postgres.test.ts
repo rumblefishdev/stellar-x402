@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PostgresSpendStore, postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
+import { createSearchCardRewrite } from "../src/catalog/search-cards.js";
 import { main, migrateMain } from "../src/main.js";
 import {
   HashConflictError,
@@ -1044,6 +1045,55 @@ describe("PostgreSQL stores", () => {
     await pool.query("DELETE FROM catalog_search");
     expect(await catalog.upsert(listing(3, "Waves"))).toBe("updated");
     expect(await card()).toEqual([fieldsOf("Waves")]);
+  });
+
+  it("rewrites every card at start: a missing one, an out-of-date one, a rich listing's exactly (0120)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const rich = {
+      ...catalogEntry(),
+      resource: {
+        ...catalogEntry().resource,
+        description: "Météo ☀ for 2.5e-7 BTC",
+        tags: ["weather", "kraków"],
+        extensions: {
+          bazaar: {
+            info: { input: { type: "http", method: "GET", queryParams: { city: "Gdańsk" } } },
+            schema: {
+              properties: {
+                input: {
+                  properties: {
+                    queryParams: {
+                      properties: { city: { description: "City name", maxLength: 1e3 } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    await catalog.upsert(rich);
+    // A card left behind by older rules, and a listing stored before cards existed.
+    await pool.query("UPDATE catalog_search SET name = 'old'");
+    await pool.query(
+      `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+         resource, type, extension_keys)
+       VALUES ('stellar:testnet', 'G', 'GET', 'https://b.example/tides', 1, NULL, 1,
+         '{"resource":"https://b.example/tides","description":"Tides"}', 'http', '{}')`,
+    );
+    await createSearchCardRewrite({
+      store: searchCards,
+      logger: jsonLogger("error"),
+      metrics: memoryMetrics(),
+    }).run();
+    const { rows } = await pool.query(
+      `SELECT c.resource, s.name, s.tags, s.description, s.parameters
+         FROM catalog c JOIN catalog_search s USING (seq) ORDER BY c.seq`,
+    );
+    expect(rows).toHaveLength(2);
+    for (const { resource, ...card } of rows) expect(card).toEqual(searchFields(resource));
   });
 
   it("waits for a listing write under way, and then writes no card over the newer one (0120)", async () => {

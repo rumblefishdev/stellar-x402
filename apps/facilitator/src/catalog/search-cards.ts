@@ -3,7 +3,7 @@ import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
 import type { SearchCardStore } from "../ports/index.js";
 
-/** Listings read at a time: at ADR 0008's 36 KiB a listing, at most about 18 MiB in memory. */
+/** Listings read at a time: at ADR 0008's 36 KiB a listing, at most about 18 MiB of listing text. */
 const PAGE = 500;
 
 export interface SearchCardRewriteDeps {

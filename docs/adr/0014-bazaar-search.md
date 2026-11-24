@@ -44,7 +44,7 @@ The measurements are in
   - tags;
   - description: the listing's, an MCP tool's own and its input schema's;
   - parameters: the names and descriptions of the inputs a listing takes, an HTTP listing's query
-    and body fields or an MCP tool's arguments, each name once, at most 40, each cut at 300
+    and body fields or an MCP tool's arguments, each name once, at most 40 entries (a name or a description each), each cut at 300
     characters.
 
   One TypeScript function, `searchFields` in `@stellar-x402/bazaar`, builds the fields from the
