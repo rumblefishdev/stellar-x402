@@ -3,8 +3,12 @@ import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
 import type { SearchCardStore } from "../ports/index.js";
 
-/** Listings read at a time: at ADR 0008's 36 KiB a listing, at most about 18 MiB of listing text. */
-const PAGE = 500;
+/**
+ * Listings read at a time, the discovery route's largest page: a seller's example values can make
+ * a 36 KiB listing (ADR 0008) take about 0.66 MiB once parsed, so 100 hold about 66 MiB, well
+ * inside the process's memory (measured on Node 22 with an `info.input.body` of empty objects).
+ */
+const PAGE = 100;
 
 export interface SearchCardRewriteDeps {
   store: SearchCardStore;

@@ -587,12 +587,14 @@ export async function main(
     // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
     const closeOnce = async () => {
       signer.close();
+      // The search card rewrite stops at once, so it holds no connection through the drain.
+      const rewriteClosed = searchCards.close();
       try {
         try {
           await started.close();
         } finally {
           try {
-            await Promise.all([cataloger.drain(), pruner.close(), searchCards.close()]);
+            await Promise.all([cataloger.drain(), pruner.close(), rewriteClosed]);
           } finally {
             await endPools();
           }
