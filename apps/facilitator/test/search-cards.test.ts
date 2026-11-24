@@ -92,7 +92,7 @@ describe("search card rewrite", () => {
     await rewrite(store, lines, metrics).run();
     expect(metrics.value("search_card_failures_total")).toBe(1);
     expect(lines.map((line) => JSON.parse(line))).toContainEqual(
-      expect.objectContaining({ event: "search_cards_read_failed" }),
+      expect.objectContaining({ level: "error", event: "search_cards_read_failed", written: 0 }),
     );
   });
 

@@ -26,7 +26,7 @@ export interface SearchCardRewrite {
  * this release's field rules: so the cards of listings stored before cards existed, written by
  * other rules, or left behind by a rolled-back release all match their listings. Between starts
  * the catalog's write keeps each card in step. A failure is logged and counted; a failed read ends
- * the rewrite until the next start.
+ * the rewrite until the next start, logged as an error with the count of cards written.
  */
 export function createSearchCardRewrite(deps: SearchCardRewriteDeps): SearchCardRewrite {
   const { store, logger, metrics } = deps;
@@ -41,7 +41,8 @@ export function createSearchCardRewrite(deps: SearchCardRewriteDeps): SearchCard
       try {
         page = await store.listings(after, PAGE);
       } catch (error) {
-        logger.warn("search_cards_read_failed", { error });
+        // Nothing tries again before the next start, so the cards past this page stay as they are.
+        logger.error("search_cards_read_failed", { written, error });
         metrics.increment("search_card_failures_total");
         return;
       }
