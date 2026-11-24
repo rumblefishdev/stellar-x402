@@ -31,8 +31,8 @@ function pathWords(url: string): string {
  * - name: the service name, an MCP tool's name and the words of the URL's path;
  * - tags;
  * - description: the listing's, the MCP tool's own and its input schema's;
- * - parameters: each input's name once, with its description, from the HTTP query and body fields
- *   or the MCP tool's arguments. An HTTP listing's `info` holds example values (`validate.ts`), so
+ * - parameters: each input's name once, in name order, with its description, from the HTTP query
+ *   and body fields or the MCP tool's arguments. An HTTP listing's `info` holds example values (`validate.ts`), so
  *   only its names are read there; descriptions come from the schemas.
  * A field of an unexpected shape adds nothing.
  */
@@ -61,7 +61,12 @@ export function searchFields(listing: DiscoveryResource): SearchFields {
   ])
     for (const [name, value] of Object.entries(record(schema)))
       add(name, text(record(value)["description"]));
-  const entries = [...inputs].flat().filter((entry) => entry !== undefined);
+  // The stored listing (PostgreSQL's jsonb) keeps no key order, so the inputs go in name order: a
+  // listing gives the same fields before it is stored and after.
+  const entries = [...inputs.keys()]
+    .sort()
+    .flatMap((name) => [name, inputs.get(name)])
+    .filter((entry) => entry !== undefined);
 
   return {
     name: join([

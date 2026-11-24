@@ -67,7 +67,7 @@ describe("searchFields", () => {
       name: "Sea levels get tides mcp",
       tags: "ocean tides",
       description: "Tide tables High and low water for a port A port and a day",
-      parameters: "port UN/LOCODE of the port day",
+      parameters: "day port UN/LOCODE of the port",
     });
   });
 
@@ -122,6 +122,31 @@ describe("searchFields", () => {
       },
     });
     expect(searchFields(shop).parameters).toBe("product The product to buy");
+  });
+
+  it("gives the same fields whatever order the listing's keys come in, as stored or not", () => {
+    // jsonb, where the listing is stored, orders keys shorter first: `q` before `p00`…`p29`.
+    const names = [...Array.from({ length: 30 }, (_, i) => `p${String(i).padStart(2, "0")}`), "q"];
+    const withInputs = (order: string[]) =>
+      listing({
+        extensions: {
+          bazaar: {
+            info: {
+              input: {
+                type: "mcp",
+                inputSchema: {
+                  properties: Object.fromEntries(
+                    order.map((n) => [n, { description: `about ${n}` }]),
+                  ),
+                },
+              },
+            },
+          },
+        },
+      });
+    const asSent = searchFields(withInputs(names));
+    expect(searchFields(withInputs([...names].reverse()))).toEqual(asSent);
+    expect(searchFields(withInputs(["q", ...names.slice(0, -1)]))).toEqual(asSent);
   });
 
   it("caps the parameters at 40 entries, a name or a description each, of 300 characters", () => {
