@@ -149,7 +149,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
         },
       },
       description: {
-        what: `A write to Postgres failed on ${network}: a settlement record or the spend store. Settle answers may be lost from the records, and the spend policy may be blind.`,
+        what: `A read or write to Postgres failed on ${network}: a settlement record or the spend store, an account's plan among its reads. Settle answers may be lost from the records, and the spend policy may be blind.`,
         next: `Check x402-db-${networkSuffix(network)}@${c.envName} and its log, then settlement_record_failed and spend_store_failed in the app logs for the operation.`,
         noData: SILENT_EVENT,
       },
