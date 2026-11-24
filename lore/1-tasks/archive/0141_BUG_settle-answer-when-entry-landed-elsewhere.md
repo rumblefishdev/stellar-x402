@@ -2,7 +2,7 @@
 id: "0141"
 title: "Answer the seller correctly when the payer's auth entry landed in another transaction"
 type: BUG
-status: active
+status: completed
 owner: karolkow
 related_adr: []
 related_tasks: ["0024", "0124", "0043"]
@@ -20,6 +20,12 @@ history:
     status: active
     who: karolkow
     note: "Work starts."
+  - date: "2026-11-24"
+    status: completed
+    who: karolkow
+    note: >
+      PRs #183 (move the settle reasons), #182 (the fix) and #192 (one advice table) merged.
+      Decisions 9 and 10 withdrawn, so #237 closed unmerged. Facilitator 1272 passed, 3 skipped.
 ---
 
 # Answer the seller correctly when the payer's auth entry landed in another transaction
@@ -86,7 +92,7 @@ testnet cases reproduce (rival in ledger 5694924, ours failed in 5694925). What 
 | 7 | `settlement_nonce_consumed_elsewhere_total` carries a label `window`: `verify` for a refusal in `/verify` or in `/settle`'s re-check before the claim, `settle` for a record that ends with the settle code. Why: the out-of-scope lookup below waits on this counter, and a refusal before the claim writes no record (3 of the 7 testnet cases) | owner, 2026-11-13 | beyond it | nobody checked does it | `records.ts`, `verify.ts`; catalog `fields: ["window"]` | `verify.test.ts`, `settle.test.ts` (decision 7) |
 | 8 | The nonce read has no timeout of its own: the RPC's per-URL timeout and its failover to the next URL apply. A read that still fails keeps the old reason, logged as `nonce_lookup_failed`; nothing is built for a nonce that can't be read. Why: an own 3 s cut stopped the failover, and a failed read after a front-run needs every RPC URL down in that second (0 cases) | owner, 2026-11-13 | beyond it | nobody checked does it | `nonce-used.ts` | `nonce-used.test.ts` (read fails) |
 | 9 | A record that ends `settle_exact_stellar_nonce_consumed_elsewhere` feeds no breaker, also without an error event that names the cause. Done in its own PR after this task's PR merges, not here: the gap is in the breaker code already merged. **Withdrawn (owner, 2026-11-24):** the nonce entry is read after our failure, so a payer can write it then with a second entry under the same nonce and escape every breaker, own-frame failures included; with 0 front-runs measured, who is at fault stays as 0024 has it | owner, 2026-11-13 | beyond it | nobody checked does it | | |
-| 10 | The trustline lookup behind `/verify`'s `simulation_failed` loses its own 3 s timeout too, like the nonce read (decision 8): the RPC's per-URL timeout and failover apply. Done in decision 9's PR. **Withdrawn (owner, 2026-11-24):** task 0078 decision 6 set the 3 s on purpose: 10 s per URL over two calls would hold a refusal 30 s or more for a cause that only explains it owner, 2026-11-16 | beyond it | nobody checked does it | | |
+| 10 | The trustline lookup behind `/verify`'s `simulation_failed` loses its own 3 s timeout too, like the nonce read (decision 8): the RPC's per-URL timeout and failover apply. Done in decision 9's PR. **Withdrawn (owner, 2026-11-24):** task 0078 decision 6 set the 3 s on purpose: 10 s per URL over two calls would hold a refusal 30 s or more for a cause that only explains it | owner, 2026-11-16 | beyond it | nobody checked does it | | |
 | 11 | A front-run is named only by the payer's nonce entry on chain, never by parsing the error event: every writer that ends a record, and the pool-simulation path, read the entry after a failure, and an entry means another transaction used the nonce (ours writes none). The breaker keeps its own event rule (0024). Why: one proof in one place; the event check became redundant once decisions 5 and 6 read the entry on every path | owner, 2026-11-16 | changes decision 2's detection (`sceAuth/scecExistingValue`) | upstream EVM decides by the on-chain nonce state (`eip3009-utils.ts:195-205`@f33e4cf) | `reasons.ts` `reasonAfterFailure`; `settle.ts` pool-simulation catch; `consumedElsewhere` removed | `settle.test.ts`, `reconcile.test.ts` (decision 11); `test/live/nonce-consumed-elsewhere.ts` |
 | 12 | One rule names a failure that may hide a used nonce: `reasonAfterFailure` reads the nonce entry after `…_transaction_failed` or `…_simulation_failed`, for every writer; the `verify`-window counter is incremented once, where the checks produce the code. The answer after a failed record write keeps its nonce read: without it a front-run during a store outage gets the advice to sign a new payment. No behaviour change | owner, 2026-11-16 | beyond it | nobody checked does it | `reasons.ts` `reasonAfterFailure`; `verify.ts` counts the refusal | `verify.test.ts` "counts that refusal once"; the 0141 cases in `settle.test.ts` and `reconcile.test.ts` |
 | 13 | `withRetry`'s advice becomes one table from reason to advice kind (repeat / sign after ledger X / none) instead of the `UNSENT` and `NOT_SIGN_AGAIN` lists and the early return; a `[refactor]` PR after this task's, behaviour unchanged, reviewed by the author of tasks 0073 and 0082 | owner, 2026-11-16 | beyond it | upstream x402 gives no advice, only the code (`x402-specification-v2.md` §9) | `reasons.ts` `ADVICE`; `settle.ts` `withRetry` | unchanged: the advice cases in `settle.test.ts` |
@@ -126,3 +132,28 @@ Nothing.
 - [x] `docs/threat-model.md` states what a consumed nonce proves and what it does not
 - [x] The fee lost per incident is visible in logs or metrics (`settlement_nonce_consumed_elsewhere`
       with `feeCharged`, and its counter)
+
+## Design Decisions
+
+The table under "Decisions so far" holds every decision with its source, code and test.
+
+### From Plan
+
+1. **A distinct failure, never success** (decisions 2 and 3): the task proposed answering success
+   with the other transaction's hash; the owner chose a new failure code without advice to sign
+   again, because success lets a buyer race one entry through two facilitators and be served twice.
+2. **Every window answers it** (decision 4): `/verify`, `/settle`'s re-check, the pool's simulation
+   and the failure on chain, not only the last one the task named.
+
+### Emerged
+
+3. **The nonce entry is the proof, not the error event** (decisions 5, 6, 11, 12): one read after a
+   failure, in every writer that ends a record; it also works with an RPC that gives no events.
+4. **No own timeout on the nonce read** (decision 8): `FallbackRpc`'s timeout and failover apply.
+5. **One advice table** (decision 13, #192): no behaviour change. A reason missing from it gets
+   "sign a new payment after ledger X"; no test pins that, an accepted risk.
+6. **Breaker exemption withdrawn** (decision 9): the read comes after our failure, so a payer could
+   write the entry then and escape every breaker; fault stays as 0024 has it.
+7. **Trustline lookup keeps its 3 s** (decision 10 withdrawn): 0078 decision 6 set it on purpose.
+8. **Not covered: our transaction expires while another lands the entry.** The record ends
+   `…_transaction_expired` with advice to sign a new payment; 0 cases measured.
