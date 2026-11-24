@@ -441,8 +441,8 @@ requires one (0105, "API keys" below).
   comes from the payer's nonce entry on chain, not from the error: our failed transaction wrote no
   nonce, so an entry means another transaction used it. Answering
   `success` would let a buyer race one entry through two facilitators to the same seller and be
-  served twice. With an error event that names it, a used nonce feeds no breaker; without one (an
-  RPC without diagnostic events) it still does until task 0141 decision 9. The fee still counts
+  served twice. A record that ends with this code feeds no breaker, with or without an error event
+  that names the cause (an RPC without diagnostic events gives none). The fee still counts
   against the budgets, and each such record is logged with it
   (`settlement_nonce_consumed_elsewhere`). The host runs a C-account's `__check_auth` first and
   checks the nonce after it, when the token calls `require_auth` (`authenticate`, then
