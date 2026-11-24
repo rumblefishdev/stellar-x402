@@ -24,3 +24,4 @@ export {
   toolCall,
   type SellerListing,
 } from "./seller.js";
+export { SEARCH_FIELDS_VERSION, searchFields, type SearchFields } from "./search-fields.js";
