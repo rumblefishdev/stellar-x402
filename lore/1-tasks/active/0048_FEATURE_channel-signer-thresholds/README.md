@@ -110,3 +110,64 @@ only to the cold-key option.
 - [ ] Given the cold recovery key, when the hot key is lost or rotated, then one batched, cold-signed transaction moves many channels to a new hot key, tested on testnet
 - [ ] Given a channel without the recovery signer or with the hot key at high, when `checkChannel` runs at startup, then the service refuses to start
 - [ ] Spine AD-12 and the threat model describe the new signer layout; the reserve choice is recorded
+
+**Criteria for the chosen option** (accept full power, 2026-11-24; the cold-key criteria above
+no longer apply):
+
+- [ ] ADR 0015 records that the hot key keeps its full power, why (about 130 XLM at stake,
+      rebuilt in about an hour), and the trigger: float + reserves above 500 XLM, or before `upto`
+      goes to mainnet, whichever comes first; ADR 0013 and AD-12 link to it
+- [ ] The threat model lists the `upto` risk: a stolen key settles open payments at their full
+      `max_amount`
+- [ ] No contract gives a channel address any power: `upto-proxy` and every other contract
+      checked, the result recorded
+- [ ] `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` are read from the server's `.env`, not
+      `deploy/production/compose.yaml`, so a new key needs no PR
+- [ ] `docs/runbook.md` has a "lost access" section: new key, fee account, channels, `.env`,
+      restart, alarms, and when the same server may stay
+- [ ] A testnet drill moves the facilitator to a new key, fee account and channels with that
+      section, timed, and the result recorded
+
+## Design Decisions
+
+### From Plan
+
+1. **Accept the hot key's full power** (okarcz, 2026-11-24, stkrolikiewicz's proposal): no
+   threshold change and no second key. At launch scale every option loses about the same on a
+   theft (about 130 XLM, rebuilt in about an hour); A gives up in-place rotation for little, and
+   B0 costs a KMS spike, a signing CLI and an ADR 0013 exception before mainnet. Options in
+   [R-hot-key-reach-without-cold-key](notes/R-hot-key-reach-without-cold-key.md).
+2. **Trigger to revisit: float + reserves above 500 XLM, or before `upto` reaches mainnet**,
+   whichever comes first (okarcz, 2026-11-24). 500 XLM is about 4× today's stake; `upto` puts
+   payers' money at risk, not only ours.
+3. **A new ADR 0015**, linked from ADR 0013 and AD-12, rather than amending 0013 (okarcz,
+   2026-11-24): when the trigger fires, a later ADR supersedes 0015 without rewriting 0013.
+   AD-12's signer layout doesn't change.
+4. **All gaps close in 0048** (okarcz, 2026-11-24): the ADR, the threat-model entry, the
+   channel-address check, the key name moved to `.env`, the "lost access" runbook and its testnet
+   drill. OpenBao's backup stays with 0026.
+
+## Open Gaps
+
+Found on 2026-11-24 while walking through a theft of the hot key with today's setup
+([R-hot-key-reach-without-cold-key](notes/R-hot-key-reach-without-cold-key.md), "Theft with
+today's setup"). Each one holds whichever option the re-check picks.
+
+- **OpenBao's backup doesn't run yet.** `snapshot_age_seconds` on `x402-host` reads 1e9 (no
+  snapshot ever succeeded), and steps 3–5 of the runbook's "OpenBao snapshots → Setting it up"
+  never ran. Until they do, losing OpenBao's data loses the key for good. Owned by 0026.
+- **No runbook for "we lost access".** ADR 0013's theft steps assume our key still works on the
+  accounts (it adds the new key and merges the old fee account). When a thief has removed our
+  key, nothing covers it: a new key, fee account and channels, the config switch, the alarms, and
+  the rule that the same server stays only if the leak didn't come from it. Needs its own steps
+  and a testnet drill. stkrolikiewicz's steps in the research note are most of it. The key's name
+  and version are hardcoded in `deploy/production/compose.yaml:35-36`, so a new key after a theft
+  (a Transit rotate or a new name) needs an approved PR and a playbook run; moving
+  `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` into the server's `.env` would remove that step.
+- **`upto` is missing from the threat model.** A stolen key is `receiver_authorizer` on every open
+  `upto` payment and can settle each at its full `max_amount` until its `deadline`. The money goes
+  to the seller, but the payer pays more. Record it before `upto` reaches mainnet.
+- **Confirm nothing trusts a channel address.** Abandoned channels keep the old key at medium,
+  and so Soroban `require_auth`, forever. `upto-proxy` checks only `from` and
+  `receiver_authorizer` (`contracts/upto-proxy/src/lib.rs:123-136`), not the caller; confirm
+  there and for any later contract.
