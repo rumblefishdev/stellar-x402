@@ -7,8 +7,7 @@
 #   FACILITATOR_IMAGE  the facilitator's image; `x402-compose` sets it from `digest`
 #   SECRETS_DIR        the decrypted credentials, /run/x402/production unless set (local runs)
 #   FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET, OPENBAO_KEY_TESTNET, OPENBAO_KEY_VERSION_TESTNET
-#                      this directory's .env: the key and its accounts change together, with no
-#                      pull request (ADR 0015)
+#                      this directory's .env (see the facilitator's environment below)
 name: x402-production
 
 services:
@@ -34,9 +33,9 @@ services:
       RPC_URLS_FILE: /run/secrets/rpc-urls.testnet
       # The facilitator key signs in OpenBao Transit over testnet's socket, with no secret seed
       # here (ADR 0013, 0036). The OpenBao key's name and version, its account and its channels
-      # are public, and all four live in .env so a new key needs no pull request (ADR 0015).
-      # Unset, a deploy stops before it migrates; the database's and the tunnel's units set them
-      # themselves.
+      # are public, and all four live in .env so a new key needs no pull request (ADR 0015); a new
+      # name also needs its own policy in OpenBao, a new version doesn't. Unset, a deploy stops
+      # before it migrates; the database's and the tunnel's units set them themselves.
       FACILITATOR_ADDRESS: ${FACILITATOR_ADDRESS_TESTNET:?set in this directory's .env}
       CHANNELS: ${CHANNELS_TESTNET:?set in this directory's .env}
       OPENBAO_SOCKET: /run/openbao/testnet/bao.sock
