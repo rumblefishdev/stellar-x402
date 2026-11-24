@@ -12,7 +12,8 @@ resources on **Stellar testnet**, within limits you set.
 
 Without `STELLAR_X402_SECRET_KEY`, `call_paid_http` is not offered: the client's tool list does not
 have it. `list_resources` and `search_resources` make one catalog request per call and never loop
-over pages: the agent pages with `limit` and `offset`, or with search's `pagination.cursor`. Seller-written text is returned as data and cut to the catalog's
+over pages: the agent pages with `limit` and `offset`, or with search's `pagination.cursor`. A search's `query` goes to the catalog in the request URL, so
+the catalog's access log may keep it. Seller-written text is returned as data and cut to the catalog's
 limits: descriptions to 500 characters, MIME types to 127. Every failure comes back as a code from
 a fixed list ([Error codes](#error-codes)); causes go to stderr only.
 
