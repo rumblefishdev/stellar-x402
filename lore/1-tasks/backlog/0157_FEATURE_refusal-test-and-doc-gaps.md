@@ -54,7 +54,9 @@ whole facilitator suite (52 files, 1,339 tests).
   today: `spendWindowMs: config.spend.windowMs` (the month's rows would go after 7 days, so a
   quota would count a week), `keyed: false`, the default plans in place of
   `config.spend.accountPlans`, and `plans: { planOf: async () => undefined }`. **Before 0126
-  starts**: it rewrites `compose()` for two networks.
+  starts**: it rewrites `compose()` for two networks. The pruner is built in `main()`, which
+  parses its own config, so its test mocks `parseConfig` to let pubnet through, and has a test
+  that fails when 0048 lifts the refusal, to drop the mock then.
 - **`upstreamMessage` in the `verified` and `settled` lines**: deleting the field from either
   `logger.info` in `http/app.ts` fails no test, and for
   `invalid_exact_stellar_pay_to_balance_missing` it is the only place the fee upstream measured
@@ -64,7 +66,11 @@ whole facilitator suite (52 files, 1,339 tests).
 
 ## Acceptance Criteria
 
-- [ ] Reverting any of the four keyed wirings in `main.ts` fails a test (before 0126 starts)
+- [x] Reverting any of the four keyed wirings in `main.ts` fails a test (before 0126 starts)
+      (2026-11-24, branch `lore-0157-keyed-compose-test`, on top of 0107's: three `compose()`
+      tests in `settle-pool.test.ts`, "on a network that requires an API key", and
+      `main-keyed.test.ts` for the pruner's window, which `main()` builds, not `compose()`. Each
+      of the four reverts was applied again and fails one of them.)
 - [ ] Removing `upstreamMessage` from the `verified` or the `settled` line fails a test
 - [ ] Removing `verifyWithRefusals` from `main.ts` fails a test
 - [ ] Removing the network guard in `verifyWithRefusals` fails a test
