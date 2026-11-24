@@ -56,7 +56,7 @@ reading the port back. No other probe-and-close helper is left in the repo (chec
 
 - [x] No test helper in the repo probes and closes a port to pass it on (`git grep freePort` finds
       none outside lore)
-- [x] The affected tests pass; typecheck, lint and format clean (`examples/http-api` 13 tests,
+- [x] The affected tests pass; typecheck, lint and format clean (`examples/http-api` 14 tests,
       `conformance/test/proxy.test.ts` 17 tests; `apps/mcp-local/e2e` typechecks, its testnet run
       is by hand)
 
@@ -69,6 +69,11 @@ reading the port back. No other probe-and-close helper is left in the repo (chec
   0009's contract with the suite is unchanged.
 - `conformance/test/proxy.test.ts` and `apps/mcp-local/e2e/src/seller.ts` start their server on 0
   and read the port back from the start line; both `freePort()` helpers are gone.
+- From the PR #239 review: each refusal row also expects the proxy's message on stderr, since an
+  uncaught error exits 1 too (`listen(70000)` throws `ERR_SOCKET_BAD_PORT`). The seller's start
+  line, which the e2e now depends on, is checked in `pnpm test` by
+  `examples/http-api/test/index.test.ts`: it starts `src/index.ts` through tsx on `PORT=0`, reads
+  the port with `seller.ts`'s pattern and expects a 402 there.
 
 ## Design Decisions
 
