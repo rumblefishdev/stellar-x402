@@ -1,8 +1,9 @@
 # ADR 0014: Search the Bazaar by words and by meaning in PostgreSQL, fused by rank
 
 - Status: accepted
-- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks) and 2026-11-23
-  (task 0154: the quality score)
+- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks), 2026-11-23
+  (task 0154: the quality score) and 2026-11-24 (task 0120: each listing's search card in a table
+  of its own)
 
 ## Context
 
@@ -41,13 +42,19 @@ The measurements are in
   in four fields:
   - name: the service name, an MCP listing's tool name and the words of the URL path;
   - tags;
-  - description: the listing's and its input schema's;
+  - description: the listing's, an MCP tool's own and its input schema's;
   - parameters: the names and descriptions of the inputs a listing takes, an HTTP listing's query
-    and body fields or an MCP tool's arguments, at most 40, each cut at 300 characters.
+    and body fields or an MCP tool's arguments, each name once, at most 40, each cut at 300
+    characters.
 
-  The fields are built once, by one SQL function over the stored listing, into a stored generated
-  column. The words part, the meaning part and the text's hash all read that column, so they can't
-  disagree about what a listing says.
+  One TypeScript function, `searchFields` in `@stellar-x402/bazaar`, builds the fields from the
+  stored listing, next to the validator that knows its shape. They go into the listing's search
+  card: a row of its own table, `catalog_search`, one per catalog listing, which the words part,
+  the meaning part and the text's hash all read, so they can't disagree about what a listing says.
+  One background loop in the facilitator is the card's only writer: it writes the card of a
+  listing that has none, that was checked again since, or whose card an older version of the rules
+  built. A listing enters search once its card exists. A change to the rules is a version bump the
+  loop carries to every card, and the catalog table is never rewritten for search.
 
 - **Matches.** A listing matches a query when its meaning is close enough: cosine similarity
   0.60 or more (below). Words never add a listing; they only order the listings that match. On
@@ -58,17 +65,18 @@ The measurements are in
 - **Filters.** `network`, `type`, `payTo`, `scheme` and `extensions` apply before anything is
   ranked, so a filtered query ranks among the listings that pass.
 - **Words.** PostgreSQL's own full-text search, the `english` configuration:
-  - a weighted `tsvector` from the fields, with a GIN index. Weights start at name 1.0, tags 0.67,
-    description 0.5, parameters 0.33;
+  - a weighted `tsvector` from the card's fields, which PostgreSQL computes on each card write.
+    Weights start at name 1.0, tags 0.67, description 0.5, parameters 0.33. No index: on 35,000
+    listings ranking by words alone took 142 ms with a GIN index and 138 ms without;
   - the query's words are OR-ed, so a long sentence still matches, and ranked by `ts_rank_cd`.
 - **Meaning.**
   - The model is `ibm-granite/granite-embedding-30m-english`: 30M parameters, 384 dimensions,
     Apache-2.0, CLS pooling, no query prefix, inputs cut at 512 tokens. Listings and queries are
     embedded the same way and the vectors normalized. The meaning part reads the fields joined,
     cut at 2,000 characters.
-  - Vectors are a `vector(384)` column in the catalog table, from `pgvector`. Each stores the
-    model that made it and the hash of the text it was made from; search reads only vectors of the
-    current model.
+  - Vectors are a `vector` column of the card, from `pgvector`, with no fixed dimension, so a model
+    of another size needs no migration. Each stores the model that made it and the hash of the
+    text it was made from; search reads only vectors of the current model.
   - Search compares the query's vector with every listing's that passes the filters (an exact
     scan, no index).
   - A listing whose cosine similarity to the query is below 0.60 is not a match, so a query
@@ -85,10 +93,9 @@ The measurements are in
   - In a container of its own, with its own memory limit, reached by the facilitator over the
     environment's internal network. The model file is in the image, pinned by its revision, so
     nothing is downloaded when it starts.
-  - It holds no database password. The facilitator reads listings whose vector is missing or
-    stale (another model, another text hash), asks the container for each vector without holding
-    a lock, and writes it only `WHERE` the text hash is still the one it embedded. The catalog row
-    is the only record of what needs a vector.
+  - It holds no database password. The card loop asks it for a card's vector when the card has
+    none, or its model or text hash differs, without holding a lock. A card whose listing changes
+    meanwhile is written again on the next pass.
   - The facilitator sends the container one listing at a time, so a backlog never takes the CPU
     that queries need.
   - A listing the container fails on is tried again on the next pass. Failures are logged with
@@ -276,9 +283,12 @@ The measurements are in
 
 - Production, CI and local compose switch to the pgvector image pinned as above, and one
   more container, limited to 512 MiB, which ADR 0011's totals now count.
-- Adding the stored generated column rewrites the catalog table. On today's catalog that is one
-  row; changing how the fields are built later, on a large catalog, needs a plain column, a
-  trigger and a backfill, to stay within ADR 0012's online-migration limits.
+- The cards are a table of their own, added with a `CREATE TABLE` that touches no catalog row. A
+  catalog column computed by PostgreSQL was the first shape: adding it rewrote the catalog under
+  its lock (285–576 ms for 2,500 listings, 5.5 s for 35,000), and so would every later change to
+  the fields, past what ADR 0012 lets a transactional migration hold.
+- A new listing, or a listing checked again, is searched as its card says until the loop's next
+  pass, a few seconds later.
 - A seller can repeat words in its listing to rise in the words ranking, since `ts_rank_cd` counts
   each occurrence. Parameters are capped above; name, tags and description only by ADR 0008's
   listing limit. Fusion takes ranks, not scores, which bounds the gain, but the effect of
@@ -290,8 +300,7 @@ The measurements are in
 - Paging reaches every match. On the 0134 set a query has a median of 158 matches, 76 among the
   Stellar listings alone, and at most 744.
 - Changing the model means embedding every listing again: about 5 minutes for 34,782 listings at
-  granite's speed on an M4, while search answers by words alone. A model of another size also
-  changes the column's type.
+  granite's speed on an M4, while search answers by words alone.
 - The cursor carries the score with q in it. A payment between two pages can move a listing, as a
   new listing can.
 - Changing how a payment's listing key is derived leaves old rows under the old key; the rows can
