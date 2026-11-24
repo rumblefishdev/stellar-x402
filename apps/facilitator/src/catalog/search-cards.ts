@@ -11,8 +11,6 @@ export interface SearchCardWriterDeps {
   store: SearchCardStore;
   logger: Logger;
   metrics: ProcessMetrics;
-  /** Spreads the passes of several processes. */
-  random?: () => number;
 }
 
 export interface SearchCardWriter {
@@ -31,20 +29,23 @@ export interface SearchCardWriter {
  * logged and counted, and the next pass tries again.
  */
 export function createSearchCardWriter(deps: SearchCardWriterDeps): SearchCardWriter {
-  const { store, logger, metrics, random = Math.random } = deps;
+  const { store, logger, metrics } = deps;
+  let closed = false;
 
   const runOnce = async () => {
     let stale;
     try {
       stale = await store.stale(SEARCH_FIELDS_VERSION, BATCH);
     } catch (error) {
-      logger.warn("search_cards_failed", { error });
+      logger.warn("search_cards_read_failed", { error });
       metrics.increment("search_card_failures_total");
       return;
     }
     let written = 0;
     // One card that fails is logged and skipped, so it never holds up the listings after it.
     for (const listing of stale) {
+      // A shutdown waits for this pass, so it stops between cards.
+      if (closed) break;
       try {
         await store.write({
           seq: listing.seq,
@@ -63,7 +64,6 @@ export function createSearchCardWriter(deps: SearchCardWriterDeps): SearchCardWr
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   let running: Promise<void> | undefined;
-  let closed = false;
   const schedule = () => {
     if (closed) return;
     timer = setTimeout(
@@ -73,7 +73,7 @@ export function createSearchCardWriter(deps: SearchCardWriterDeps): SearchCardWr
           schedule();
         });
       },
-      INTERVAL_MS * (0.9 + 0.2 * random()),
+      INTERVAL_MS * (0.9 + 0.2 * Math.random()),
     );
     timer.unref();
   };
