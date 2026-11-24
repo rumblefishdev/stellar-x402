@@ -1551,7 +1551,7 @@ describe("createSettler", () => {
   });
 
   it("counts every answer by its outcome: result success or error (0027)", async () => {
-    // `result` is the outcome's only dimension set: without it the EMF line has no valid set.
+    // `result` is the outcome's only dimension: without it the series is written as `other`.
     const { settle, metrics } = setup();
     await settle(payload(), requirements);
     await settle(payload(), requirements);

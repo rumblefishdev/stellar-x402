@@ -1,6 +1,6 @@
 // Prometheus adapter (lore 0139, ADR 0011 "Metrics"): the facilitator's metrics as Prometheus text
-// on `/metrics`, for the agent on the server to scrape. It replaces the EMF adapter at the switch
-// (0139 AC3); until then nothing wires it in `main()`.
+// on `/metrics`, for the agent on the server to scrape. It replaced the EMF adapter at the switch
+// (0139 AC3); `main()` serves it on `METRICS_PORT`.
 //
 // - A series' labels are the union of its catalog sets' dims, plus `network` for a network-scoped
 //   metric, plus its `fieldValues` fields (below). A set's `when` on a dim only limited what
@@ -67,7 +67,7 @@ export function labelKeys(def: MetricDef): string[] {
 /** A label's closed values: a dim's `values` or a field's `fieldValues`; none for an open dim. */
 const closedValues = (def: MetricDef, key: string) => def.values?.[key] ?? def.fieldValues?.[key];
 
-// ponytail: the one label rewritten here; main.ts can pass the index itself once EMF is gone.
+// ponytail: the one label rewritten here; main.ts could pass the index itself.
 const RPC_INDEX = /^RPC_URLS\[(\d+)\]#/;
 
 /**
