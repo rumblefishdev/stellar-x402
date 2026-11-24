@@ -4,13 +4,32 @@ import ipaddr from "ipaddr.js";
 import { Agent, errors, fetch as undiciFetch } from "undici";
 
 /**
- * Why a seller request was refused or failed. `message` can reach the caller's own client as is (the
- * buyer's MCP server shows it to the agent), so it holds nothing from the seller; `detail` (a library
- * or seller error) is for logs only.
+ * What stopped a seller request:
+ * - `not_a_url`: the URL does not parse.
+ * - `not_https`: its scheme is not https (nor http to this machine, when that is allowed).
+ * - `not_public`: its host is, or resolves to, an address that is not public.
+ * - `redirect`: the seller answered 3xx, which is not followed.
+ * - `response_too_large`: the seller's headers or body are over their cap.
+ * - `timeout`: the deadline passed before the response arrived in full.
+ * - `network`: the request or its body failed for any other reason (a refused or dropped
+ *   connection, a TLS error, the request's own signal).
+ */
+export type SellerFetchCode =
+  | "not_a_url"
+  | "not_https"
+  | "not_public"
+  | "redirect"
+  | "response_too_large"
+  | "timeout"
+  | "network";
+
+/**
+ * Why a seller request was refused or failed. `message` states the fact and holds nothing from the
+ * seller, so a caller may pass it on as is; `detail` (a library or seller error) is for logs only.
  */
 export class SellerFetchError extends Error {
   constructor(
-    readonly code: "unsafe_url" | "upstream_error" | "response_too_large",
+    readonly code: SellerFetchCode,
     message: string,
     readonly detail?: string,
   ) {
@@ -20,9 +39,9 @@ export class SellerFetchError extends Error {
 
 /**
  * All of a seller's response headers, in bytes. Its terms travel base64-encoded in one header, so
- * the largest listing we keep (16 KiB) takes about 21.4 KiB, plus the seller's other headers.
+ * the largest listing we keep (36 KiB) takes 48 KiB, plus the seller's other headers.
  */
-const MAX_HEADER_BYTES = 24 * 1024;
+const MAX_HEADER_BYTES = 52 * 1024;
 
 /** How requests to one seller are bounded. */
 export interface SellerLimits {
@@ -72,7 +91,7 @@ export const publicOnlyLookup: LookupFunction = (hostname, options, callback) =>
     if (error) return callback(error, "");
     if (addresses.some((a) => isNotPublic(a.address))) {
       const refused = new SellerFetchError(
-        "unsafe_url",
+        "not_public",
         "The URL's host resolves to an address that is not public.",
       );
       return callback(refused as NodeJS.ErrnoException, "");
@@ -88,16 +107,16 @@ export const publicOnlyLookup: LookupFunction = (hostname, options, callback) =>
  * With `allowInsecureLocal`, http or https to this machine passes too.
  */
 export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
-  if (!URL.canParse(raw)) throw new SellerFetchError("unsafe_url", "url is not a URL.");
+  if (!URL.canParse(raw)) throw new SellerFetchError("not_a_url", "url is not a URL.");
   const url = new URL(raw);
   const host = url.hostname.replace(/^\[|\]$/g, "");
   const web = url.protocol === "http:" || url.protocol === "https:";
   if (allowInsecureLocal && web && isLoopback(host)) return url;
   if (url.protocol !== "https:")
-    throw new SellerFetchError("unsafe_url", "Only https URLs are called.");
+    throw new SellerFetchError("not_https", "Only https URLs are called.");
   const local = isIP(host) !== 0 && isNotPublic(host);
   if (local)
-    throw new SellerFetchError("unsafe_url", "The URL points at an address that is not public.");
+    throw new SellerFetchError("not_public", "The URL points at an address that is not public.");
   return url;
 }
 
@@ -107,7 +126,8 @@ export function checkUrl(raw: string, allowInsecureLocal: boolean): URL {
  * the body arrives. `deadline` is the caller's, `AbortSignal.timeout(timeoutMs)` made once when its
  * work starts: it covers every request made through this fetch, so a request still running at
  * `timeoutMs`, or started after it, is cut off. Work between requests (a payment's signing) is not.
- * A request's own `signal` ends it earlier: an MCP client closing its event stream.
+ * A request's own `signal` ends it earlier (the caller gave up on it), and that is a `network`
+ * failure: only the deadline is a `timeout`.
  */
 export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeof fetch {
   // Every name is checked where it is connected to. undici's own `maxResponseSize` is not used: it
@@ -142,14 +162,14 @@ export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeo
         throw new SellerFetchError("response_too_large", "The seller's response is too large.");
       }
       throw new SellerFetchError(
-        "upstream_error",
+        deadline.aborted ? "timeout" : "network",
         "The request to the seller failed.",
         String(error),
       );
     }
     if (response.status >= 300 && response.status < 400) {
       throw new SellerFetchError(
-        "unsafe_url",
+        "redirect",
         "The seller answered with a redirect, which is not followed.",
       );
     }
@@ -168,7 +188,7 @@ export function guardedFetch(limits: SellerLimits, deadline: AbortSignal): typeo
       if (error instanceof SellerFetchError) throw error;
       // The deadline covers the body too: a seller that sends its headers and then stalls ends here.
       throw new SellerFetchError(
-        "upstream_error",
+        deadline.aborted ? "timeout" : "network",
         "The seller's response did not arrive in full.",
         String(error),
       );

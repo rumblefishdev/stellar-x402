@@ -1,7 +1,7 @@
 // G-alarm-list, "Settlement": the facilitator's EMF lines (#112), which reach CloudWatch with #113.
 import type { EnvironmentConfig } from "../config.js";
 import { networkSuffix } from "../names.js";
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
 const SILENT_LEVEL = "Keeps its state; facilitator-silent covers a stopped process.";
 const SILENT_EVENT = "Nothing happened; facilitator-silent covers a stopped process.";
@@ -13,7 +13,7 @@ const BREAKERS = [
   ["asset", "one wasm token's transfers"],
 ] as const;
 
-export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
+export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
   const t = c.thresholds;
 
   // On the first one (Karol's review of #114, point 3): `onError` takes anything unknown as ours,
@@ -44,6 +44,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.level("pending", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "settlement_oldest_open_seconds", dims: on },
       statistic: "Maximum",
       periodMinutes: 1,
@@ -83,7 +84,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       comparison: ">",
       threshold: 0,
       description: {
-        what: `Settle on ${network} has waited for a free channel for 3 minutes, every sample of each minute: every channel is busy or out of the pool.`,
+        what: `Settle on ${network} has waited for a free channel for 3 minutes, every sample of each minute: every channel is busy, out of the pool, or held back after a deploy (0090).`,
         next: "Check channel-quarantined and the traffic; add channels (docs/runbook.md, OpenBao) when it is load rather than faults that holds them.",
         noData: SILENT_LEVEL,
       },
@@ -111,6 +112,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       f.event("breaker-opened", {
         group: "facilitator",
         network,
+        severity: "critical",
         qualifier: breaker.replace("_", "-"),
         signal: { catalog: "spend_breaker_opened_total", dims: { network, breaker } },
         description: {
@@ -123,6 +125,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.event("budget-nearing", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "spend_budget_nearing_total", dims: on },
       periodMinutes: 5,
       periods: 4,
@@ -180,6 +183,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.event("landed-after-expired", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "settlement_landed_after_expired_total", dims: on },
       description: {
         what: `A transaction on ${network} landed after its record was marked expired: the payer may have been told the payment failed while it settled.`,
@@ -191,6 +195,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.level("sweeps-stopped", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "settlement_sweeps_total", dims: { network, outcome: "listed" } },
       statistic: "Sum",
       periodMinutes: 1,
@@ -294,6 +299,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.event("commit-unmatched", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "spend_commit_unmatched_total", dims: on },
       description: {
         what: `A settled fee on ${network} counts against no budget: its reservation was never made or was pruned meanwhile, so the fee budgets undercount.`,

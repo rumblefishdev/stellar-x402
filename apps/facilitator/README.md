@@ -5,6 +5,17 @@ discovery routes. Design: [the M1 spine](../../docs/architecture/m1-spine.md) (A
 [ADR 0006](../../docs/adr/0006-settlement-record.md) (the settlement record) and
 [ADR 0011](../../docs/adr/0011-facilitator-hosting.md) (the settle budget and its timing).
 
+## `openapi.json`
+
+[`openapi.json`](openapi.json) describes the five public routes (`/verify`, `/settle`,
+`/discovery/resources`, `/supported` and `/health`) as OpenAPI 3.1: for a seller, for a generator,
+and for the API hub's reference page at `sorobanscan.com/api/docs/x402`, which renders a copy of
+it (`public/docs/x402/openapi.json` in `rumblefishdev/sorobanscan-api-portal`).
+
+It is written by hand, from this README and `src/http/app.ts`. No route serves it and no test
+compares it with the routes yet, so a change here to a route, a status, a limit or an answer's
+shape has to be made in the document too, and the hub's copy replaced.
+
 ## Settings that shape `/settle`
 
 - `SETTLE_BUDGET_MS` (30 s by default, 1–80 s): the longest one `/settle` call takes, the checks
@@ -115,8 +126,14 @@ not `NETWORK`, so it holds in a process that serves both networks (0126).
   client throws `Facilitator verify failed (401): {"error":"missing_api_key"}`.
 
 - **A key is `x402_` and 43 base64url characters** (32 random bytes). The registry (`api_keys`,
-  migration `0013_api_keys`) stores its SHA-256, never the key, so a key is shown once, when it is
-  issued, and a lost one is replaced. A malformed key is refused without a read of the registry.
+  migration `0013_api_keys`) stores its SHA-256, never the key, so a key the operator's script
+  issues is shown once, when it is issued, and a lost one is replaced. A malformed key is refused
+  without a read of the registry. A key the portal issues (0106) also has a sealed copy in
+  `api_key_copies` (migration `0014_api_key_copies`), so the API hub can show it again:
+  AES-256-GCM under the portal's `KEY_ENCRYPTION_KEY`, which the database never holds, bound to
+  the key's owner and hash, and deleted when the portal revokes the key. The script's `revoke`
+  leaves it, never shown again, until the portal next revokes a key of that owner. The
+  facilitator never reads that table.
 - **A key has an owner**, `<kind>:<id>`: `operator:<name>` for a key the operator issues by hand,
   `discord:<id>` for one the portal issues (0106). An owner has one active key at a time. The rate
   limiter counts a pubnet request under its owner (`settle:key:operator:acme`), with the same
@@ -326,7 +343,13 @@ Labels come from closed sets; addresses are in log lines only.
   expiry. `0007_settlement_reopened` adds the reopen count: rows already there, and rows an older
   release writes during the deploy, get -1 and never reopen. This release can't claim a payment
   on a database without it. `0011_settlement_in_flight`: `/settle` can't claim a payment without it. `0013_api_keys` adds the
-  API key registry, a new table the release before it never reads.
+  API key registry, a new table the release before it never reads. `0015_settlement_refused`
+  (0086) adds the checks' message and detail columns, the payer's expiration ledger and the
+  index the pruner reads `refused` records through; a transactional migration, since online ones
+  wait for 0080: `ADD COLUMN` holds reads and writes of `settlements` until the group commits,
+  for one scan of it, and a group past its 1.5 s fails the run, unretried. The release before never writes `refused`, and
+  reads such a record as not final: during the deploy, an old process answers a repeat of a
+  refused payment `settlement_pending` until its budget ends, and never settles it.
 - An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
   failed run continues from the next step. It logs `migration_step` after each step and
   `migration_backfill` every 50 backfill batches. A backfill writes about 1.2 GiB of WAL per
@@ -427,6 +450,26 @@ When no RPC URL gives a verdict, `/verify` answers `503 {"error":"rpc_unavailabl
 its own `unexpected_verify_error` on every `RPC_URLS` entry, or the facilitator's own ledger read
 failed on every URL. The payment wasn't judged, so the same request may be sent again.
 
+A refusal of a payment whose payload names a payer and nonce is recorded (task 0086), so the same
+payment never settles through us once it would pass: fees drop, the payer tops up or adds a
+trustline. Its `invalidMessage` starts with what to do: `this payment will not settle here, but
+its auth entry may still land in ledger N: sign a new payment once that ledger has closed`, and
+`extra.expirationLedger` is N. The same payment sent again gets the recorded answer without the
+checks. A payload whose auth entry expires more than 720 ledgers (about an hour) after the latest
+ledger isn't recorded (task 0156): its expiration comes from the payload alone, before any
+signature check, and the record is kept until that ledger. Its refusal starts with `this payment may still
+settle until ledger N: sign a new payment once that ledger has closed`, logged as
+`settlement_refusal_unrecorded`. When the latest ledger can't be read within 1 s, the refusal is
+recorded. `/settle`'s check before the claim does the same: past the 720 ledgers nothing is
+recorded, and the answer carries the usual `the auth entry may still land in ledger N: sign a new
+payment once that ledger has closed`. While a settlement of the same payment is under way, a refusal starts with `a settlement
+of this payment is under way: send this payment to /settle for its outcome before signing a new
+one`. When the settlement store doesn't answer the lookup within 2 s, `/verify` runs the checks as
+usual, logged as `verify_store_lookup_failed`. When it doesn't record a refusal within 2 s,
+`/verify` answers `503 {"error":"store_unavailable"}` with `Retry-After: 5`, logged as
+`verify_store_unavailable`: a refusal it couldn't record would invite a second signature, so send
+the same request again. A breaker's refusal (below) isn't recorded.
+
 While a breaker is open (task 0024, "Breakers" above), a payment every other check accepted gets
 `/settle`'s reason early, so a seller doesn't serve what `/settle` would refuse. `invalidMessage`
 says which breaker, with no address, amount or reset time:
@@ -446,12 +489,12 @@ then simulates once more, to name the causes upstream drops:
 | `invalid_exact_stellar_payto_trustline_missing`          | `payTo` holds no trustline to the classic asset, or the account is unfunded | the seller funds the account and adds it               |
 | `invalid_exact_stellar_payer_trustline_missing`          | the payer holds no trustline to the classic asset                           | the payer makes sure the account exists and adds it    |
 
-`invalidMessage` names the account, the asset and the ledger the simulation saw, and the `verified`
+For the two trustline reasons, `invalidMessage` names the account, the asset and the ledger the simulation saw, and the `verified`
 and `settled` logs carry it as `message`. The token must be a Stellar Asset Contract: any
 contract can emit the same error, and only a SAC's means a trustline. A SAC stops at its first
 failure, the payer's side first, so the payer's message adds that `payTo` wasn't checked: a seller
-missing one too shows up on the next try. Once the trustline is there, the same payment may be
-sent again until its auth expires. `/settle`'s check before the claim gives the same two reasons; a
+missing one too shows up on the next try. The refusal is recorded (task 0086; past 720 ledgers ahead
+only answered, task 0156), so once the trustline is there, sign a new payment after the refused one's `extra.expirationLedger`. `/settle`'s check before the claim gives the same three reasons; a
 trustline removed after it answers `settle_exact_stellar_simulation_failed` from the pool.
 
 The nonce is used when its entry exists on chain: the host keeps it until the auth entry expires.
@@ -532,11 +575,13 @@ below are worth repeating as they are. Any other failure gets the same answer ag
 needs a new payment (a new nonce), but only once this one can't land ("Ended", below), except for:
 
 - a refusal from the checks (`invalid_exact_stellar_*`, `invalid_network`) comes before the
-  claim and records nothing: the same payment may be sent again, and may succeed later, except
-  when its message names archived entries.
+  claim. For a payload that names a payer and nonce it is recorded as `refused` (task 0086): the
+  same payment never settles here, even once it would pass, and gets the same answer again, with
+  `extra.expirationLedger` and "sign a new payment once that ledger has closed", as for an ended
+  payment. A nothing-sent record whose repeat the checks refuse turns `refused` too. A store that
+  can't record the refusal is a 500: send the same payment again.
   `invalid_exact_stellar_payload_fee_exceeds_maximum` is our own fee estimate above our ceiling,
-  not a fault in the payment (0086: it can settle after its payer signed again, so ask for a new
-  signature only once it can't land). With the bid from fee stats (no `INCLUSION_FEE_STROOPS`),
+  not a fault in the payment. With the bid from fee stats (no `INCLUSION_FEE_STROOPS`),
   the bid adds at most 20,000 stroops of it (fee stats are capped at 10,000 and the estimate
   counts the bid twice), so rent is what usually puts it there, and waiting seldom helps. When the
   message names archived entries
@@ -546,8 +591,7 @@ needs a new payment (a new nonce), but only once this one can't land ("Ended", b
   `invalid_exact_stellar_signature_expiration_too_far` comes from our three checks: the resource's
   `maxTimeoutSeconds` above 300 s at the default cap ("at most 300 is allowed", which stays
   refused, so the resource must ask for less), the auth's own expiry past the cap ("at most 66 are
-  allowed": the client saw ledgers faster than 5 s; the refused payment may pass later too, so ask
-  for a new signature only once it can't land), or past the last ledger the pool can bound.
+  allowed": the client saw ledgers faster than 5 s), or past the last ledger the pool can bound.
   Upstream's own expiry check answers with it too, for one whose message names none of these,
   when our RPC is 3 or more ledgers behind the client's;
 - `…_payer_busy` recorded nothing: one payer's payments in one asset settle one at a time, and
@@ -648,8 +692,10 @@ the network, submitted the payer's entry first, or the payer spent the nonce on 
 `success` is never answered for a transaction we didn't submit: one entry raced through two
 facilitators to the same seller would be served twice. No action is needed for one; many of them
 mean someone grieves our fees. The same counter with `window: "verify"` counts a refusal in `/verify` or in `/settle`'s re-check
-before the claim, which writes no record: there the other transaction landed before ours was sent,
-so it cost no fee. A seller that sends `/verify` and then `/settle` counts it twice.
+before the claim, which records it `refused` (0086): there the other transaction landed before ours was sent,
+so it cost no fee. It counts requests, not payments: each `/verify`, each `/settle` retry and each
+reopen re-check of the same payload adds one, so a burst of retries is not a burst of front-runs.
+`/verify` keeps no record either, so a repeat of a payment we settled ourselves counts too.
 
 `settlement_landed_after_expired` (counted in `settlement_landed_after_expired_total` by `state`)
 reports a transaction found on chain after its record ended `expired`, with its hash and ledger. The
@@ -736,10 +782,11 @@ stellar-cli restores one entry per call, and takes the parts of a key rather tha
 `{ x402Version: 2, items, pagination: { limit, offset, total } }`, in a stable order with no
 ranking. `total` counts every entry the filters match.
 
-- Filters: `type`, `payTo`, `network`, `extensions` and `scheme`, alone or combined. A
-  well-formed network we don't serve, such as `eip155:8453` or the other Stellar network, any
-  `scheme` but `exact` and any `extensions` but `bazaar` give an empty page. Every entry has
-  `bazaar`.
+- Filters: `type`, `payTo`, `network`, `extensions` and `scheme`, alone or combined. The catalog
+  holds both Stellar networks, whichever one this facilitator settles on (task 0155): without
+  `network` a page lists both, and `network` narrows it to one. A well-formed network that isn't
+  Stellar's, such as `eip155:8453`, any `scheme` but `exact` and any `extensions` but `bazaar` give
+  an empty page. Every entry has `bazaar`.
 - `limit`: 20 by default, at most 100. A larger one is clamped, and `pagination.limit` echoes the
   limit used. `limit=0` gives `total` alone.
 - `offset`: at most 1 000 000, so every entry can be paged to.
@@ -765,3 +812,47 @@ version on: a local catalog written before it keeps its old entries until `docke
 | Setting              | Default | Meaning                                                                    |
 | -------------------- | ------- | -------------------------------------------------------------------------- |
 | `CATALOG_LIST_LOCAL` | `false` | `true` lists those URLs too, for a local run or the e2e gate; testnet only |
+
+### Seeding the catalog
+
+`pnpm seed <hosts file>` fills the catalog once with the sellers that exist, without waiting for a
+payment through us (task 0155). It reads every listing from the seller itself, never from another
+catalog:
+
+1. The hosts file has one host a line (`api.seller.example`, or a whole origin); blank lines and
+   `#` comments are skipped, and a host named twice is asked once. A line that isn't a host stops
+   the command before any request, naming the line. Keep the file outside the repository.
+2. For each host it reads `https://<host>/.well-known/x402` (at most 512 KiB) and keeps the
+   resource URLs on that host, with GET or POST. Other hosts' URLs, other methods and entries with
+   no readable URL are skipped, each named in the report with its reason.
+3. Each URL gets one unpaid request, by the file's method or GET. Its 402 names the listing's
+   method, example and Stellar accounts; each account then gets the check a payment would start,
+   on that same 402, so a seeded listing passes the same gates. Only when the 402 declares another
+   method, or an MCP tool, is the seller asked once more that way. It has no `ledger` and its
+   attempt rows no `payer`; a listing a settlement wrote keeps its `ledger`.
+4. Hosts run at once; within a host the seed waits 3 s after each request, 20 a minute, below the
+   30 checks a minute a host's checks after payments may use. A URL that fails never stops the
+   next, nor a host the others.
+
+The seed follows each host's `robots.txt` (RFC 9309) under the name `stellar-bazaar`: a URL it
+disallows is skipped and reported as `robots`; a 4xx means no rules; a 5xx or no answer means the
+host is not asked. Every request says `User-Agent: stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
+so a seller can block it by name. The report goes to stdout: a tab-separated line per URL and
+account (URL, method, network, `payTo`, outcome, reason, detail), a line per skipped entry
+(outcome `skipped`), a line per host, the totals, and each `payTo` seen on more than one host. As
+with `pnpm keys`, it runs the built `dist/seed.js` against the database `DATABASE_URL` names, after
+`pnpm migrate`.
+
+On the server it runs inside the running `facilitator` container, the only one that reaches both
+the sellers and the database (the `migrate` services have no internet). The hosts file, kept by the
+operator outside the repository, goes in on stdin and the report comes out on stdout:
+
+```sh
+sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator \
+  node dist/seed.js /dev/stdin < seed-hosts.txt > seed-report.tsv
+```
+
+The report is printed once, at the end, and a large host takes tens of minutes at the seed's pace.
+Run it in `tmux` on the server, so a dropped SSH session doesn't lose the report, and not during a
+deploy, which recreates the container and stops the seed. A testnet reset empties the catalog,
+seeded mainnet listings included (ADR 0012): run it again.

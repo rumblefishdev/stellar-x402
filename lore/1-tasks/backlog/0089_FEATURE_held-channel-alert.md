@@ -3,16 +3,21 @@ id: "0089"
 title: "Show and alert on a channel held past a threshold"
 type: FEATURE
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: ["0011"]
 related_tasks: ["0073", "0027"]
-tags: [facilitator, signer-pool, observability, before-pubnet, priority-medium, effort-small]
+tags: [facilitator, signer-pool, observability, before-pubnet, priority-medium, effort-small, platform]
 links: []
 history:
   - date: "2026-10-29"
     status: backlog
     who: okarcz
     note: "Spawned from 0073's PR #85 review (Stan's question on channel hold time)."
+  - date: "2026-11-16"
+    status: backlog
+    who: okarcz
+    note: >
+      Platform lane, M2 (okarcz, unlaned M1 check): an alarm for Stan's M2 focus; the infra alarm channel-held waits for its gauge. Owner to be agreed with Stan.
 ---
 
 # Show and alert on a channel held past a threshold

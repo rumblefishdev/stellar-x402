@@ -35,8 +35,9 @@ const LAYER_LABELS = {
 
 const LAYER_ORDER = Object.keys(LAYER_LABELS);
 
-// Work lanes from the M1 plan (docs/planning/m1-epics.md); one tag per task.
-const LANES = ["payments", "discovery", "platform"];
+// Work lanes from the M1 plan (docs/planning/m1-epics.md), plus M2's fifth lane for the developer
+// joining later (agents, SDK and quality, 0149); one tag per task.
+const LANES = ["payments", "discovery", "platform", "dev-tools"];
 
 function parseFrontmatter(content) {
   const match = content.match(/^---\n([\s\S]*?)\n---/);

@@ -20,7 +20,7 @@ function resolve(hostname: string, all: boolean) {
 describe("publicOnlyLookup", () => {
   it("refuses a name that resolves to a loopback address", async () => {
     const { error } = await resolve("localhost", true);
-    expect(error).toMatchObject({ code: "unsafe_url" });
+    expect(error).toMatchObject({ code: "not_public" });
   });
 
   it("answers a public address in the shape the caller asked for", async () => {
@@ -33,14 +33,18 @@ describe("checkUrl", () => {
   it("with allowInsecureLocal, passes http to a *.localhost name, which only this machine answers", () => {
     expect(checkUrl("http://x.localhost:8080/", true).hostname).toBe("x.localhost");
     expect(() => checkUrl("http://x.localhost:8080/", false)).toThrow(
-      expect.objectContaining({ code: "unsafe_url" }),
+      expect.objectContaining({ code: "not_https" }),
     );
   });
 
   it("with allowInsecureLocal, still refuses a scheme other than http and https on this machine", () => {
     expect(() => checkUrl("ftp://localhost/x", true)).toThrow(
-      expect.objectContaining({ code: "unsafe_url" }),
+      expect.objectContaining({ code: "not_https" }),
     );
+  });
+
+  it("names a string that does not parse apart from a URL with another scheme", () => {
+    expect(() => checkUrl("seller", false)).toThrow(expect.objectContaining({ code: "not_a_url" }));
   });
 });
 
@@ -52,18 +56,21 @@ describe("guardedFetch", () => {
     await expect(
       guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))("https://10.0.0.5/x"),
     ).rejects.toMatchObject({
-      code: "unsafe_url",
+      code: "not_public",
     });
     expect(undiciFetch).not.toHaveBeenCalled();
   });
 
-  it.each([["https://10.0.0.5/x"], ["http://example.com/x"]])(
-    "with allowInsecureLocal, still refuses %s: the switch opens only this machine",
-    async (url) => {
+  it.each([
+    ["https://10.0.0.5/x", "not_public"],
+    ["http://example.com/x", "not_https"],
+  ])(
+    "with allowInsecureLocal, still refuses %s (%s): the switch opens only this machine",
+    async (url, code) => {
       const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: true };
       await expect(
         guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url),
-      ).rejects.toMatchObject({ code: "unsafe_url" });
+      ).rejects.toMatchObject({ code });
       expect(undiciFetch).not.toHaveBeenCalled();
     },
   );
@@ -88,7 +95,7 @@ describe("guardedFetch", () => {
       await expect(
         guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(`https://localhost.:${port}/`),
       ).rejects.toMatchObject({
-        code: "unsafe_url",
+        code: "not_public",
       });
     } finally {
       seller.close();
@@ -97,7 +104,7 @@ describe("guardedFetch", () => {
 
   it("passes on a refusal from the lookup with its own code", async () => {
     const { SellerFetchError } = await import("../src/guard.js");
-    const refused = new SellerFetchError("unsafe_url", "refused");
+    const refused = new SellerFetchError("not_public", "refused");
     undiciFetch.mockRejectedValue(new TypeError("fetch failed", { cause: refused }));
     const limits = { timeoutMs: 1_000, maxResponseBytes: 1_000, allowInsecureLocal: false };
     await expect(
@@ -126,7 +133,7 @@ describe("guardedFetch", () => {
     }
   });
 
-  it("ends a request its caller aborts, before the deadline: an MCP client closes its event stream", async () => {
+  it("ends a request its caller aborts, before the deadline, as a network failure", async () => {
     const { fetch: realFetch } = await vi.importActual<typeof import("undici")>("undici");
     undiciFetch.mockImplementation(realFetch);
     // Sends its headers, then a stream that never ends.
@@ -143,16 +150,76 @@ describe("guardedFetch", () => {
         signal: caller.signal,
       });
       setTimeout(() => caller.abort(), 50);
-      await expect(pending).rejects.toMatchObject({ code: "upstream_error" });
+      await expect(pending).rejects.toMatchObject({ code: "network" });
     } finally {
       seller.closeAllConnections();
       seller.close();
     }
   });
 
+  it("names a seller that stalls past the deadline a timeout", async () => {
+    const { fetch: realFetch } = await vi.importActual<typeof import("undici")>("undici");
+    undiciFetch.mockImplementation(realFetch);
+    // Sends its headers, then a body that never ends.
+    const seller = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.write("partial");
+    });
+    await new Promise<void>((done) => seller.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(seller.address() as AddressInfo).port}/`;
+    const limits = { timeoutMs: 200, maxResponseBytes: 1_000, allowInsecureLocal: true };
+    try {
+      await expect(
+        guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url),
+      ).rejects.toMatchObject({ code: "timeout" });
+    } finally {
+      seller.closeAllConnections();
+      seller.close();
+    }
+  });
+
+  it.each([301, 302, 307])(
+    "refuses a %i answer as a redirect, without following it",
+    async (status) => {
+      const { fetch: realFetch } = await vi.importActual<typeof import("undici")>("undici");
+      undiciFetch.mockImplementation(realFetch);
+      const seller = createServer((_req, res) => {
+        res.writeHead(status, { location: "https://elsewhere.example/" }).end();
+      });
+      await new Promise<void>((done) => seller.listen(0, "127.0.0.1", done));
+      const url = `http://127.0.0.1:${(seller.address() as AddressInfo).port}/`;
+      const limits = { timeoutMs: 5_000, maxResponseBytes: 1_000, allowInsecureLocal: true };
+      try {
+        await expect(
+          guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url),
+        ).rejects.toMatchObject({ code: "redirect" });
+      } finally {
+        seller.close();
+      }
+    },
+  );
+
+  it("names a seller that drops the connection a network failure", async () => {
+    const { fetch: realFetch } = await vi.importActual<typeof import("undici")>("undici");
+    undiciFetch.mockImplementation(realFetch);
+    // Kept listening for the whole test, so no other process can take its port in between.
+    const seller = createServer();
+    seller.on("connection", (socket) => socket.destroy());
+    await new Promise<void>((done) => seller.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(seller.address() as AddressInfo).port}/`;
+    const limits = { timeoutMs: 5_000, maxResponseBytes: 1_000, allowInsecureLocal: true };
+    try {
+      await expect(
+        guardedFetch(limits, AbortSignal.timeout(limits.timeoutMs))(url),
+      ).rejects.toMatchObject({ code: "network" });
+    } finally {
+      seller.close();
+    }
+  });
+
   it.each([
-    [20_000, 200],
-    [30_000, undefined],
+    [49_000, 200],
+    [60_000, undefined],
   ])(
     "with a %i-byte header, a seller's answer is read or refused as too large",
     async (bytes, status) => {

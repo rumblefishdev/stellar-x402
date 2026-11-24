@@ -13,6 +13,10 @@ export interface SellerRequest {
 export interface Seller {
   /** What it was asked, in order. */
   requests: SellerRequest[];
+  /** The `User-Agent` of each request, in order. */
+  userAgents: string[];
+  /** Documents it serves with a 200 instead of a 402, by path: a seller's `/.well-known/x402`. */
+  files: Record<string, string>;
   /** `http://127.0.0.1:<port>`. */
   url: string;
   /** The 402 terms for a request to `url`; tests replace it. */
@@ -32,6 +36,8 @@ const read = async (req: IncomingMessage) => {
 export async function startSeller(paymentRequired: Seller["paymentRequired"]): Promise<Seller> {
   const seller: Seller = {
     requests: [],
+    userAgents: [],
+    files: {},
     url: "",
     paymentRequired,
     reply: async () => ({ status: 402 }),
@@ -39,6 +45,12 @@ export async function startSeller(paymentRequired: Seller["paymentRequired"]): P
       void (async () => {
         const request = { method: req.method!, url: req.url!, body: await read(req) };
         seller.requests.push(request);
+        seller.userAgents.push(String(req.headers["user-agent"]));
+        const file = seller.files[req.url!];
+        if (file !== undefined) {
+          res.writeHead(200, { "content-type": "application/json" }).end(file);
+          return;
+        }
         const { status, body } = await seller.reply(request);
         const terms = body ?? seller.paymentRequired(`${seller.url}${req.url}`);
         const headers =

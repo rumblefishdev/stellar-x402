@@ -1,0 +1,38 @@
+# The portal's backend in an environment (task 0106): x402-portal@production. It doesn't pull; its
+# deploy does, then restarts this unit. Nothing here starts, stops or waits for the facilitator.
+[Unit]
+Description=x402 portal backend (%i)
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/apps/portal/README.md
+PartOf=docker.service
+# The registry is in testnet's database until pubnet has one (0126). Wants, not Requires: a
+# restart of the database doesn't stop the backend, whose pool connects again.
+Wants=x402-db-testnet@%i.service
+After=docker.service x402-tunnel@%i.service x402-db-testnet@%i.service
+# No image to run before the first deploy, which writes this file: skipped at boot, not failed.
+ConditionPathExists=/srv/x402/%i/portal.digest
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+WorkingDirectory=/srv/x402/%i
+# The backend's JSON lines and Compose's own, stdout and stderr in order, for the CloudWatch
+# agent (0027 decision 1). A call is named by its token's jti and act, a key by a short key_id:
+# never the owner or a Discord id.
+StandardOutput=append:/var/log/x402/%i/portal.log
+StandardError=inherit
+ExecStartPre=/usr/local/libexec/x402/x402-creds %i portal-database-url:1000 portal-hub-token-secret:1000 portal-key-encryption-key:1000
+# The last image that answered /health, unless a deploy is starting this one.
+ExecStartPre=/bin/sh -c '[ -e /run/x402/%i/portal.deploying ] || cp portal.digest.good portal.digest'
+# --exit-code-from: a plain `up` exits 0 whatever the container's code.
+ExecStart=/usr/local/libexec/x402/x402-portal-compose %i up --no-log-prefix --no-color --no-deps --pull never --exit-code-from portal portal
+ExecStop=/usr/local/libexec/x402/x402-portal-compose %i stop portal
+# A planned stop: Compose answers the signal systemd sends the exiting `up` with 130 (x402@).
+SuccessExitStatus=130
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+# Above the 30 s stop_grace_period.
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

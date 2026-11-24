@@ -19,6 +19,10 @@ requirementsSource: >
 
 # stellar-x402 Milestone 1 (Tranche 1) - Epic Breakdown
 
+> **Changed since this plan:** the in-memory fakes it names for the four ports were replaced by
+> PostgreSQL in tests and local runs ([ADR 0012](../adr/0012-facilitator-state-store.md), task
+> 0064). The ports and their contract tests stay.
+
 ## Overview
 
 This document breaks Milestone 1 (Tranche 1) of stellar-x402 into epics and stories. The

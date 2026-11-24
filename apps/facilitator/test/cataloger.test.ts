@@ -3,6 +3,7 @@ import { safeBase64Decode } from "@x402/core/utils";
 import * as bazaarLib from "@stellar-x402/bazaar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCataloger, type CatalogerDeps } from "../src/catalog/cataloger.js";
+import { SELLER_USER_AGENT } from "../src/catalog/seller-check.js";
 import { encodeExtensionResponses } from "../src/http/extension-responses.js";
 import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
@@ -134,6 +135,12 @@ describe("cataloger", () => {
     expect(Object.keys(entry?.extensions ?? {})).toEqual(["bazaar"]);
     expect(seller.requests).toEqual([{ method: "GET", url: "/users/42", body: "" }]);
     expect(counted("seller", "refreshed", "inserted")).toBe(1);
+  });
+
+  it("names our robot to the seller (0155 decision 8)", async () => {
+    const { cataloger } = setup();
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(seller.userAgents).toEqual([SELLER_USER_AGENT]);
   });
 
   it("trims a seller's tags and service name as a payment's copy is, and still lists (row 1)", async () => {
@@ -279,13 +286,30 @@ describe("cataloger", () => {
     },
   );
 
+  it("records a seller's redirect as the attempt's reason, not followed (0085)", async () => {
+    const { cataloger, attempts, list } = setup();
+    seller.reply = async () => ({ status: 302 });
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(await attempts()).toEqual([
+      { stage: "seller", outcome: "not_askable", reason: "redirect" },
+    ]);
+    expect(seller.requests).toHaveLength(1);
+    expect(await list()).toEqual([]);
+  });
+
   it("does not ask a private address, an mcp listing, or a seller past the timeout (row 6)", async () => {
     const { cataloger, list, counted } = setup({ sellerTimeoutMs: 100 });
+    await cataloger.onSuccess(
+      record({ info: valid.info }, {}, { url: "https://10.255.255.1/x" }),
+      "settle",
+    );
+    expect(counted("seller", "not_askable", "not_public")).toBe(1);
+    // Over http the scheme is refused first, before the address is looked at.
     await cataloger.onSuccess(
       record({ info: valid.info }, {}, { url: "http://10.255.255.1/x" }),
       "settle",
     );
-    expect(counted("seller", "not_askable", "unsafe_url")).toBe(1);
+    expect(counted("seller", "not_askable", "not_https")).toBe(1);
 
     // Upstream's default resource URL names the tool, not the server that has it.
     const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };
@@ -294,7 +318,7 @@ describe("cataloger", () => {
 
     seller.reply = () => new Promise(() => {});
     await cataloger.onSuccess(record(valid), "settle");
-    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(counted("seller", "not_askable", "timeout")).toBe(1);
     expect(await list()).toEqual([]);
   });
 
@@ -384,7 +408,7 @@ describe("cataloger", () => {
     seller.paymentRequired = (url) => ({
       x402Version: 2,
       resource: { url, description: DESCRIPTION },
-      accepts: [{ ...requirements, extra: { pad: "x".repeat(5_000) } }],
+      accepts: [{ ...requirements, extra: { pad: "x".repeat(37_000) } }],
       extensions: { bazaar: valid },
     });
     expect(setup().cataloger.extensionResponses(record(valid))).toEqual({
@@ -395,10 +419,10 @@ describe("cataloger", () => {
     expect(counted("seller", "too_large")).toBe(1);
     expect(logger.info).toHaveBeenCalledWith(
       "catalog_rejected",
-      expect.objectContaining({ detail: "accepts.extra", bytes: 5_010 }),
+      expect.objectContaining({ detail: "listing" }),
     );
     const { rows } = await db.pool.query(`SELECT field_bytes FROM catalog_attempts`);
-    expect(rows).toEqual([{ field_bytes: 5_010 }]);
+    expect(rows[0].field_bytes).toBeGreaterThan(36 * 1024);
   });
 
   it("keeps the result of the check that started later, whichever answers first (row 10)", async () => {
@@ -672,7 +696,7 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     mcp.server.close();
     clock.now += MINUTE;
     await cataloger.onSuccess(paid(), "settle");
-    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(counted("seller", "not_askable", "network")).toBe(1);
     expect(await list()).toEqual([]);
   });
 
@@ -731,8 +755,16 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     const started = performance.now();
     await cataloger.onSuccess(paid(), "settle");
     expect(performance.now() - started).toBeLessThan(5_000);
-    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(counted("seller", "not_askable", "timeout")).toBe(1);
     expect(await list()).toEqual([]);
+  });
+
+  it("names our robot on every request to an MCP seller (0155 decision 8)", async () => {
+    mcp = await startMcpSeller(() => terms, { session: "s-1" });
+    const { cataloger } = setup();
+    await cataloger.onSuccess(paid(), "settle");
+    expect(mcp.userAgents.length).toBeGreaterThan(2);
+    expect(new Set(mcp.userAgents)).toEqual(new Set([SELLER_USER_AGENT]));
   });
 
   it("ends a stateful seller's session once the check is done", async () => {

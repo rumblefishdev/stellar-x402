@@ -56,6 +56,7 @@ channel while production is behind.
 | 6 | The version is read with a plain match on `~X.Y.Z`, the shape AD-14 sets; any other shape fails the read | the owner's decision, 2026-11-16 | beyond it | no standard | | |
 | 7 | Once a day, in the 08:00 UTC run with the upstream section, on a one-day alarm period | the owner's decision, 2026-11-16 | beyond it | no standard | | |
 | 8 | No point that day reads as behind: `upstream-library-behind` means "production not confirmed on npm's latest", so a read that breaks (a range shape, a moved file, a source down) pages within a day; no separate silence alarm for it. Built as `FILL(m, 1) >= 1` over the day, the factory's silence shape, not `treatMissingData` alone (the Prices API's 0222: a breaching-only alarm missed a 3-hour halt, `infra/src/lib/alarms/factory.ts:195`) | the owner's decision, 2026-11-16; the alarm's shape agent, from the factory's note | beyond it | the `uptime` alarm reads a missing point as down (`infra/lambdas/uptime-probe/probe.mjs`) | | |
+| 9 | `upstream-changed` takes the same rule: no point that day reads as changed, and `upstream-silent` is removed, so the `upstream` group has one rule for a missing read and two alarms | the owner's decision, 2026-11-16 | changes 0029's decision 17 | no standard | | |
 
 ## Not yet decided
 
@@ -70,5 +71,6 @@ channel while production is behind.
 
 - [ ] Given production on another `@x402/stellar` version than npm's `latest`, when the 08:00 UTC run reads both, then it publishes 1, and `upstream-library-behind` goes to ALARM
 - [ ] Given production on npm's `latest`, when the run reads both, then it publishes 0 and the alarm is OK
-- [ ] Given `/health`, GitHub or npm failing, when the run reads them, then it publishes nothing for this read, logs `watch_section_failed` with the read that failed, and `upstream-library-behind` goes to ALARM the same day
+- [ ] Given `/health`, GitHub or npm failing, when the run reads them, then it publishes nothing for this read, logs `watch_section_failed` with the read that failed, and `upstream-library-behind` goes to ALARM within the day
+- [ ] Given no `upstream_files_changed` point in a day, when the alarm reads it, then `upstream-changed` goes to ALARM, and `upstream-silent` no longer exists
 - [ ] Given the alarm list, when this task is done, then `docs/monitoring.md` lists `upstream-library-behind` among the alarms that are off, turned on by 0026

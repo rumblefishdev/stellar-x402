@@ -83,8 +83,9 @@ Reviewers, please confirm:
   | Lane tag    | Owner            |
   | ----------- | ---------------- |
   | `payments`  | `okarcz`         |
-  | `discovery` | `akot`           |
+  | `discovery` | `karolkow`       |
   | `platform`  | `stkrolikiewicz` |
+  | `dev-tools` | `bstruzyk`       |
 
   Skip tasks of the PR's creator. Each bullet says in one sentence what the PR changes for that task and what to confirm, e.g. `**@adamkoot** (0032): no resource filter is needed; details before paying come from the seller's 402 answer.` Leave the list out when no one else's task is affected. These people are always requested as reviewers (step 6).
 
@@ -138,6 +139,7 @@ Say who was picked, and that the pick was random. `team.yaml` ids map to GitHub 
 | `akot`           | `adamkoot`       |
 | `stkrolikiewicz` | `stkrolikiewicz` |
 | `karolkow`       | `karolko9`       |
+| `bstruzyk`       | `Bartek-str`     |
 
 ```bash
 git push -u origin {branch}

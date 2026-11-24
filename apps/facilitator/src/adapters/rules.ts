@@ -18,6 +18,8 @@ const ORDER: Record<SettlementState, number> = {
   failed: 3,
   rejected: 3,
   expired: 3,
+  // A second start (0086), final: nothing moves to or from it through `transition`.
+  refused: 3,
 };
 
 /** `claimed`, `signed`, `pending`: every state ranked below the final ones. */
@@ -29,10 +31,11 @@ export const isFinal = (state: SettlementState): boolean => FINAL_SETTLEMENT_STA
 
 /**
  * Whether a record in `expected` may move to `next`: never from a final state, and only forward,
- * since a same-state update would let two concurrent callers both win.
+ * since a same-state update would let two concurrent callers both win. Never to `refused`: only
+ * `refuse` writes it, before any claim (0086).
  */
 export const isForward = (expected: SettlementState, next: SettlementState): boolean =>
-  !isFinal(expected) && ORDER[next] > ORDER[expected];
+  !isFinal(expected) && next !== "refused" && ORDER[next] > ORDER[expected];
 
 const ATTEMPT_ORDER: Record<AttemptState, number> = {
   stored: 0,
@@ -64,32 +67,6 @@ const INT64_MAX = 2n ** 63n - 1n;
 export function assertStroops(amount: bigint, name: string): void {
   if (typeof amount !== "bigint" || amount < 0n || amount > INT64_MAX)
     throw new RangeError(`${name} must be a non-negative int64 amount of stroops`);
-}
-
-/** A key's SHA-256 as the registry stores it: 64 lower-case hex digits. */
-const API_KEY_HASH = /^[0-9a-f]{64}$/;
-
-/** The longest API key owner. It is part of a rate-limit key, which a b-tree index must hold. */
-export const API_KEY_OWNER_MAX_LENGTH = 128;
-
-/** `<kind>:<id>`, e.g. `operator:acme-weather` or `discord:412345678901234567` (0105). */
-const API_KEY_OWNER = /^[a-z]+:[a-z0-9][a-z0-9_-]*$/;
-
-/** Whether `owner` is an API key owner the registry takes; `0013_api_keys` checks the same. */
-export const isApiKeyOwner = (owner: string): boolean =>
-  owner.length <= API_KEY_OWNER_MAX_LENGTH && API_KEY_OWNER.test(owner);
-
-/**
- * Rejects what the registry must never hold: anything but a SHA-256 in the hash column, where a
- * caller's mistake would put the key itself, and an owner that isn't `<kind>:<id>`.
- */
-export function assertApiKey(hash: string, owner: string): void {
-  if (!API_KEY_HASH.test(hash))
-    throw new RangeError("an API key hash must be 64 lower-case hex digits");
-  if (!isApiKeyOwner(owner))
-    throw new RangeError(
-      `an API key owner must be <kind>:<id> in a-z, 0-9, "_" and "-", at most ${API_KEY_OWNER_MAX_LENGTH} characters`,
-    );
 }
 
 /** The end of the fixed rate-limit window of `windowMs` that contains `now`. */

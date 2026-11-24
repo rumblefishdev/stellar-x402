@@ -8,8 +8,14 @@
     "serverIpSsmParam": "/x402/production/server-ip",
     "sessionHours": 12
   },
+  "monitoringVm": {
+    "certificateCn": "x402-monitoring-vm-production",
+    "ipSsmParam": "/x402/production/monitoring-vm-ip"
+  },
   "uptime": {
-    "url": "https://x402-facilitator.sorobanscan.com/health"
+    "url": "https://x402-facilitator.sorobanscan.com/health",
+    "portalUrl": "https://x402-portal.sorobanscan.com/health",
+    "hubUrl": "https://sorobanscan.com/api/hub/me"
   },
   "feeAccounts": {
     "stellar:testnet": "GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP"
@@ -41,6 +47,8 @@
   },
   "alarmGroups": {
     "uptime": true,
+    "portalUptime": false,
+    "hubUptime": false,
     "telemetry": true,
     "facilitator": true,
     "channelHeld": false,
@@ -53,7 +61,8 @@
     "watch": true,
     "watchSecurity": false,
     "protocol": true,
-    "upstream": false
+    "upstream": false,
+    "heartbeat": false
   },
   "thresholds": {
     "uptimeFailingMinutes": 7,

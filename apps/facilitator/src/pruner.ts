@@ -1,6 +1,12 @@
+import type { StellarNetwork } from "@stellar-x402/config";
 import type { Logger } from "./logger.js";
 import type { ProcessMetrics } from "./metrics.js";
-import type { CatalogAttemptStore, RateLimitStore, SpendStore } from "./ports/index.js";
+import type {
+  CatalogAttemptStore,
+  RateLimitStore,
+  SettlementStore,
+  SpendStore,
+} from "./ports/index.js";
 
 const DAY_MS = 86_400_000;
 const INTERVAL_MS = 60_000;
@@ -17,10 +23,25 @@ const BUDGET_MS = 1_000;
  */
 export const spendHorizonMs = (windowMs: number) => Math.max(2 * windowMs, 7 * DAY_MS);
 
+/**
+ * How long a `refused` record is kept at least (0086). One with an expiration ledger is kept
+ * until that ledger has closed too: the checks can refuse a payload for its fee before any expiry
+ * check, so one signed for thousands of ledgers can pass later. One without never passes the
+ * payer-auth check, so the hour is margin for clock skew between processes.
+ */
+export const REFUSED_HORIZON_MS = 60 * 60_000;
+
 /** How long listing attempts are kept for analysis (0063, an assumption). */
 const CATALOG_ATTEMPTS_HORIZON_MS = 30 * DAY_MS;
 
 export interface PrunerDeps {
+  settlements: Pick<SettlementStore, "pruneRefusals">;
+  /**
+   * The network this process settles on and its latest closed ledger, read once a tick: a
+   * `refused` record of it is pruned once its expiration ledger is at most that. A failed read
+   * prunes only records without one, that tick.
+   */
+  ledger: { network: StellarNetwork; latest: () => Promise<number> };
   spend: Pick<SpendStore, "prune" | "pruneScopes">;
   rateLimits: Pick<RateLimitStore, "prune">;
   catalogAttempts: Pick<CatalogAttemptStore, "prune">;
@@ -47,8 +68,8 @@ export interface Pruner {
 }
 
 /**
- * Deletes spend reservations and rate-limit windows no budget or limit counts any more (0050), and
- * listing attempts past their 30 days (0063).
+ * Deletes spend reservations and rate-limit windows no budget or limit counts any more (0050),
+ * listing attempts past their 30 days (0063), and `refused` settlements past their hour (0086).
  * Every process runs one: the deletes skip rows another holds, so pruners never wait on each
  * other or on a request, and a pruner that stops costs disk, not latency. A failure is logged
  * and counted, and the next tick tries again.
@@ -61,6 +82,17 @@ export function createPruner(deps: PrunerDeps): Pruner {
     clock = () => performance.now(),
     random = Math.random,
   } = deps;
+  // The tick's latest closed ledger, for `settlements_refused`.
+  let tickLedger: { network: StellarNetwork; latest: number } | undefined;
+  const latestClosed = async () => {
+    try {
+      return { network: deps.ledger.network, latest: await deps.ledger.latest() };
+    } catch (error) {
+      logger.warn("store_prune_ledger_failed", { table: "settlements_refused", error });
+      metrics.increment("store_prune_failures_total", { table: "settlements_refused" });
+      return undefined;
+    }
+  };
   const tables = [
     {
       table: "spend_reservations",
@@ -81,6 +113,15 @@ export function createPruner(deps: PrunerDeps): Pruner {
       table: "catalog_attempts",
       store: deps.catalogAttempts,
       horizonMs: CATALOG_ATTEMPTS_HORIZON_MS,
+    },
+    // Check refusals past their auth entry's expiry (0086); every other settlement stays.
+    {
+      table: "settlements_refused",
+      store: {
+        prune: (before: number, limit: number) =>
+          deps.settlements.pruneRefusals(before, tickLedger, limit),
+      },
+      horizonMs: REFUSED_HORIZON_MS,
     },
   ];
 
@@ -110,6 +151,7 @@ export function createPruner(deps: PrunerDeps): Pruner {
   };
 
   const runOnce = async () => {
+    tickLedger = await latestClosed();
     for (const table of tables) await pruneTable(table);
   };
 

@@ -1,10 +1,10 @@
-import type { ApiKeyStore } from "./api-key-store.js";
+import type { ApiKeyStore } from "@stellar-x402/api-keys";
 import type { CatalogAttemptStore, CatalogStore } from "./catalog-store.js";
 import type { RateLimitStore } from "./rate-limit-store.js";
 import type { SettlementStore } from "./settlement-store.js";
 import type { SpendStore } from "./spend-store.js";
 
-export type { ApiKeyRecord, ApiKeyStore } from "./api-key-store.js";
+export type { ApiKeyRecord, ApiKeyStore } from "@stellar-x402/api-keys";
 export type {
   CatalogAttempt,
   CatalogAttemptOutcome,
@@ -30,6 +30,7 @@ export {
   type ClaimResult,
   type LeaseFence,
   type NewSettlement,
+  type Refusal,
   type ReopenResult,
   type SettlementAttempt,
   type SettlementKey,

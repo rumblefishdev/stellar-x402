@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
+import { apiKeyHash, isApiKeyOwner, newApiKey } from "@stellar-x402/api-keys";
 import {
   FallbackRpc,
   SettlementSubmitter,
@@ -12,12 +14,11 @@ import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
-import { isApiKeyOwner } from "./adapters/rules.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
+import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import type { AppDeps } from "./http/app.js";
-import { apiKeyHash, newApiKey } from "./http/api-key.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";
@@ -34,6 +35,7 @@ import {
   type Reconciliation,
 } from "./settlement/reconcile.js";
 import { createLeaseKeeper } from "./settlement/lease.js";
+import { createChannelHolder, type ChannelHolder } from "./settlement/open-channels.js";
 import { createRecords } from "./settlement/records.js";
 import { SETTLE_MIN_VALIDITY_LEDGERS, createSettler, type Settle } from "./settlement/settle.js";
 import { createNonceLookup } from "./settlement/nonce-used.js";
@@ -47,6 +49,7 @@ import {
 import { createAssetKinds } from "./spend/asset-kinds.js";
 import { BALANCE_STALE_ALARM_MS, createBalanceFloor } from "./spend/balance-floor.js";
 import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
+import { verifyWithRefusals } from "./settlement/refusals.js";
 import { start } from "./start.js";
 import {
   createChecker,
@@ -201,6 +204,8 @@ export function buildSettlement(
   settle: Settle;
   submitter: SettlementSubmitter;
   reconciliation: Reconciliation;
+  /** Holds back the channels a previous process left open; run when the lease is acquired (0090). */
+  channelHolder: ChannelHolder;
   drain: () => Promise<void>;
 } {
   const { logger, metrics } = deps;
@@ -267,6 +272,17 @@ export function buildSettlement(
     lease: deps.lease,
   });
   const reconciliation = scheduleReconciliation({ reconciler, logger, metrics, network });
+  const channelHolder = createChannelHolder({
+    store: deps.store,
+    network,
+    channels: config.channels,
+    latestLedger: async () => {
+      const latest = await deps.rpc.getLatestLedger();
+      return { sequence: latest.sequence, closeTime: Number(latest.closeTime) };
+    },
+    hold: (address, until) => submitter.hold(address, until),
+    logger,
+  });
   // Gauges read at each sample, from memory only (0027 AD-5): `stats()` copies the pool's
   // counters and load, and the reconciler's age is taken at the read.
   metrics.registerGauge("pool_queued", () => {
@@ -280,10 +296,11 @@ export function buildSettlement(
   });
   // Closing the pool first refuses every call that sent nothing, so their records close too.
   const drain = async () => {
+    channelHolder.close();
     await submitter.close();
     await settle.drain();
   };
-  return { settle, submitter, reconciliation, drain };
+  return { settle, submitter, reconciliation, channelHolder, drain };
 }
 
 /**
@@ -352,13 +369,17 @@ export function compose(
   const fees = feeSettings(config.fees, rpc);
   const checks = buildChecks(config, rpc, fees, logger, metrics, opts.seams);
   const signer = openBaoSigner({ ...config.signer, network: config.network, logger, metrics });
-  // One lease per network's channel set (AD-17): only its holder settles.
+  // One lease per network's channel set (AD-17): only its holder settles, and only once the
+  // channels the previous holder left a transaction open on are held back (0090). The holder is
+  // built with the submitter below, before the keeper's first attempt.
+  const late: { channelHolder?: ChannelHolder } = {};
   const lease = createLeaseKeeper({
     store: stores.settlements,
     network: config.network,
     ttlMs: config.settlement.leaseTtlMs,
     logger,
     metrics,
+    onAcquired: () => late.channelHolder!.holdOpen(),
   });
   // The spend lane (AD-18, 0024): before a submit, the fee account's balance floor, the breakers
   // and the fee budgets; once a record is final, the fee charged and the breakers' counts. The fee
@@ -400,7 +421,7 @@ export function compose(
     logger,
     metrics,
   });
-  const { settle, reconciliation, drain } = buildSettlement(config, {
+  const built = buildSettlement(config, {
     rpc,
     fees,
     checks,
@@ -416,6 +437,8 @@ export function compose(
     ...(opts.sleep && { sleep: opts.sleep }),
     lease: lease.current,
   });
+  const { settle, reconciliation, drain } = built;
+  late.channelHolder = built.channelHolder;
   return {
     deps: {
       config,
@@ -423,7 +446,16 @@ export function compose(
       // The HTTP app and discovery: a route serves every network.
       metrics: root,
       stores,
-      verify: verifyWithBreakers(createVerifier(checks), { policy, logger, metrics }),
+      // Refusals are recorded inside the breakers: only the checks' own (0086).
+      verify: verifyWithBreakers(
+        verifyWithRefusals(createVerifier(checks), {
+          network: config.network,
+          store: stores.settlements,
+          logger,
+          latestLedger: checks.latestLedger,
+        }),
+        { policy, logger, metrics },
+      ),
       settle,
       extensionResponses: cataloger.extensionResponses,
       supported: supportedResponse(config.network, checks.facilitator),
@@ -531,6 +563,11 @@ export async function main(
     void signer.check();
     // Every budget sums the one window (0024 S-design §5).
     const pruner = createPruner({
+      settlements: stores.settlements,
+      ledger: {
+        network: config.network,
+        latest: async () => (await rpc.getLatestLedger()).sequence,
+      },
       spend: stores.spend,
       rateLimits: stores.rateLimits,
       catalogAttempts: stores.catalogAttempts,
@@ -696,6 +733,45 @@ export async function keysMain(
     write(`owner: ${owner}`);
     write(`key: ${key}`);
     write('Shown once: only its SHA-256 is stored. Sent as "Authorization: Bearer <key>".');
+  } finally {
+    await pool.end();
+  }
+}
+
+export class SeedError extends Error {}
+
+/**
+ * The `pnpm seed <hosts file>` command (0155): seeds the catalog once from each host's own
+ * `/.well-known/x402`, into the database `DATABASE_URL` names. What the operator reads goes to
+ * stdout; log lines go to stderr.
+ */
+export async function seedMain(
+  argv: readonly string[],
+  env: Record<string, string | undefined> = process.env,
+  write: (line: string) => void = (line) => void process.stdout.write(`${line}\n`),
+): Promise<void> {
+  const [path, ...rest] = argv;
+  if (path === undefined || rest.length > 0) throw new SeedError("usage: pnpm seed <hosts file>");
+  const { origins, invalid } = parseHosts(await readFile(path, "utf8"));
+  if (invalid.length > 0)
+    throw new SeedError(`the hosts file has lines that aren't hosts: ${invalid.join(", ")}`);
+  const { databaseUrl } = parseMigrateConfig(env);
+  const logger = jsonLogger("info", (line) => process.stderr.write(line));
+  const pool = createPool(databaseUrl, poolErrorLogger(logger));
+  try {
+    const pending = await pendingMigrations(pool);
+    if (pending.length > 0)
+      throw new SeedError(`the schema lacks migrations: ${pending.join(", ")}`);
+    const stores = postgresStores(pool);
+    const cataloger = createCataloger({
+      store: stores.catalog,
+      attempts: stores.catalogAttempts,
+      rateLimits: stores.rateLimits,
+      logger,
+      metrics: memoryMetrics(),
+    });
+    const reports = await seedHosts(origins, cataloger, { listLocal: false });
+    for (const line of reportLines(reports)) write(line);
   } finally {
     await pool.end();
   }

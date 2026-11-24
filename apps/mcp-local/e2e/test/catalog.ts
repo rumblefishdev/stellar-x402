@@ -1,6 +1,6 @@
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { describe, it } from "vitest";
-import { startFakeCatalog } from "../../../../packages/mcp/test/fake-catalog.js";
+import { startFakeCatalog } from "../../test/fake-catalog.js";
 import { code, startServer } from "../src/cli.js";
 import { startFakeSeller } from "../src/fakes.js";
 import { row } from "../src/results.js";

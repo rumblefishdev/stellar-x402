@@ -35,7 +35,7 @@ facilitator can do about it, and how other facilitators handle it, if any do.
   the account and the asset. That answer goes to the resource server, and the message also goes to
   the facilitator's log, which the seller can't see.
 - Most payments don't get that far. Upstream's client at our `~2.28.0` pin simulates before it
-  signs and throws a raw `HostError ... #13`, and `packages/mcp` answers `insufficient_funds`
+  signs and throws a raw `HostError ... #13`, and `apps/mcp-local` answers `insufficient_funds`
   (0078, Issues Encountered). The seller sees nothing.
 - 0092 gives the client a clear error before signing. It tells the client, not the seller.
 - The facilitator has no way to contact a seller: it only answers calls. The seller check reads a

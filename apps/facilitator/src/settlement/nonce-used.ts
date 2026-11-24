@@ -21,7 +21,9 @@ export type IsNonceUsed = (payer: string, nonce: string) => Promise<boolean>;
  * settle, it says whether the nonce is used. The RPC's own timeout and its failover to the next
  * URL apply. A read that still fails is logged and `false`: the payment is refused either way.
  * Then a front-run keeps the old reason and its advice to sign a new payment, which needs every
- * RPC URL down in that second.
+ * RPC URL down in that second. The same happens when the URL that answers is a few ledgers behind
+ * the one where the other transaction used the nonce: it shows no entry yet. Healthy URLs agree to
+ * within a ledger, and nothing here checks the answer's `latestLedger`; an accepted risk.
  */
 export function createNonceLookup(
   rpc: Pick<SorobanRpc, "getLedgerEntries">,
@@ -29,16 +31,16 @@ export function createNonceLookup(
   logger: Pick<Logger, "warn">,
 ): IsNonceUsed {
   return async (payer, nonce) => {
-    const key = xdr.LedgerKey.contractData(
-      new xdr.LedgerKeyContractData({
-        contract: new Address(payer).toScAddress(),
-        key: xdr.ScVal.scvLedgerKeyNonce(
-          new xdr.ScNonceKey({ nonce: xdr.Int64.fromString(nonce) }),
-        ),
-        durability: xdr.ContractDataDurability.temporary(),
-      }),
-    );
     try {
+      const key = xdr.LedgerKey.contractData(
+        new xdr.LedgerKeyContractData({
+          contract: new Address(payer).toScAddress(),
+          key: xdr.ScVal.scvLedgerKeyNonce(
+            new xdr.ScNonceKey({ nonce: xdr.Int64.fromString(nonce) }),
+          ),
+          durability: xdr.ContractDataDurability.temporary(),
+        }),
+      );
       const { entries } = await rpc.getLedgerEntries(key);
       return entries.length > 0;
     } catch (error) {

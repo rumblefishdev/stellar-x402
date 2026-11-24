@@ -15,6 +15,12 @@
   2026-11-04 (task 0027 decisions 18 and 20: metric lines kept 30 days, no CPU metric) and
   2026-11-05 (task 0027 decision 4 amended: every metric in the catalog is billed) and
   2026-11-09 (task 0027 decision 73: OpenBao's audit log disk at 90%, the server's disk at 80%)
+  and 2026-11-17 (task 0138: metrics and alerts move to Prometheus and Alertmanager on
+  a separate Hetzner Cloud VM; CloudWatch keeps the logs and the off-server checks) and
+  2026-11-18 (task 0106: an API key crosses Cloudflare in plain text, in a pubnet request and
+  in the portal backend's answer to `reveal`) and 2026-11-19 (task 0134: a search-model
+  container, 512 MiB, joins the totals) and 2026-11-20 (task 0106: the log files also rotate
+  daily and none is kept past 30 days, the hub's privacy policy)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -50,7 +56,12 @@ The host must:
   `confirmGraceSeconds` 30, about 426 s by default and 750 s at 120, so it can outlast the drain. One still open at 150 s is finished by
   the next process's reconciliation, and until it lands or expires the next process's sends on
   its channel may fail with `txBadSeq` and rebuild, for minutes rather than about 60 s. Accepted
-  for testnet; before pubnet the next process leaves such a channel out (0090);
+  for testnet, not for pubnet, so the next process holds such a channel back (0090): from the
+  moment it takes the lease until reconciliation marks that transaction landed or dead, or the
+  network is past its bound by the `NOT_FOUND` margin, and sends on the other channels meanwhile.
+  That check runs inside the lease acquire, within a third of the TTL; a primary RPC that hangs
+  then fails the first acquire and `/settle` answers 503 for one more interval until the fallback
+  RPC takes over. Accepted: it recovers by itself;
 - **keep the facilitator key out of the image, the logs and the facilitator's process** (AD-12);
 - **offer a durable store** for the PostgreSQL schema of ADR 0012.
 
@@ -61,8 +72,8 @@ The company already runs a Hetzner dedicated server for its production ClickHous
 - Docker Compose, and Caddy already terminates HTTPS for ClickHouse's mutual-TLS endpoint, in the
   same compose project as ClickHouse.
 
-Our containers are limited to 1.875 GiB of RAM with OpenBao while production serves testnet, and
-2.875 GiB once mainnet's database joins; on testnet they need about 2 GB of disk, WAL included.
+Our containers are limited to 2.375 GiB of RAM with OpenBao and the search model while production
+serves testnet, and 3.375 GiB once mainnet's database joins; on testnet they need about 2 GB of disk, WAL included.
 The company bought `sorobanscan.com` for sorobanscan and the Stellar Prices API and moves it, as
 a whole zone, to Cloudflare on the Free plan.
 
@@ -100,8 +111,12 @@ a whole zone, to Cloudflare on the Free plan.
     The facilitator mounts the socket of every network it serves, as external volumes from
     OpenBao's project, so one process can sign for both networks. ADR 0013 weighs what that
     costs.
-- **The limits add up to 1.625 GiB for production with testnet's database,** 1.875 GiB with
-  OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less.
+- **A search-model container** (ADR 0014), memory limit 512 MiB: the embedding model used by
+  `/discovery/search`, measured at 371 MB peak.
+- **The limits add up to 2.125 GiB for production with testnet's database and the search model,**
+  2.375 GiB with OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less. On
+  2026-11-19 the server had 125 GiB of RAM, every container's limit together came to about
+  110 GiB, and ours used 181 MiB.
 - **Testnet and mainnet share the facilitator process and OpenBao,** never a database, a key or a
   channel set (AD-12).
 - **No container publishes a port on the host,** and each environment gets two Docker networks
@@ -389,8 +404,10 @@ One request or one stop must never outlast the layer in front of it:
     UDP for QUIC and TCP) and forwards the hostname to `http://facilitator:4021`, the Compose
     service; anything else gets 404. The server opens no port for it. The compose file keeps
     `PORT` at 4021; changing it means changing `cloudflare/x402.tf` too.
-  - HTTPS ends at Cloudflare, so Cloudflare sees the requests in plain text. They carry signed
-    payments, never keys.
+  - HTTPS ends at Cloudflare, so Cloudflare sees the requests and their answers in plain text.
+    They carry signed payments, never a signing key; a pubnet request also carries its seller's
+    API key (0105), and the portal's backend, behind the same tunnel, answers the hub's `reveal`
+    with one (0106).
   - The tunnel, its routing and the DNS record are Terraform in the `soroban-infrastructure`
     repo's `cloudflare/`, beside the `sorobanscan.com` zone, so routing changes are reviewed
     there. Task 0062 sets up the zone and the tunnel, the facilitator's prerequisite.
@@ -559,7 +576,9 @@ One request or one stop must never outlast the layer in front of it:
     `rate_limited` too; that and the retention are looked at again before mainnet (0038).
   - The files rotate with `logrotate` on its own timer, every 10 minutes past 100 MB with 10
     kept, since they share a disk with ClickHouse, using `copytruncate`, as the units hold the
-    files open. We accept two losses, tested locally
+    files open. Since 2026-11-20 each also rotates daily, empty or not, and none is kept past 30
+    days: the API hub's privacy policy keeps log lines up to 30 days, and by size alone a quiet
+    file never rotated (task 0106). We accept two losses, tested locally
     in 0027. At each rotation, the lines the agent hadn't read yet: up to 250 ms, its poll, all
     but a few ms of them still in the rotated file. When a rotation falls inside an AWS outage,
     every app line since the agent stopped sending, about 5 s into it; those stay in the rotated
@@ -568,6 +587,11 @@ One request or one stop must never outlast the layer in front of it:
     line would break an EMF line before it. 0027 sets it to start an event at every line, and
     tests that.
   - That EMF lines turn into metrics is checked once, at the first deploy (0027).
+  - Once metrics move to Prometheus (0139), the facilitator writes no EMF lines. Their log group
+    stays until its 30-day retention has run out, so the weekly fee review that spans the switch
+    keeps its data, and is deleted then. Each field the weekly fee review or a Logs Insights
+    recipe reads becomes a label,
+    if its values are few and closed, or moves to the app line (0139).
   - No pino: stdout is the only transport, and the logger already writes identifiers only.
 - **RPC endpoints are logged as `RPC_URLS[i]#<fingerprint>`, never by URL or host.** An RPC URL
   can carry an API key, and a host can be an account's own endpoint name (some providers put one
@@ -582,40 +606,110 @@ One request or one stop must never outlast the layer in front of it:
   Node's network errors give it (`getaddrinfo ENOTFOUND <host>`), is named too. Since 0045,
   `main()` names the shared `FallbackRpc`'s endpoints the same way and logs its switches
   (`rpc_failover`).
-- **Metrics:** a metrics adapter (0027) writes CloudWatch Embedded Metric Format lines to stdout,
-  which CloudWatch turns into metrics.
-  - Namespace `x402-facilitator`.
-  - Dimensions stay low-cardinality: `network`, route, outcome, event name.
-  - Never payer or `payTo`: each dimension combination is a billed custom metric.
-  - Every metric in 0027's catalog is billed (decision 4 as amended). Labels that aren't
-    dimensions stay fields in the line, read with Logs Insights.
-- **Host metrics:** the CloudWatch agent on the server reports memory and disk use, since
-  ClickHouse shares the machine. No CPU: nothing alarms on it, and every metric written is
-  billed (0027 decisions 4 and 20).
-- **Alerts:** CloudWatch alarms go to an SNS topic, and Amazon Q Developer in chat applications
-  (formerly AWS Chatbot) posts them to the team's Slack channel. 0027 defines them:
-  - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance, and
-    again below 10 XLM (ADR 0013);
-  - not ready to settle: `/health`'s status is 200 whatever the lease says, so the uptime probe
-    reads `ready` from its body (below);
-  - no sweep listing the records within the alarm window: since the deploy checks `listed` only
-    once, this is the net for sweeps that start failing later (0019 decision 36);
-  - from ADR 0013: OpenBao sealed, down or failing to sign; theft and reads of the backup
-    secret, off the server; and OpenBao's audit log disk at 90%, after the server's disk alarm at
-    80% (amended 2026-11-09);
-  - WAL archiving failing (`pg_stat_archiver.last_failed_time` past `last_archived_time`, or the
-    last archived segment older than 10 minutes). pgBackRest acknowledges a segment only once it is in the
-    repository, so this one alarm covers a stuck archive, which fills a disk ClickHouse shares,
-    and WAL that doesn't leave the server;
-  - the last `pgbackrest backup` or the last OpenBao snapshot older than 26 hours (both run
-    daily). Each job touches its stamp, `/var/lib/x402/last-ok/pgbackrest-backup` or
-    `openbao-snapshot`, as root and only after it succeeded, and may set its time from the
-    repository; the host probe reports the stamp's age, and a missing one reads as a job that
-    never ran. Stamps live on disk, so a reboot doesn't read as a missed job (0027);
-  - the Roles Anywhere certificate expiring within 30 days;
-  - low free disk and memory on the server. The disk alarm goes to our channel too: our Platform
-    lane runs the server's base setup, and our WAL and logs are what fills the disk.
+- **Metrics:** the facilitator serves Prometheus text on `/metrics`, built from 0027's catalog
+  (`packages/metrics-catalog`). The port is on the Compose network only, never on the host.
+  An agent on this server (Prometheus in agent mode) scrapes it every 15 s and sends the samples
+  to the monitoring VM (below) with `remote_write`, over HTTPS with a client certificate from the
+  ClickHouse project's CA.
+  - The connection is outbound, so no port opens on this server.
+  - The agent's write-ahead log holds a few hours of samples while the VM can't be reached.
+  - Every mTLS certificate has an expiry rule, as the Roles Anywhere one has an alarm: the
+    agent's client certificate, Caddy's on the VM, the VM's own Roles Anywhere certificate
+    (Alerts, below) and, later, the Lambdas'. Each host's probe writes each certificate's
+    `notAfter` to a textfile, and a rule fires 30 days before it. An expired client certificate
+    would otherwise read as "this server gone quiet" with no cause.
+  - Labels stay low-cardinality: `network`, route, outcome, event name. The catalog closes every
+    label's values.
+  - Never payer or `payTo`: every label value is a series kept on the VM's disk.
+  - Counters start at 0 for every closed label value, each gauge has a last-successful-read
+    timestamp, and a liveness series is written after start, so a missing series reads as a
+    fault, never as a quiet day (0139).
+  - A series costs no money, only disk and memory on the VM (Monitoring stack, below).
+  - The EMF adapter (0027) and the `x402-facilitator` alarms in CloudWatch go in the same change
+    that turns the Prometheus rules on (0139). There is no period with both.
+- **Host metrics:** node_exporter reports memory, disk and CPU, since ClickHouse shares the
+  machine; its textfile collector carries the host probe's stamps (the backup, WAL and snapshot
+  ages). The collector keeps reporting a file's last values when nobody writes it, so every file
+  has a rule on its age, `time() - node_textfile_mtime_seconds > 300` against the probe's
+  one-minute timer, and the probe keeps counter files for its one-off events. ClickHouse's own
+  Prometheus endpoint is scraped too, so one view covers the shared
+  server. The same agent sends them to the VM. The CloudWatch agent stays for the logs and one
+  metric, the audit log disk's use, for its alarm (Alerts, below).
+- **Monitoring stack:** Prometheus, Alertmanager and Grafana run on a small Hetzner Cloud VM in
+  Helsinki, in another location than this server in Falkenstein, so a fault here doesn't take
+  the monitoring with it.
+  - A CPX12 (Regular Performance: 1 AMD vCPU, 2 GB, 40 GB NVMe, $11.59 a month in Helsinki with
+    its IPv4, before VAT) holds up to about 8,000 series. Above that, a rescale, not a migration;
+    0139 measures the count.
+  - It runs Ubuntu 24.04, as this server does. Since it serves every project on the server, it
+    is provisioned from soroban-infrastructure (`monitoring/`, private): copies of the base roles
+    of the server's setup (soroban-block-explorer `infra-hetzner`: base, users, security, docker)
+    and its own monitoring role. Each project keeps its metrics, rules and dashboards in its own
+    repository.
+  - The Hetzner Cloud firewall and `ufw` open 22 for key-only SSH and 443 to all. Caddy on 443
+    takes `remote_write` from this server's agent and, later, metrics from the Lambdas, each
+    with a client certificate from the ClickHouse project's CA.
+  - Prometheus keeps 90 days, capped by size (`--storage.tsdb.retention.size`, 20 GB) on the
+    VM's own disk.
+  - Grafana shows dashboards only; its own alerting is off, so alerts take one path. Its
+    datasources and dashboards are provisioned from the repo, so its database holds nothing to
+    back up. It is reached through Cloudflare Tunnel behind Cloudflare Access, with no port of
+    its own.
+  - The rules are generated from the catalog, as `infra/src/lib/alarms/factory.ts` builds the
+    alarms today: one per check, with `network` as a label, so pubnet adds alert instances, not
+    rules.
+- **Alerts:** Prometheus evaluates the rules and Alertmanager posts them to the team's Slack
+  channel through an incoming webhook, whose URL is a secret file.
+  - Alertmanager groups by alert and cause, so a new cause posts while the alert already fires,
+    and it posts again when the alert resolves.
+  - What stays in CloudWatch runs off the server, so it works when the server doesn't:
+    `x402-watch` (balance, protocol, upstream; theft and reads of the backup secret, ADR 0013),
+    the uptime probe, the Roles Anywhere certificate and log-delivery alarms, OpenBao's audit log
+    disk at 90% (signing stops when it fills, so it must page when the VM can't), and the
+    heartbeat below. These keep SNS and Amazon Q Developer in chat applications (formerly AWS
+    Chatbot) to
+    the same channel.
+  - **Heartbeat:** an always-firing Watchdog rule goes through Alertmanager to an SNS topic of
+    its own every minute: its route has `group_interval` and `repeat_interval` of 1 minute,
+    whatever the other routes repeat at. A CloudWatch alarm on that topic's
+    `NumberOfMessagesPublished`, missing data breaching, fires when it stops: Prometheus,
+    Alertmanager or the VM gone quiet, or the VM's AWS credential broken.
+  - **The VM's AWS identity:** IAM Roles Anywhere with its own certificate from the ClickHouse
+    project's CA, as this server's CloudWatch agent has, and a role that may only publish to the
+    heartbeat topic and the alerts topic. A broken credential fails Alertmanager's SNS sends,
+    which the failed-notification rule below posts to Slack, so it doesn't read as "monitoring
+    down"; the certificate's expiry has its rule (Metrics, above).
+  - **This server gone quiet:** when the agent's samples stop, a rule on the VM fires, with the
+    metrics from before the outage kept for the diagnosis.
+  - A rule on `alertmanager_notifications_failed_total` goes through the other receiver: a
+    failing Slack webhook is posted through SNS, a failing SNS publish through Slack.
+  - The conditions, from 0027; of these, the low balance, not ready to settle, theft and reads
+    of the backup secret, OpenBao's audit log disk and the Roles Anywhere certificate stay in
+    CloudWatch, and the rest move to Prometheus:
+    - the five AD-18 conditions; the low-balance one fires below 25 XLM of spendable balance, and
+      again below 10 XLM (ADR 0013);
+    - not ready to settle: `/health`'s status is 200 whatever the lease says, so the uptime probe
+      reads `ready` from its body (below);
+    - no sweep listing the records within the alarm window: since the deploy checks `listed` only
+      once, this is the net for sweeps that start failing later (0019 decision 36);
+    - from ADR 0013: OpenBao sealed, down or failing to sign; theft and reads of the backup
+      secret, off the server; and OpenBao's audit log disk at 90%, after the server's disk alarm at
+      80% (amended 2026-11-09);
+    - WAL archiving failing (`pg_stat_archiver.last_failed_time` past `last_archived_time`, or the
+      last archived segment older than 10 minutes). pgBackRest acknowledges a segment only once it is in the
+      repository, so this one alarm covers a stuck archive, which fills a disk ClickHouse shares,
+      and WAL that doesn't leave the server;
+    - the last `pgbackrest backup` or the last OpenBao snapshot older than 26 hours (both run
+      daily). Each job touches its stamp, `/var/lib/x402/last-ok/pgbackrest-backup` or
+      `openbao-snapshot`, as root and only after it succeeded, and may set its time from the
+      repository; the host probe reports the stamp's age, and a missing one reads as a job that
+      never ran. Stamps live on disk, so a reboot doesn't read as a missed job (0027);
+    - the Roles Anywhere certificate expiring within 30 days;
+    - low free disk and memory on the server. The disk alarm goes to our channel too: our Platform
+      lane runs the server's base setup, and our WAL and logs are what fills the disk.
 - **A deploy of the alarms is done only when a test alarm reaches Slack and a person sees it.**
+  Since the move to Prometheus (0139) that takes two tests: one alert from Alertmanager and one
+  alarm from CloudWatch.
 - **Uptime:** a small Lambda in eu-central-1 reads `/health` on the public URL every minute and
   publishes `ready`.
   - It runs apart from the other off-server checks, so their dependencies can't stop it. A failed
@@ -636,14 +730,19 @@ One request or one stop must never outlast the layer in front of it:
 ## Rationale
 
 - **The capacity is already paid for.** The server has a lot of free RAM and disk, and our
-  containers are limited to 1.875 GiB today and 2.875 GiB with mainnet's database. Running there
+  containers are limited to 2.375 GiB today and 3.375 GiB with mainnet's database. Running there
   costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
   Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no
   platform cap, so 180 s covers the 150 s drain. A submission still open then is finished by the
   next process (0073).
-- **The alerting design carries over:** the same logger, the same EMF metrics, CloudWatch alarms
-  and Slack.
+- **The alerting design carries over:** the same logger, the same catalog and Slack. Metrics
+  and alerts move to Prometheus and Alertmanager on a separate VM (task 0138): a series costs
+  disk, not $0.30 a month, and an alert $0, not $0.10; pubnet adds alert instances, not about 26
+  alarms and 30 series; and one view covers the server shared with ClickHouse.
+- **The monitoring doesn't share this server's fate,** for $11.59 a month. A fault, a full
+  disk or a reboot here is an alert from the VM, with the metrics from before it. The checks
+  that must outlive both stay in AWS.
 - **Docker is already on the server,** and the company already runs sorobanscan's API behind
   Cloudflare.
 - **The tunnel needs nothing from the ClickHouse project:** no site block in its Caddy, no
@@ -717,8 +816,24 @@ One request or one stop must never outlast the layer in front of it:
   records.
 - **ClickHouse as the store.** Rejected; see Store.
 - **Key custody** (AWS KMS, a key file, OpenBao and others): compared in ADR 0013 (task 0047).
-- **Grafana Cloud Free for metrics and alerts.** $0, but a second vendor whose alert rules sit
-  outside our config. CloudWatch is kept.
+- **CloudWatch for metrics and alerts.** This was this section until 2026-11-17. Replaced
+  (task 0138): every series costs $0.30 a month and every alarm $0.10, pubnet would add about 26
+  alarms and 30 series, and the facilitator's share was about $21 a month at the 2026-11-13
+  inventory ([measurement][cw-measurement]).
+- **Cut CloudWatch only.** About $22 a month saved across the account, nearly all of it the
+  explorer's and the Prices API's; x402's own part is about $1. Rejected for x402: pubnet would
+  still double the facilitator's alarms, and the server shared with ClickHouse would still have
+  no single view.
+- **Prometheus and Alertmanager on this server.** $0, on capacity already paid. Rejected: the
+  monitoring would stop with every fault, full disk and reboot of the server it watches, and the
+  metrics from the outage would be lost. The explorer's ADR 0054 rejected it for the same reason
+  ("partially inside the system it observes"). Moving there would only change the agent's
+  `remote_write` target.
+- **Grafana Cloud Free for metrics and alerts.** $0 and off the server, but 10,000 active
+  series, 14 days of history, 500 alert rules, 3 people a month (Grafana's pricing page and
+  docs, read 2026-11-17) and a second vendor. Rules
+  generated from the catalog answer the earlier objection that its alert rules sit outside our
+  config. Kept as the fallback if nobody runs the stack.
 
 ## Consequences
 
@@ -741,6 +856,12 @@ One request or one stop must never outlast the layer in front of it:
 - **It is one physical machine.** A hardware fault takes the facilitator down until the server is
   repaired or the service is restored elsewhere from the off-server backups, which can take hours.
   Restoring elsewhere is a runbook step (0026) and a mainnet risk (0038).
+- **The monitoring is one more host.**
+  - The VM needs OS and Docker updates and its own patching schedule, from the same playbook.
+  - When the VM fails, the heartbeat in CloudWatch fires. This server and the facilitator keep
+    running, and the agent's write-ahead log holds a few hours of samples.
+  - The VM depends on Hetzner too: a Hetzner-wide outage or a blocked account silences both.
+    Then only `x402-watch`, the uptime probe and the Lambda alarms in AWS speak.
 - **Operations are ours:** Docker and OS updates, PostgreSQL upgrades, backups and restore drills,
   `cloudflared` upgrades, and keeping the playbook in step with the server.
 - **Deploy downtime is usually under a minute:** a quick drain when idle and a container start;
@@ -776,11 +897,24 @@ One request or one stop must never outlast the layer in front of it:
   steps. The holder of the ClickHouse project's CA signs the certificate from a request made on
   the server, so its key never leaves it. 0026's first deploy goes out without CloudWatch logs
   until 0027 lands.
+- **0139 builds:** the Prometheus adapter; the monitoring VM, its role and its certificate; the
+  agent on this server; the rules generated from the catalog; the Slack webhook, the heartbeat
+  and the failed-notification rule; Grafana behind Cloudflare Access; and the switch: one change
+  that turns the rules on and retires the EMF adapter and the CloudWatch alarms that moved, with
+  no period of both. Each rule is drilled once right after the switch, and one that fails its
+  drill is fixed forward.
 - **0023 keys the limiter on `CF-Connecting-IP`** as above.
 - **Cost:**
-  - The server adds nothing.
-  - CloudWatch logs, metrics and alarms, with the uptime probe, come to about $13 a month with
-    one network, and about $6 more with a second.
+  - The server adds nothing. The monitoring VM (CPX12) costs $11.59 a month with its IPv4, before
+    VAT, for every project on the server.
+  - Before 0139, CloudWatch logs, metrics and alarms, with the uptime probe, come to about $21 a
+    month at the 2026-11-13 inventory ([measurement][cw-measurement]). A second network
+    would add about 26 alarms and 30 series.
+  - After it, about $5 a month: 11 alarms on 6 series, about $3 (`balance-low` and
+    `balance-critical`, `x402-watch`'s blind and findings alarms, `uptime` and
+    `uptime-flapping`, the certificate, credentials, log-delivery, audit disk and heartbeat
+    alarms; task 0138's signals note), and the logs. A second network adds a few `x402-watch`
+    alarms.
   - Off-server backups go to the existing Storage Box and add nothing.
 - **Mainnet availability is open** (0038). It needs to settle:
   - the targets for the longest downtime and the most data lost after a hardware fault;
@@ -796,7 +930,8 @@ One request or one stop must never outlast the layer in front of it:
     facilitator, a crash and every deploy cut both networks' submissions in flight, and rotating
     one network's key (Keys, secrets and access: "stop the service") stops both.
 - **Slack is not a pager.** On mainnet, the alerts that cost money (breaker open, low balance,
-  pending settlements) also need a phone or SMS route.
+  pending settlements) also need a phone or SMS route. One SNS topic can serve it for both
+  paths: CloudWatch alarm actions and Alertmanager's SNS receiver.
 
 ## References
 
@@ -808,6 +943,12 @@ One request or one stop must never outlast the layer in front of it:
   research and the comparison behind the first version
 - Task 0039: the move to the Hetzner server
 - [ADR 0013](0013-facilitator-key-custody.md): the facilitator key in OpenBao Transit
+- Task 0138 notes (`0138_RESEARCH_monitoring-cost-and-grafana-decision/notes/`): the CloudWatch
+  cost, the alarm inventory and the move to Prometheus
+- [Prometheus storage](https://prometheus.io/docs/prometheus/latest/storage/),
+  [Alertmanager configuration](https://prometheus.io/docs/alerting/latest/configuration/)
 - [IAM Roles Anywhere](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html),
   [CloudWatch agent](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Install-CloudWatch-Agent.html),
   [Compose `stop_grace_period`](https://docs.docker.com/reference/compose-file/services/#stop_grace_period)
+
+[cw-measurement]: ../../lore/1-tasks/archive/0138_RESEARCH_monitoring-cost-and-grafana-decision/notes/R-cloudwatch-cost-measurement.md

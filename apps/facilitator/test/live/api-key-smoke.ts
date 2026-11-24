@@ -33,7 +33,7 @@ import type { PaymentRequirements, SettleResponse, VerifyResponse } from "@x402/
 import { createEd25519Signer } from "@x402/stellar";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, fetch } from "undici";
-import { newApiKey } from "../../src/http/api-key.js";
+import { newApiKey } from "@stellar-x402/api-keys";
 import { keysMain, main } from "../../src/main.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
 

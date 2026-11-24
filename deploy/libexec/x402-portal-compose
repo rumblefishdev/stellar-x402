@@ -1,0 +1,10 @@
+#!/bin/sh
+# `docker compose` in an environment's portal project with the image its `portal.digest` names
+# (task 0106 decision 5), as x402-compose is for the facilitator's. Used by x402-portal@<environment>
+# and its deploy.
+#   x402-portal-compose <environment> <compose arguments>...
+set -eu
+cd "${X402_SRV:-/srv/x402}/$1"
+shift
+PORTAL_IMAGE="ghcr.io/rumblefishdev/x402-portal@$(cat portal.digest)" \
+  exec docker compose -f portal.compose.yaml "$@"

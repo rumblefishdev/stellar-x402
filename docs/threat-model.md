@@ -323,16 +323,31 @@ Scope: the `exact` payer's auth entry and how long it stays landable (spine AD-6
 
 #### A refused payment settles after its payer signed again
 
-- **Attack:** A payment P1 is refused before the claim, which records nothing. The seller has its
-  payer sign P2, which settles. P1 is then sent again, by a seller retrying with backoff or by
-  anyone holding it, once the reason it was refused no longer holds, and settles too.
-- **Mitigation:** A resource asking for more than the cap fits is refused on its
-  `maxTimeoutSeconds`, which doesn't change over time, so the same request stays refused (0073
-  decision 22).
-- **Residual risk:** A sender who edits `maxTimeoutSeconds` gets P1 through; it holds P1, so it
-  could submit it on chain without us anyway. A 300 s payment signed at 4 s ledgers is refused by
-  the ledger gap and can pass later. `invalid_exact_stellar_payload_fee_exceeds_maximum` has the
-  same path once fees drop (0086).
+- **Attack:** A payment P1 is refused before the claim. The seller has its payer sign P2, which
+  settles. P1 is then sent again, by a seller retrying with backoff or by anyone holding it, once
+  the reason it was refused no longer holds (fees drop, the payer tops up or adds a trustline, the
+  ledger gap closes), and settles too.
+- **Mitigation:** Every refusal of the checks for a payload with a key is recorded as a final
+  `refused` record (0086), in `/verify` and in `/settle`, so P1 never settles through us; the
+  answer says to sign P2 only once P1's auth entry has expired. `/verify` answers 503 when it
+  can't record the refusal. A resource asking for more than the cap fits stays refused on its
+  `maxTimeoutSeconds` anyway (0073 decision 22). The record is kept until P1's expiration ledger
+  has closed: the checks can refuse P1 for its fee before any expiry check. That ledger comes
+  from the payload alone, before any signature check, so a refusal whose auth entry expires more
+  than 720 ledgers ahead isn't recorded (0156): otherwise junk payloads signed by throwaway keys
+  could keep rows for good. Its answer still says to wait for P1's expiration ledger.
+- **Residual risk:** Whoever holds P1 can submit it on chain without us until its auth entry
+  expires; the answer's wait covers a seller that follows it. P1 with another payload under the
+  same key (an edited `maxTimeoutSeconds`) is answered `…_nonce_already_used`, and its nonce
+  makes only one of them land. During a rolling deploy, a process of the release before reads a
+  `refused` record as open and answers `settlement_pending`, without settling it. A breaker's
+  refusal in `/verify` isn't recorded and has the same path once the breaker closes. P1 signed
+  more than 720 ledgers ahead isn't recorded either (0156), so it can settle through us once it
+  passes, as it could elsewhere; a seller that waits as the answer says pays once. Junk payloads
+  within the 720 ledgers still each leave a row for up to about an hour, at the rate limit's pace.
+  While the latest ledger can't be read within 1 s (an RPC outage, or one a flood slows down),
+  `/verify` records every refusal as before 0156, so junk gets rows until its own ledger for as
+  long as that lasts.
 
 #### A payment ended after its claim settles after its payer signed again
 
@@ -426,11 +441,15 @@ requires one (0105, "API keys" below).
   comes from the payer's nonce entry on chain, not from the error: our failed transaction wrote no
   nonce, so an entry means another transaction used it. Answering
   `success` would let a buyer race one entry through two facilitators to the same seller and be
-  served twice. A used nonce feeds no breaker. The fee still counts against the budgets, and each
-  such record is logged with it (`settlement_nonce_consumed_elsewhere`). The host checks the nonce
-  when the token calls `require_auth`, before a C-account's `__check_auth` runs, so the error names
-  the token, never the payer: shown on testnet for a `test-wallet` payer in a wasm token and in a
-  SAC (task 0024, `apps/facilitator/test/live/results/front-run-testnet.json`).
+  served twice. With an error event that names it, a used nonce feeds no breaker; without one (an
+  RPC without diagnostic events) it still does until task 0141 decision 9. The fee still counts
+  against the budgets, and each such record is logged with it
+  (`settlement_nonce_consumed_elsewhere`). The host runs a C-account's `__check_auth` first and
+  checks the nonce after it, when the token calls `require_auth` (`authenticate`, then
+  `verify_and_consume_nonce`, in soroban-env-host's `auth.rs`), so for a payer whose `__check_auth`
+  passes the error names the token: shown on testnet for a `test-wallet` payer in a wasm token and
+  in a SAC (task 0024, `apps/facilitator/test/live/results/front-run-testnet.json`). A wallet whose
+  own check fails first, say on a spending limit the front-run used up, fails in its own frame.
 - **Residual risk:** A buyer whose entry was submitted by someone else paid and is refused: the
   seller holds the payment until it refunds. The front-runner gains nothing and pays its own fee; no
   case was found in about 4,500 pubnet settlements of four submitters (March to November 2026).
@@ -512,11 +531,38 @@ by its payer's signature. Who may get a key is the portal's rule (0106), not cov
 - **Mitigation:** The registry holds each key's SHA-256, never the key, and the table's own CHECK
   refuses anything but 64 hex digits in that column. A key is 32 random bytes, so its hash can't
   be searched back into the key, salted or not. The hash is not a credential: sent as a key it is
-  refused as malformed, without a read.
+  refused as malformed, without a read. Beside it, `api_key_copies` holds a sealed copy of each
+  key the portal issued, so the API hub can show it again (0106): AES-256-GCM under the portal's
+  `KEY_ENCRYPTION_KEY`, which the database never holds, bound to the key's owner and hash so a
+  copy moved to another row doesn't open, and deleted when the portal revokes the key. A dump
+  alone opens no copy.
 - **Residual risk:** The owners are readable, and from 0106 they are Discord account ids, which
-  its privacy policy has to cover. Whoever can write the database can add a key of their own;
-  that takes the database password, which only the facilitator and the migration service hold
-  (ADR 0012).
+  its privacy policy has to cover. A dump together with `KEY_ENCRYPTION_KEY`, an encrypted
+  credential on the server that only the portal's container reads, gives every active key the
+  portal issued. Grants don't close the copies to anyone else in the database: the facilitator
+  connects as its owner and could read them, so only the encryption keeps them (0106 decision
+  18). Whoever can write the database can add a key of their own; that takes the database
+  password, which only the facilitator and the migration service hold (ADR 0012), or the
+  password of the portal's role `x402_portal`, which may insert a key.
+
+#### Someone holds the hub's token secret
+
+- **Attack:** The portal's backend issues, shows and revokes a key on the word of a token the API
+  hub signs, an HMAC under the secret `sorobanscan-hub/production/x402-token` (0106). Whoever
+  holds the secret signs a token for any Discord account and any act: a key for an account that
+  never asked or that the hub would refuse, any account's key shown, or revoked.
+- **Mitigation:** The secret is in AWS Secrets Manager, where the hub's backend reads it, and on
+  the server in one file, the encrypted credential `portal-hub-token-secret`, decrypted for the
+  portal's container only. Neither side logs it or a token. A token lives 60 seconds, names one
+  account and one act, and is signed under x402's own audience and context, so a token for
+  another of the hub's products doesn't pass here. The secret can be changed with no moment in
+  which a good token is refused, apart from the seconds of each of the backend's two restarts
+  (runbook, The portal's backend).
+- **Residual risk:** The backend can't tell a token the hub signed from one signed with a stolen
+  secret, and a key issued with one is a real key for that account. Membership of Stellar
+  Developers and its screening are the hub's to check before it signs for `issue`; the backend
+  checks only the account's age. Whoever can read the secret in that AWS account holds this
+  power, and so does root on the server.
 
 #### Requests without a valid key, in bulk
 

@@ -5,7 +5,6 @@ import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   HashConflictError,
-  type ApiKeyStore,
   type CatalogAttempt,
   type CatalogAttemptStore,
   LEASE_SKEW_MARGIN_MS,
@@ -534,6 +533,216 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         );
         expect(results.filter(Boolean)).toHaveLength(1);
         expect((await store.get(s.key))?.reopened).toBe(1);
+      });
+    });
+
+    describe("refuse (0086)", () => {
+      const UNSENT = ["unsent_a"];
+      const FEE = { errorReason: "invalid_fee", errorMessage: "too high", errorDetail: "our_code" };
+
+      it("inserts a refused record with the checks' reason and message, no hash, never reopening", async () => {
+        const s = settlement("1");
+        const record = {
+          ...s,
+          state: "refused",
+          hashes: [],
+          version: 0,
+          reopened: 0,
+          errorReason: "invalid_fee",
+          errorMessage: "too high",
+          errorDetail: "our_code",
+          createdAt: 1_000,
+          updatedAt: 2_000,
+        };
+        expect(await store.refuse(s, FEE, UNSENT, 2_000)).toEqual(record);
+        expect(await store.get(s.key)).toEqual(record);
+        // Final: no transition, no reopen, no hash, and a claim finds it.
+        expect(
+          await store.transition(s.key, "refused", { state: "success", updatedAt: 3_000 }),
+        ).toBeUndefined();
+        expect(await store.reopen(s.key, s.fingerprint, ["invalid_fee"], 3_000)).toBeUndefined();
+        expect(await store.addHash(s.key, "h1", LEASE, 3_000)).toBe(false);
+        expect(await store.claim(s)).toEqual({ claimed: false, existing: record });
+        expect(await store.listNonFinal("stellar:testnet")).toEqual([]);
+      });
+
+      it("keeps the message empty when the checks gave none", async () => {
+        const s = settlement("1");
+        const record = await store.refuse(s, { errorReason: "invalid_x" }, UNSENT, 2_000);
+        expect(record).not.toHaveProperty("errorMessage");
+        expect(record).not.toHaveProperty("errorDetail");
+      });
+
+      it("takes no payer and asset slot, and never waits for one", async () => {
+        const open = settlement("1");
+        await store.claim(open);
+        // Another key of the same payer and asset is settling: a claim would be busy.
+        expect(await store.refuse(settlement("2"), FEE, UNSENT, 2_000)).toMatchObject({
+          state: "refused",
+        });
+        await store.transition(open.key, "claimed", { state: "success", updatedAt: 3_000 });
+        expect(await store.claim(settlement("3"))).toMatchObject({ claimed: true });
+      });
+
+      it("moves a reopenable rejected record of the same payment to refused, once", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        await store.transition(s.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 2_000,
+        });
+        expect(await store.refuse(s, FEE, UNSENT, 3_000)).toMatchObject({
+          state: "refused",
+          errorReason: "invalid_fee",
+          errorMessage: "too high",
+          version: 1,
+          reopened: 0,
+          createdAt: 1_000,
+          updatedAt: 3_000,
+        });
+        expect(await store.reopen(s.key, s.fingerprint, UNSENT, 4_000)).toBeUndefined();
+      });
+
+      it("leaves any other record as it is: open, sent, another reason or another payload", async () => {
+        const open = settlement("1");
+        await store.claim(open);
+        const sent = settlement("2");
+        await store.claim(sent);
+        await store.addHash(sent.key, "h2", LEASE, 1_500);
+        await store.transition(sent.key, "signed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 2_000,
+        });
+        const other = settlement("3");
+        await store.claim(other);
+        await store.transition(other.key, "claimed", {
+          state: "rejected",
+          errorReason: "settle_exact_stellar_refused",
+          updatedAt: 2_000,
+        });
+        const unsent = settlement("4");
+        await store.claim(unsent);
+        await store.transition(unsent.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 2_000,
+        });
+        for (const [s, state] of [
+          [open, "claimed"],
+          [sent, "rejected"],
+          [other, "rejected"],
+        ] as const) {
+          const before = await store.get(s.key);
+          expect(await store.refuse(s, FEE, UNSENT, 3_000)).toEqual(before);
+          expect(before?.state).toBe(state);
+        }
+        const before = await store.get(unsent.key);
+        expect(
+          await store.refuse({ ...unsent, fingerprint: "fp-other" }, FEE, UNSENT, 3_000),
+        ).toEqual(before);
+      });
+
+      it("lets exactly one of a refuse and a reopen of the same record win", async () => {
+        for (const nonce of ["1", "2", "3", "4", "5"]) {
+          const s = settlement(nonce);
+          await store.claim(s);
+          await store.transition(s.key, "claimed", {
+            state: "rejected",
+            errorReason: "unsent_a",
+            updatedAt: 2_000,
+          });
+          const [refused, reopened] = await Promise.all([
+            store.refuse(s, FEE, UNSENT, 3_000),
+            store.reopen(s.key, s.fingerprint, UNSENT, 3_000),
+          ]);
+          const record = await store.get(s.key);
+          if (record?.state === "refused") {
+            expect(reopened).toBeUndefined();
+          } else {
+            expect(record?.state).toBe("claimed");
+            expect(reopened).toMatchObject({ state: "claimed" });
+            expect(refused).toMatchObject({ state: "claimed" });
+          }
+          // Free the slot for the next payment of the same payer and asset.
+          if (record?.state === "claimed")
+            await store.transition(s.key, "claimed", {
+              state: "rejected",
+              errorReason: "x",
+              updatedAt: 4_000,
+            });
+        }
+      });
+
+      it("is never a transition's target: only refuse writes it", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        expect(
+          await store.transition(s.key, "claimed", {
+            state: "refused",
+            errorReason: "invalid_fee",
+            updatedAt: 2_000,
+          }),
+        ).toBeUndefined();
+        expect(await store.get(s.key)).toMatchObject({ state: "claimed" });
+      });
+
+      it("prunes only refused records created before the cutoff, in batches", async () => {
+        for (const nonce of ["1", "2", "3"])
+          await store.refuse({ ...settlement(nonce), createdAt: 1_000 }, FEE, UNSENT, 1_000);
+        await store.refuse({ ...settlement("4"), createdAt: 9_000 }, FEE, UNSENT, 9_000);
+        const kept = settlement("5");
+        await store.claim(kept);
+        await store.transition(kept.key, "claimed", {
+          state: "rejected",
+          errorReason: "invalid_like",
+          updatedAt: 2_000,
+        });
+        expect(await store.pruneRefusals(5_000, undefined, 2)).toBe(2);
+        expect(await store.pruneRefusals(5_000, undefined, 2)).toBe(1);
+        expect(await store.pruneRefusals(5_000, undefined, 2)).toBe(0);
+        expect(await store.get(settlement("4").key)).toMatchObject({ state: "refused" });
+        expect(await store.get(kept.key)).toMatchObject({ state: "rejected" });
+      });
+
+      it("keeps a refused record until its expiration ledger has closed on its network", async () => {
+        const at = (nonce: string, expirationLedger: number) =>
+          store.refuse(
+            { ...settlement(nonce), createdAt: 1_000 },
+            { ...FEE, expirationLedger },
+            UNSENT,
+            1_000,
+          );
+        await at("1", 99);
+        await at("2", 100);
+        await at("3", 101);
+        const testnet = { network: "stellar:testnet" as const, latest: 100 };
+        // No ledger read: only records without an expiration go.
+        expect(await store.pruneRefusals(5_000, undefined, 10)).toBe(0);
+        // Another network's ledger counts for nothing here.
+        expect(
+          await store.pruneRefusals(5_000, { ...testnet, network: "stellar:pubnet" }, 10),
+        ).toBe(0);
+        // Not before the hour either.
+        expect(await store.pruneRefusals(1_000, testnet, 10)).toBe(0);
+        expect(await store.pruneRefusals(5_000, testnet, 10)).toBe(2);
+        expect(await store.get(settlement("3").key)).toMatchObject({ state: "refused" });
+        expect(await store.pruneRefusals(5_000, { ...testnet, latest: 101 }, 10)).toBe(1);
+      });
+
+      it("keeps the expiration ledger when it moves a rejected record to refused", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        await store.transition(s.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_a",
+          updatedAt: 2_000,
+        });
+        await store.refuse(s, { ...FEE, expirationLedger: 200 }, UNSENT, 3_000);
+        const testnet = { network: "stellar:testnet" as const, latest: 199 };
+        expect(await store.pruneRefusals(5_000, testnet, 10)).toBe(0);
+        expect(await store.pruneRefusals(5_000, { ...testnet, latest: 200 }, 10)).toBe(1);
       });
     });
 
@@ -1542,102 +1751,6 @@ export function rateLimitStoreContract(make: Make<RateLimitStore>) {
   });
 }
 
-export function apiKeyStoreContract(make: Make<ApiKeyStore>) {
-  describe("ApiKeyStore contract (0105)", () => {
-    const HASH_A = "a".repeat(64);
-    const HASH_B = "b".repeat(64);
-    let store: ApiKeyStore;
-    beforeEach(async () => {
-      store = await make();
-    });
-
-    it("knows an issued key's owner by its hash, and no other hash", async () => {
-      expect(await store.issue({ hash: HASH_A, owner: "operator:acme", now: 1_000 })).toBe(true);
-      expect(await store.ownerOf(HASH_A)).toBe("operator:acme");
-      expect(await store.ownerOf(HASH_B)).toBeUndefined();
-    });
-
-    it("gives an owner one active key: a second is refused and stores nothing", async () => {
-      expect(await store.issue({ hash: HASH_A, owner: "operator:acme", now: 1_000 })).toBe(true);
-      expect(await store.issue({ hash: HASH_B, owner: "operator:acme", now: 2_000 })).toBe(false);
-      expect(await store.ownerOf(HASH_A)).toBe("operator:acme");
-      expect(await store.ownerOf(HASH_B)).toBeUndefined();
-      expect(await store.list()).toHaveLength(1);
-      // Another owner is not held up.
-      expect(await store.issue({ hash: HASH_B, owner: "operator:other", now: 2_000 })).toBe(true);
-    });
-
-    it("gives two concurrent issues for one owner to exactly one", async () => {
-      const issued = await Promise.all(
-        [HASH_A, HASH_B].map((hash) => store.issue({ hash, owner: "operator:acme", now: 1_000 })),
-      );
-      expect(issued.filter(Boolean)).toHaveLength(1);
-      expect(await store.list()).toHaveLength(1);
-    });
-
-    it("revokes an owner's active key at once and keeps its row", async () => {
-      await store.issue({ hash: HASH_A, owner: "operator:acme", now: 1_000 });
-      expect(await store.revoke("operator:acme", 2_000)).toBe(true);
-      expect(await store.ownerOf(HASH_A)).toBeUndefined();
-      expect(await store.list()).toEqual([
-        {
-          hash: HASH_A,
-          owner: "operator:acme",
-          state: "revoked",
-          createdAt: 1_000,
-          revokedAt: 2_000,
-        },
-      ]);
-      // Nothing is active any more, so a second revoke changes nothing.
-      expect(await store.revoke("operator:acme", 3_000)).toBe(false);
-      expect((await store.list())[0]?.revokedAt).toBe(2_000);
-      expect(await store.revoke("operator:nobody", 3_000)).toBe(false);
-    });
-
-    it("issues a new key after a revoke, and the revoked one stays revoked", async () => {
-      await store.issue({ hash: HASH_A, owner: "operator:acme", now: 1_000 });
-      await store.revoke("operator:acme", 2_000);
-      expect(await store.issue({ hash: HASH_B, owner: "operator:acme", now: 3_000 })).toBe(true);
-      expect(await store.ownerOf(HASH_A)).toBeUndefined();
-      expect(await store.ownerOf(HASH_B)).toBe("operator:acme");
-      // Oldest first.
-      expect(await store.list()).toEqual([
-        {
-          hash: HASH_A,
-          owner: "operator:acme",
-          state: "revoked",
-          createdAt: 1_000,
-          revokedAt: 2_000,
-        },
-        { hash: HASH_B, owner: "operator:acme", state: "active", createdAt: 3_000 },
-      ]);
-    });
-
-    it("never takes a hash twice, whoever asks and whatever its state", async () => {
-      await store.issue({ hash: HASH_A, owner: "operator:acme", now: 1_000 });
-      await expect(
-        store.issue({ hash: HASH_A, owner: "operator:other", now: 2_000 }),
-      ).rejects.toThrow();
-      await store.revoke("operator:acme", 2_000);
-      await expect(
-        store.issue({ hash: HASH_A, owner: "operator:acme", now: 3_000 }),
-      ).rejects.toThrow();
-      expect(await store.ownerOf(HASH_A)).toBeUndefined();
-    });
-
-    it.each([
-      ["a hash that is not 64 hex digits", { hash: "x402_plain-key", owner: "operator:acme" }],
-      ["an upper-case hash", { hash: "A".repeat(64), owner: "operator:acme" }],
-      ["an empty owner", { hash: HASH_A, owner: "" }],
-      ["an owner over 128 characters", { hash: HASH_A, owner: `operator:${"a".repeat(120)}` }],
-      ["an owner with a space", { hash: HASH_A, owner: "operator:ac me" }],
-    ])("refuses %s and stores nothing", async (_name, key) => {
-      await expect(store.issue({ ...key, now: 1_000 })).rejects.toThrow(RangeError);
-      expect(await store.list()).toEqual([]);
-    });
-  });
-}
-
 export function catalogStoreContract(make: Make<CatalogStore>) {
   describe("CatalogStore contract", () => {
     let store: CatalogStore;
@@ -1665,6 +1778,20 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       payTo,
       method: "GET",
       resourceUrl: url,
+    });
+
+    it("stores an entry no settlement wrote, as the seed does (0155)", async () => {
+      const url = "https://seller.example.com/seeded";
+      const entry = { key: key(url), resource: resource(url) };
+      expect(
+        await store.upsert({
+          keyVersion: CATALOG_KEY_VERSION,
+          ledger: null,
+          checkedAt: 1,
+          ...entry,
+        }),
+      ).toBe("inserted");
+      expect(await store.get(key(url))).toMatchObject({ resource: url });
     });
 
     it("replaces the stored entry by key, its accepts included (0063 row 7)", async () => {
@@ -1829,6 +1956,10 @@ export function catalogAttemptStoreContract(make: Make<CatalogAttemptStore>) {
       stage: "payment",
       outcome: "rejected",
       ...overrides,
+    });
+
+    it("records an attempt with no payer, as the seed's checks are (0155)", async () => {
+      await expect(attempts.record(attempt(1, { payer: undefined }))).resolves.toBeUndefined();
     });
 
     it("prunes attempts before a time in batches, keeping later ones", async () => {

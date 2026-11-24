@@ -66,6 +66,21 @@ jobs:
       - uses: actions/checkout@v4
       - run: deploy/scripts/check-production-postgres.sh
 
+  # The monitoring VM's rule file (0139 step 6): the tests compare it with what `make rules`
+  # writes, but only promtool parses its PromQL, and Prometheus refuses a whole file it can't load.
+  prometheus-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # What loads the file is the monitoring VM's Prometheus, v3.16.0 (soroban-infrastructure,
+      # monitoring/ansible/playbook.yml, prometheus_version); the agent runs --agent and never
+      # evaluates rules. The digest is the agent's image of that tag: raise the two together.
+      - run: >-
+          docker run --rm --entrypoint promtool
+          -v "$PWD/deploy/metrics/rules:/rules:ro"
+          prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+          check rules /rules/x402-production.yml
+
   # The Rust SDK (task 0136), apart from contracts/, which builds WASM with its own profile.
   sdk-rust:
     runs-on: ubuntu-latest

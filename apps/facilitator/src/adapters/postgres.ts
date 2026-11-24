@@ -1,11 +1,10 @@
+import { PostgresApiKeyStore } from "@stellar-x402/api-keys";
 import type { StellarNetwork } from "@stellar-x402/config";
 import pg from "pg";
 import {
   HashConflictError,
   LeaseFencedError,
   LEASE_SKEW_MARGIN_MS,
-  type ApiKeyRecord,
-  type ApiKeyStore,
   type AttemptBounds,
   type AttemptState,
   type AttemptUpdate,
@@ -14,6 +13,7 @@ import {
   type ClaimResult,
   type ReopenResult,
   type NewSettlement,
+  type Refusal,
   type RateLimitHit,
   type RateLimitStore,
   type ReserveResult,
@@ -32,7 +32,6 @@ import {
 } from "../ports/index.js";
 import {
   NON_FINAL_STATES,
-  assertApiKey,
   assertStroops,
   attemptRankSql,
   isFinal,
@@ -167,6 +166,10 @@ interface SettlementRow {
   ledger: string | null;
   fee_charged: string | null;
   error_reason: string | null;
+  /** Absent on a database `0015_settlement_refused` hasn't reached (`SELECT s.*`). */
+  error_message?: string | null;
+  /** Absent on a database `0015_settlement_refused` hasn't reached (`SELECT s.*`). */
+  error_detail?: string | null;
   /** Absent on a database `0010_settlement_failure` hasn't reached (`SELECT s.*`). */
   failure?: SettlementRecord["failure"] | null;
   /** Absent on a database `0002_success_answered` hasn't reached (`SELECT s.*`). */
@@ -201,6 +204,8 @@ function toRecord(row: SettlementRow, hashes = row.hashes ?? []): SettlementReco
   if (row.ledger !== null) record.ledger = Number(row.ledger);
   if (row.fee_charged !== null) record.feeCharged = BigInt(row.fee_charged);
   if (row.error_reason !== null) record.errorReason = row.error_reason;
+  if (row.error_message != null) record.errorMessage = row.error_message;
+  if (row.error_detail != null) record.errorDetail = row.error_detail;
   if (row.failure != null) record.failure = row.failure;
   if (row.success_answered_at != null) record.successAnsweredAt = Number(row.success_answered_at);
   return record;
@@ -419,8 +424,8 @@ export class PostgresSettlementStore implements SettlementStore {
          FOR UPDATE
        ), ins AS (
          INSERT INTO settlement_hashes
-           (hash, key, state, max_time, max_ledger, inner_hash, updated_at)
-         SELECT $2, key, 'stored', $4::bigint, $5::bigint, $9::text, $3 FROM rec
+           (hash, key, state, max_time, max_ledger, inner_hash, channel, updated_at)
+         SELECT $2, key, 'stored', $4::bigint, $5::bigint, $9::text, $10::text, $3 FROM rec
          WHERE state IN (${NON_FINAL_SQL})
          ON CONFLICT (hash) DO NOTHING
          RETURNING key
@@ -446,6 +451,7 @@ export class PostgresSettlementStore implements SettlementStore {
         lease.name,
         lease.token,
         innerHash ?? null,
+        bounds?.channel ?? null,
       ],
     );
     const { fenced, state, added, owner } = rows[0]!;
@@ -616,6 +622,85 @@ export class PostgresSettlementStore implements SettlementStore {
     }
   }
 
+  /**
+   * Two statements, each atomic on its own: the insert-if-absent, then, if the key had a record,
+   * the conditional move of a reopenable `rejected` one to `refused`. Its row lock orders it
+   * against a concurrent `reopen`, whose condition then fails, or the other way round. Then the
+   * key's record as a new statement sees it.
+   */
+  async refuse(
+    settlement: NewSettlement,
+    refusal: Refusal,
+    unsent: readonly string[],
+    now: number,
+  ): Promise<SettlementRecord> {
+    const s = settlement;
+    const message = refusal.errorMessage ?? null;
+    const detail = refusal.errorDetail ?? null;
+    const expiration = refusal.expirationLedger ?? null;
+    const { rows } = await this.pool.query<SettlementRow>(
+      `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
+         payment_requirements, error_reason, error_message, error_detail, expiration_ledger,
+         created_at, updated_at, reopened)
+       VALUES ($1, $2, $3, $4, $5, 'refused', $6, $7, $8, $9, $10, $13, $11, $12, 0)
+       ON CONFLICT (key) DO NOTHING
+       RETURNING *`,
+      [
+        s.key,
+        s.network,
+        s.payer,
+        s.nonce,
+        s.fingerprint,
+        JSON.stringify(s.paymentPayload),
+        JSON.stringify(s.paymentRequirements),
+        refusal.errorReason,
+        message,
+        detail,
+        s.createdAt,
+        now,
+        expiration,
+      ],
+    );
+    if (rows[0]) return toRecord(rows[0], []);
+    const moved = await this.pool.query<SettlementRow>(
+      `UPDATE settlements s
+       SET state = 'refused', error_reason = $3, error_message = $4, error_detail = $7,
+           expiration_ledger = $8, version = s.version + 1, updated_at = $6
+       WHERE s.key = $1 AND s.state = 'rejected' AND s.fingerprint = $2
+         AND s.error_reason = ANY ($5::text[]) AND s.reopened >= 0
+         AND NOT EXISTS (SELECT 1 FROM settlement_hashes h WHERE h.key = s.key)
+       RETURNING *`,
+      [s.key, s.fingerprint, refusal.errorReason, message, [...unsent], now, detail, expiration],
+    );
+    if (moved.rows[0]) return toRecord(moved.rows[0], []);
+    const existing = await this.get(s.key);
+    if (!existing) throw new Error("settlement refusal conflicted but the existing record is gone");
+    return existing;
+  }
+
+  /**
+   * The partial index `settlements_refused` holds only these rows, oldest first; one whose
+   * expiration ledger is still open is read again on every tick, a few at most. The batch is a
+   * materialized CTE: as a subquery of `IN`, Postgres may run the `LIMIT … SKIP LOCKED` more
+   * than once and delete more than `limit`.
+   */
+  async pruneRefusals(
+    before: number,
+    ledger: { network: StellarNetwork; latest: number } | undefined,
+    limit: number,
+  ): Promise<number> {
+    const { rowCount } = await this.pool.query(
+      `WITH batch AS MATERIALIZED (
+         SELECT key FROM settlements
+         WHERE state = 'refused' AND created_at < $1
+           AND (expiration_ledger IS NULL OR (network = $3 AND expiration_ledger <= $4))
+         ORDER BY created_at LIMIT $2 FOR UPDATE SKIP LOCKED)
+       DELETE FROM settlements s USING batch b WHERE s.key = b.key AND s.state = 'refused'`,
+      [before, limit, ledger?.network ?? null, ledger?.latest ?? null],
+    );
+    return rowCount ?? 0;
+  }
+
   async listNonFinal(network: StellarNetwork): Promise<SettlementRecord[]> {
     const { rows } = await this.pool.query<SettlementRow>(
       `${SELECT_RECORD} WHERE s.network = $1 AND s.state IN (${NON_FINAL_SQL})
@@ -710,75 +795,6 @@ export class PostgresRateLimitStore implements RateLimitStore {
       [before, limit],
     );
     return rowCount ?? 0;
-  }
-}
-
-interface ApiKeyRow {
-  key_hash: string;
-  owner: string;
-  state: ApiKeyRecord["state"];
-  created_at: string;
-  revoked_at: string | null;
-}
-
-export class PostgresApiKeyStore implements ApiKeyStore {
-  constructor(
-    private readonly readPool: pg.Pool,
-    private readonly pool: pg.Pool = readPool,
-  ) {}
-
-  async ownerOf(hash: string): Promise<string | undefined> {
-    const { rows } = await this.readPool.query<{ owner: string }>(
-      "SELECT owner FROM api_keys WHERE key_hash = $1 AND state = 'active'",
-      [hash],
-    );
-    return rows[0]?.owner;
-  }
-
-  /**
-   * One statement: the partial unique index decides between two concurrent issues for one owner,
-   * and the loser inserts nothing. A hash already there violates the primary key instead, which
-   * `ON CONFLICT` doesn't name, so it throws.
-   */
-  async issue({
-    hash,
-    owner,
-    now,
-  }: {
-    hash: string;
-    owner: string;
-    now: number;
-  }): Promise<boolean> {
-    assertApiKey(hash, owner);
-    const { rowCount } = await this.pool.query(
-      `INSERT INTO api_keys (key_hash, owner, created_at) VALUES ($1, $2, $3)
-       ON CONFLICT (owner) WHERE state = 'active' DO NOTHING`,
-      [hash, owner, now],
-    );
-    return rowCount === 1;
-  }
-
-  async revoke(owner: string, now: number): Promise<boolean> {
-    const { rowCount } = await this.pool.query(
-      `UPDATE api_keys SET state = 'revoked', revoked_at = $2
-       WHERE owner = $1 AND state = 'active'`,
-      [owner, now],
-    );
-    return rowCount === 1;
-  }
-
-  async list(): Promise<ApiKeyRecord[]> {
-    const { rows } = await this.pool.query<ApiKeyRow>(
-      `SELECT key_hash, owner, state, created_at, revoked_at FROM api_keys
-       ORDER BY created_at, key_hash`,
-    );
-    return rows.map((row) => ({
-      hash: row.key_hash,
-      owner: row.owner,
-      state: row.state,
-      createdAt: Number(row.created_at),
-      ...(row.revoked_at !== null && { revokedAt: Number(row.revoked_at) }),
-    }));
   }
 }
 

@@ -1,0 +1,21 @@
+# A deploy of the portal's backend (task 0106 decision 5): x402-portal-deploy@production, started
+# by deploy-portal.sh, the portal deploy key's forced command, through the deploy user's sudo
+# rule for it. A unit, as the facilitator's deploy is, so a cancelled job can't cut it between
+# stopping the old backend and starting the new one.
+[Unit]
+Description=x402 portal deploy (%i)
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/runbook.md
+Wants=x402-db-testnet@%i.service
+After=docker.service x402-db-testnet@%i.service
+
+[Service]
+Type=oneshot
+# The deploy's output, in order, for the CloudWatch agent (0027 decision 1).
+StandardOutput=append:/var/log/x402/%i/portal-deploy.log
+StandardError=inherit
+ExecStart=/usr/local/libexec/x402/x402-portal-deploy %i
+# After any end: removes the marker and, unless the deploy succeeded, puts the backend back on
+# portal.digest.good.
+ExecStopPost=/usr/local/libexec/x402/x402-portal-deploy %i stopped
+# A pull, a restart and the 60 s wait; there is no migration to wait for.
+TimeoutStartSec=10min

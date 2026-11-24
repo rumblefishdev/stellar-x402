@@ -1,0 +1,147 @@
+---
+id: "0101"
+title: "Drop what the settlement modules no longer need"
+type: FEATURE
+status: completed
+owner: karolkow
+related_adr: ["0001", "0004", "0012"]
+related_tasks: ["0036", "0102", "0063"]
+tags: [facilitator, signer-pool, refactor, priority-low, effort-medium]
+links: []
+history:
+  - date: "2026-11-03"
+    status: backlog
+    who: karolkow
+    note: >
+      From an architecture review of develop: of ten candidates, these six small changes survived
+      an attempt to refute each one.
+  - date: "2026-11-03"
+    status: active
+    who: karolkow
+    note: Starting with item 1, the packages with no importer.
+  - date: "2026-11-18"
+    status: completed
+    who: karolkow
+    note: >
+      Closed. Six items merged in #123, #135, #146, #147, #197 and #198; item 2 dropped with its
+      reason. Item 7 joined the task on 2026-11-17. Assertions unchanged in every PR; #135, #147 and
+      #198 added or replaced one test each.
+---
+
+# Drop what the settlement modules no longer need
+
+## Summary
+
+Code that has no production reader or that makes a caller know too much: statistics nobody reads,
+packages nobody imports, attempts carried in a private map. Each item below is its own PR, smaller
+than a day, and none changes what a client or a seller sees, except where it says so.
+
+## Context
+
+Figures are from `origin/develop` on 2026-11-03. Work each item from what is true when it starts:
+#105 and #110 touch several of these files.
+
+## Implementation
+
+1. **Merged in #123. `[structure only]`, ~50 min. Packages with no importer.** Delete `packages/sdk` (8 lines of
+   empty exports), the two `package.json` edges from `bazaar` and `signer-pool` to `config`, and
+   `isAttemptForward` in `adapters/rules.ts`, which no commit on `develop` ever called. Reword
+   `README.md`, ADR 0001 and task 0092, which name `packages/sdk`. 0102 keeps the RFP's SDK visible.
+   `examples/mcp-metered` stays, without its dependency on the SDK. The edge from the facilitator to
+   `mcp` stays with 0063.
+2. **Dropped. Submitter statistics.** Since 0027's gauges (2026-11-04), `main.ts` reads
+   `stats()` for `queued`, `channels`, `busy` and `quarantined`. The other eleven counters have no
+   production reader, but the signer pool's tests observe the submitter through them (38 calls),
+   and 0138 may make metrics of them.
+3. **Merged in #198. `[refactor]`, ~1 h. Attempts as a plain property on the error.** Delete the `WeakMap` behind
+   `attemptsOf` and the three `vi.mock`s of the package that exist because of it.
+4. **Merged in #146. `[structure only]`, ~1.5 h. What in `main.ts` isn't wiring.** Move `start()` to its own file,
+   and `failureReason`, `upstreamDeadlineMs` and `buildUpstream` beside `upstream-failover.ts`.
+5. **Merged in #147. `[refactor]`, ~1 h. One reader of the auth expiry.** `settle.ts` already read
+   `payerExpiration`; `verify.ts` and reconciliation's `fallbackLedger` switch to it, and
+   `authExpiration` goes. `fallbackLedger` stays: someone else's fee bump of ours (0087) is stored
+   without bounds, so it isn't only for rows before migration 0005.
+6. **Merged in #135. `[refactor]`, ~1 h. One `resultUpdate(result)`.** `settle.ts` and `reconcile.ts` build
+   the same update from a pool result, under two rules for a ledger or a fee the result doesn't
+   have. #105's `failure` line stays outside the function: it belongs to non-success results only.
+7. **Merged in #197. `[structure only]`, ~1.5 h. `packages/mcp` into `apps/mcp-local`.** The package is private and
+   has one importer, and the app's e2e reaches into its tests by relative path. Its files move into
+   the app under their own names; the package goes.
+
+## Premise
+
+Checked for item 7 by a fresh reviewer on 2026-11-17, from the goal and constraints alone: it holds,
+with a caveat. The cost of the package boundary is real but small: one importer, two builds, one
+test import across packages. Nothing else needs the code as a package: the facilitator serves no
+`/mcp` route, `examples/mcp-metered` uses upstream's `@x402/mcp`, and the backlog's MCP tasks
+change the server's own tools. Caveat: if 0102's buyer helpers reuse `pay.ts`, that logic moves
+out of the app again, which decision 9 already allows.
+
+## Decisions so far
+
+| # | What is done | From | Vs the task | Code | Test |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Delete `packages/sdk`: its entry points hold no code, and 0102 creates it with its first helper. The cost of keeping it is small: a misleading `README.md` row and two empty builds | owner | matches | `packages/sdk` | CI steps, assertions unchanged |
+| 2 | Drop `config` from `bazaar` and `signer-pool`: neither imports it | task item | matches | both `package.json`, `pnpm-lock.yaml` | CI steps, assertions unchanged |
+| 3 | Delete `isAttemptForward`: only the memory store's branch called it, 0064 dropped that store, and `attemptRankSql` holds the order | task item | matches | `adapters/rules.ts` | CI steps, assertions unchanged |
+| 4 | ADR 0001 says `packages/sdk` is created when its first helper exists | task item | matches | `docs/adr/0001-repo-layout.md` | none, wording |
+| 5 | Keep `examples/mcp-metered`, without its dependency on `packages/sdk`: it records the idea of a second example, and 0041 hasn't chosen one | owner | changes it | `examples/mcp-metered/package.json` | CI steps, assertions unchanged |
+| 6 | One `resultUpdate` for both writes of a pool result, with one rule: a ledger or a fee the result doesn't have is left out. The stored result doesn't change, because a non-final record holds neither value. Clearing is the wrong rule to keep: a final record without a fee releases its budget reservation | owner | matches | `settlement/records.ts`, `settle.ts`, `reconcile.ts` | `records.test.ts`, other assertions unchanged |
+| 7 | Keep the fallback for a hash stored without bounds, read through `payerExpiration` for the record's payer: the payer's auth expiry is the one deadline every envelope of the payment shares, and someone else's fee bump of ours (0087) is stored without bounds. No production query: nothing changes for stored rows | owner | changes it | `settlement/verify.ts`, `reconcile.ts` | `reconcile.test.ts`: the fallback, with the payload of the record's payer |
+| 8 | Keep the submitter statistics: production reads four of them, and the tests read the rest to observe the submitter; trimming them costs 2–3 h and changes nothing anyone sees | owner | changes it | none | none |
+| 9 | Merge `packages/mcp` into `apps/mcp-local`: a package boundary with one user only gets in the way; it can be split out again when a second user appears | owner | beyond it | `packages/mcp`, `apps/mcp-local` | moved tests, assertions unchanged |
+| 10 | Mark the M1 plan's in-memory fakes as replaced by ADR 0012, in one note at its top: its acceptance criteria stay as written | owner | beyond it | `docs/planning/m1-epics.md` | none, wording |
+| 11 | A rejected submission's attempts ride on the error as `attempts`, not in a private `WeakMap`: the facilitator's tests already threw errors in that shape and mocked `attemptsOf` to read it | owner | matches | `signer-pool/src/submitter.ts` | the three mocks removed, assertions unchanged |
+
+## PR split
+
+One PR per item of Implementation. Item 1 goes first. Items 2, 5 and 6 wait for code #105 or #110
+touched, or start from what is true then.
+
+## Not yet decided
+
+- None.
+
+## Out of scope
+
+Each was measured against the fixes it should have prevented, and dropped:
+
+- Private `Records` sets and one shared close: 0 of 6 fixes prevented, and `respond`'s timing would
+  move with them.
+- `submit()` returning every refusal in its result: 0 of 6 fixes prevented, unclassified throws
+  still need a `catch`, 6–8 h.
+- A shutdown module: 0 of 4 fixes prevented; `start()` is called by 10 test files without pools.
+- Reading a payment once: 0 bugs from re-reading, and it moves where exceptions surface on the money
+  path.
+- Moving `fallback-rpc.ts` to the facilitator: the interface moves and doesn't shrink, and #110's
+  `NOT_FOUND` margin relies on it.
+- Dropping the port types or merging `port-contracts.ts` with `postgres.test.ts`: the ports hold the
+  money-path ordering contract in words (ADR 0012 keeps them as the exit seam), and the suites test
+  different things.
+
+## Acceptance Criteria
+
+- [x] Each item is merged or dropped with its reason here
+- [x] Items 1, 3, 4 leave test assertions unchanged, apart from moved imports
+
+## Design Decisions
+
+### From Plan
+
+1. **One PR per item, each smaller than a day**, none changing what a client or a seller sees.
+
+### Emerged
+
+2. **Item 5 keeps the bound fallback** (decision 7): someone else's fee bump of ours is stored
+   without bounds, so dropping it would leave such a record open for good once the RPC forgets it.
+3. **Item 2 dropped** (decision 8): 0027's gauges started reading `stats()` the day after the
+   review.
+4. **Item 3 reverses 0016's decision 12**: an own `attempts` property changes no error's class, and
+   the map cost three mocks.
+5. **Item 7 and the M1 plan note added** (decisions 9 and 10), from the review's leftovers.
+
+## Future Work
+
+- The payer's auth expiry is stored per hash and read from the payload too; one column per record
+  would leave one copy (a schema change, not started).
+- If 0102's buyer helpers reuse `apps/mcp-local/src/pay.ts`, it moves out to a package again.

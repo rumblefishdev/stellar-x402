@@ -25,3 +25,5 @@ contracts/upto-proxy/e2e/results/
 apps/mcp-local/e2e/results/
 # The gate saves the suite's own JSON byte for byte; formatting it would change its SHA-256.
 conformance/results/
+# Written by `make rules` in infra/; a test compares it byte for byte.
+deploy/metrics/rules/
