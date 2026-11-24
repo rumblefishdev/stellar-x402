@@ -2215,10 +2215,11 @@ export function searchCardStoreContract(
       expect(await cards.listings(second[0]!.seq, 2)).toEqual([]);
     });
 
-    it("writes the card of the listing it read", async () => {
+    it("writes no card over one that already holds its text", async () => {
       await list("https://a.example", 1);
       const [listing] = await cards.listings("0", 10);
-      expect(await cards.write(listing!)).toBe(true);
+      // The catalog's write has already written this listing's card.
+      expect(await cards.write(listing!)).toBe(false);
     });
 
     it("writes no card for a listing written again since it was read", async () => {

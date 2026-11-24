@@ -16,8 +16,8 @@ export interface SearchCardStore {
   listings(after: string, limit: number): Promise<CardListing[]>;
   /**
    * Writes the card built (`searchFields`) from this copy of the listing, unless the listing has
-   * changed since: then the catalog's write has already written the newer listing's card. True
-   * when written.
+   * changed since (the catalog's write has then written the newer listing's card) or its card
+   * already holds this text. True when written.
    */
   write(listing: CardListing): Promise<boolean>;
 }

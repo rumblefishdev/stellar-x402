@@ -1080,17 +1080,24 @@ describe("PostgreSQL stores", () => {
        VALUES ('stellar:testnet', 'G', 'GET', 'https://b.example/tides', 1, NULL, 1,
          '{"resource":"https://b.example/tides","description":"Tides"}', 'http', '{}')`,
     );
-    await createSearchCardRewrite({
-      store: searchCards,
-      logger: jsonLogger("error"),
-      metrics: memoryMetrics(),
-    }).start();
+    const rewrite = async () => {
+      const lines: string[] = [];
+      await createSearchCardRewrite({
+        store: searchCards,
+        logger: jsonLogger("info", (line) => lines.push(line)),
+        metrics: memoryMetrics(),
+      }).start();
+      return lines.map((line) => JSON.parse(line));
+    };
+    expect(await rewrite()).toContainEqual(expect.objectContaining({ written: 2 }));
     const { rows } = await pool.query(
       `SELECT c.resource, s.name, s.tags, s.description, s.parameters
          FROM catalog c JOIN catalog_search s USING (seq) ORDER BY c.seq`,
     );
     expect(rows).toHaveLength(2);
     for (const { resource, ...card } of rows) expect(card).toEqual(searchFields(resource));
+    // The next start finds every card already holding its text, and writes none.
+    expect(await rewrite()).toContainEqual(expect.objectContaining({ written: 0 }));
   });
 
   it("waits for a listing write under way, and then writes no card over the newer one (0120)", async () => {
