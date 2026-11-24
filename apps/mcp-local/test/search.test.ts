@@ -320,6 +320,14 @@ describe("search_resources: errors", () => {
     },
   );
 
+  it("returns invalid_input when a catalog answers 400 without the route's body", async () => {
+    // Another operator's catalog may refuse a search in plain text; the request is still the cause.
+    catalog.failWith = 400;
+    const { isError, structuredContent } = await call({ query: "weather" });
+    expect(isError).toBe(true);
+    expect(structuredContent.error.code).toBe("invalid_input");
+  });
+
   it("returns upstream_error, without the route's response body, when the route answers 500", async () => {
     catalog.failWith = 500;
     const { isError, structuredContent } = await call({ query: "weather" });
