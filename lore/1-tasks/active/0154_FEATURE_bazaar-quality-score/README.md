@@ -2,13 +2,14 @@
 id: "0154"
 title: "Quality score and curation for the Bazaar search ranking"
 type: FEATURE
-status: backlog
+status: active
+owner: karolkow
 milestone: 2
-related_adr: ["0007", "0008", "0012"]
+related_adr: ["0007", "0008", "0012", "0014"]
 related_tasks: ["0134", "0120", "0135", "0069", "0070"]
 tags: [bazaar, search, ranking, priority-high, effort-medium, discovery]
 links:
-  - ../../../docs/rfp/x402-facilitator-bazaar-technical-architecture.md
+  - ../../../../docs/rfp/x402-facilitator-bazaar-technical-architecture.md
 history:
   - date: "2026-11-18"
     status: backlog
@@ -16,6 +17,10 @@ history:
     note: >
       Split from 0134: matching the query text and the quality score need different data and
       carry different risks, so each is designed and checked on its own.
+  - date: "2026-11-23"
+    status: active
+    who: karolkow
+    note: "Work starts: the design is settled, the ADR 0014 amendment comes first."
 ---
 
 # Quality score and curation for the Bazaar search ranking
@@ -46,6 +51,10 @@ picks the listings that fit a query; this task orders them by a quality score an
 
 ## Questions
 
+Answered by the 2026-11-23 amendment of ADR 0014: its Decision, "Quality score" to "When the ranking
+is served", and the per-host cap under Alternatives. The measurements are in
+[R-quality-measurement](notes/R-quality-measurement.md).
+
 - Which settlements count toward buyer reach and volume, and how a seller paying itself is left out?
 - Is the score kept apart per network, or off on testnet?
 - How a listing's settlements are linked to it, and how often the score is recomputed?
@@ -58,10 +67,10 @@ picks the listings that fit a query; this task orders them by a quality score an
 
 ## Acceptance Criteria
 
-- [ ] An ADR (or an amendment to 0134's ADR) records the score's inputs, their weights, how faked
-      buyers are left out, and the curation rule
-- [ ] Given two matching listings, one with distinct paying buyers and one with none, when an agent
-      searches, then the one with buyers ranks first
-- [ ] Given a listing whose only buyers are its own `payTo` or accounts it funded, when the score
-      is computed, then those settlements do not count
+- [ ] An ADR (or an amendment to 0134's ADR) records the score's inputs, their weights, how fake
+      payers are bounded, and the curation rule
+- [ ] Given two listings that match a query equally, one with distinct paying wallets and one with
+      none, when an agent searches, then the one with paying wallets ranks first
+- [ ] Given a listing whose only payer is its own `payTo`, when the score is computed, then those
+      payments do not count
 - [ ] Any difference from the proposal's §4.3 is listed for the M2 evidence (0132)

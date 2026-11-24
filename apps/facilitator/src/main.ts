@@ -15,6 +15,7 @@ import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js"
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
+import { createSearchCardWriter } from "./catalog/search-cards.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
@@ -577,6 +578,8 @@ export async function main(
       metrics,
     });
     pruner.start();
+    const searchCards = createSearchCardWriter({ store: stores.searchCards, logger, metrics });
+    searchCards.start();
     // Catalog writes and a prune already under way finish before the process exits, and before
     // the pools end, even if closing the server fails; the pools end even if draining fails.
     // The metrics' final flush comes last, after every part that counts, and is awaited:
@@ -588,7 +591,7 @@ export async function main(
           await started.close();
         } finally {
           try {
-            await Promise.all([cataloger.drain(), pruner.close()]);
+            await Promise.all([cataloger.drain(), pruner.close(), searchCards.close()]);
           } finally {
             await endPools();
           }
@@ -607,6 +610,8 @@ export async function main(
       pools,
       /** For tests, which run a tick instead of waiting a minute. */
       pruner,
+      /** For tests, which run a pass instead of waiting for one. */
+      searchCards,
       /** The logger every part writes to: for tests. */
       logger,
       /** Settles once the first sweep has ended: for tests. */

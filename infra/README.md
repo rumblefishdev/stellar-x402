@@ -22,10 +22,19 @@ by name, so each one deploys alone.
 | `X402-production-Alarms`    | SNS topic `x402-production-alarms`, Amazon Q Developer (Chatbot) to `#stellar-x402-bot`, the alarms of the groups that are on                                                                                                                                                                                   | Thresholds, groups going on                |
 | `X402-production-Uptime`    | Three probes, one code, each every minute to `x402-watch`: `x402-production-uptime-probe` the facilitator's `/health` (`ready`), `-portal-uptime-probe` the portal backend's (`portal_ready`), `-hub-uptime-probe` the API hub's `/api/hub/me` through the explorer's CloudFront (`hub_ready`)                  | The probe's code                           |
 | `X402-production-Watch`     | `x402-production-watch`: every 5 minutes reads each network's fee account through RPC with `checkFacilitatorBalance` and publishes `spendable_stroops`, and each network's protocol from Horizon (`protocol_version`, `protocol_supported_version`), to `x402-watch`; the theft and secret-read sections follow | The check's code, the RPC and Horizon URLs |
+| `X402-production-Heartbeat` | SNS topic `x402-production-monitoring-heartbeat`, which Alertmanager's `Watchdog` on the monitoring VM reaches every minute, the alarm `x402-production-monitoring-heartbeat` on it (group `heartbeat`, missing data breaching), and the VM's own Roles Anywhere anchor (same CA), profile and role             | Rarely: IAM on a shared account            |
 
 The logging role trusts only `CN=x402-cloudwatch-agent-production` from that CA, and only on
 our trust anchor. It can only create streams in and write to the two log groups, and put metrics
 in `x402-host`, all from the server's IP. It reads nothing and can't reach a secret.
+
+The monitoring VM's role (ADR 0011, "The VM's AWS identity"; lore 0139) trusts only
+`CN=x402-monitoring-vm-production` from the same CA, on the Heartbeat stack's own anchor, and can
+only `sns:Publish` to the heartbeat topic and `x402-production-alarms`, from the VM's IP. Synth
+refuses the same CN for both roles. Amazon Q drops a message on `x402-production-alarms` that isn't
+in its custom-notification envelope (`version`, `source: "custom"`, `content`), so Alertmanager's
+SNS receiver for that topic, the failed-notification route, has to send one; the VM's SNS client
+keeps the default endpoint, IPv4 only, which the role's IP condition expects.
 
 The `x402-host` condition binds `PutMetricData` only. An EMF line written with `PutLogEvents` to
 `/x402/production/metrics` can name any namespace, `x402-watch` included, so the role doesn't
@@ -46,11 +55,12 @@ owners are told before `host` goes on (decision 65). `log-volume` is the ceiling
 3. The SSM parameters the stacks read at deploy, plain `String`, set once by hand in
    `eu-central-1`. They stay out of this public repo:
 
-   | Parameter                             | Value                                                                                          |
-   | ------------------------------------- | ---------------------------------------------------------------------------------------------- |
-   | `/x402/production/server-ip`          | The server's public IPv4, bare (no `/32`): the box `/soroban/production/ch-ip` points at       |
-   | `/x402/production/slack-workspace-id` | `T…`, the same workspace as the explorer's (`/soroban-explorer/production/slack-workspace-id`) |
-   | `/x402/production/slack-channel-id`   | `C…`, `#stellar-x402-bot`                                                                      |
+   | Parameter                             | Value                                                                                              |
+   | ------------------------------------- | -------------------------------------------------------------------------------------------------- |
+   | `/x402/production/server-ip`          | The server's public IPv4, bare (no `/32`): the box `/soroban/production/ch-ip` points at           |
+   | `/x402/production/monitoring-vm-ip`   | The monitoring VM's public IPv4, bare: `monitoring-hel1-01` (soroban-infrastructure `monitoring/`) |
+   | `/x402/production/slack-workspace-id` | `T…`, the same workspace as the explorer's (`/soroban-explorer/production/slack-workspace-id`)     |
+   | `/x402/production/slack-channel-id`   | `C…`, `#stellar-x402-bot`                                                                          |
 
    ```bash
    aws ssm put-parameter --region eu-central-1 --type String --name /x402/production/server-ip --value <IPv4>
@@ -68,7 +78,7 @@ From `infra/`:
 make synth-production           # no AWS access needed
 make diff-production            # all stacks, --strict
 make deploy-production          # prints the full diff, then deploys all stacks
-make deploy-production-alarms   # one stack: -telemetry, -uptime, -alarms, -watch (diff first, --exclusively)
+make deploy-production-alarms   # one stack: -telemetry, -uptime, -alarms, -watch, -heartbeat (diff first, --exclusively)
 make fire-test                  # the delivery test, after every deploy of the alarms
 make check-series GROUP=host    # before a group goes on
 make check-emf-disabled         # once, when the alarms first go on
@@ -77,7 +87,8 @@ make telemetry-arns             # what the server's credential helper is started
 
 Every deploy is agreed separately: the account is shared. On a fresh account or a rebuild,
 deploy Watch first, then `make check-series GROUP=watch`, `GROUP=protocol` and, after 08:00 UTC, `GROUP=upstream`, then Alarms: `--all` may create the
-alarms before the check has run, and `watch-no-invocations` pages on missing data.
+alarms before the check has run, and `watch-no-invocations` pages on missing data. Heartbeat goes in with its group off until the VM's
+Watchdog publishes to its topic, for the same reason.
 
 After a deliberate delete of the Telemetry stack, its log groups stay, and a new deploy fails on
 them until they are imported (`cdk import`) or deleted. Read the diff for removals too:
@@ -94,24 +105,29 @@ is in `us-east-1`, `/aws/chatbot/x402-production-alarms`.
 A group in `envs/production.json`'s `alarmGroups` is either absent or on with its actions; no alarm
 exists with its actions off (decision 26).
 
-| Group           | Alarms                                                                                                                                         | On when                                                                                                 |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `uptime`        | `uptime`, `uptime-flapping`                                                                                                                    | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37)               |
-| `portalUptime`  | `portal-uptime`                                                                                                                                | The portal's probe's `portal_ready` has data, as `uptime` (0106 decision 21)                            |
-| `hubUptime`     | `hub-uptime`                                                                                                                                   | The hub's backend is routed in the explorer's distribution, and its probe reads 1 (0106, 21)            |
-| `telemetry`     | `emf-validation`, `emf-parsing`                                                                                                                | On                                                                                                      |
-| `facilitator`   | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                                                             | The facilitator's metric lines reach CloudWatch (#113)                                                  |
-| `channelHeld`   | `channel-held`                                                                                                                                 | 0089 emits its gauge                                                                                    |
-| `host`          | `openbao-down`, `certificate`, `credentials-stale`, `watchdog-restart`, `facilitator-failed`, `probe-silent`, `telemetry-silent`, `audit-disk` | #113's probe and agent run, after its restart window                                                    |
-| `backups`       | `wal-failing`, `wal-stale`, `backup-age`                                                                                                       | pgBackRest archives WAL and has made a backup; 0026 turns it on (decisions 40, 71)                      |
-| `snapshots`     | `snapshot-age`                                                                                                                                 | OpenBao's daily snapshot has run; 0026 turns it on (decisions 40, 71)                                   |
-| `disk`          | `disk` per mount                                                                                                                               | 80%, the warning before `audit-disk`'s 90% on the same mount (0027 decision 73)                         |
-| `memory`        | `memory`                                                                                                                                       | 90%, set after 3 days of data (0027 decision 72)                                                        |
-| `logVolume`     | `log-volume` per log group                                                                                                                     | With `host` (#113), at a coarse 200 MB an hour until measured (decision 65)                             |
-| `watch`         | `balance-low`, `balance-critical`, `watch-errors`, `watch-no-invocations`                                                                      | The Watch stack's Lambda publishes `spendable_stroops` (#115)                                           |
-| `watchSecurity` | `account-state`, `account-effects`, `backup-secret-read`                                                                                       | The check's theft and secret-read sections publish: task 0127 (decisions 68, 71)                        |
-| `protocol`      | `protocol-changed`, `protocol-upgrade-coming`                                                                                                  | The check's protocol section publishes both versions for each network in `watch.protocol` (decision 70) |
-| `upstream`      | `upstream-changed`, `upstream-silent`                                                                                                          | The check's 08:00 UTC run publishes `upstream_files_changed` (task 0029)                                |
+| Group           | Alarms                                                                                                                                         | On when                                                                                                                                       |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uptime`        | `uptime`, `uptime-flapping`                                                                                                                    | The probe's `ready` has data, a few minutes after the Uptime stack's deploy (decision 37)                                                     |
+| `portalUptime`  | `portal-uptime`                                                                                                                                | The portal's probe's `portal_ready` has data, as `uptime` (0106 decision 21)                                                                  |
+| `hubUptime`     | `hub-uptime`                                                                                                                                   | The hub's backend is routed in the explorer's distribution, and its probe reads 1 (0106, 21)                                                  |
+| `telemetry`     | `emf-validation`, `emf-parsing`                                                                                                                | On                                                                                                                                            |
+| `facilitator`   | Availability and Settlement, `facilitator-silent`, `gauges-silent`                                                                             | The facilitator's metric lines reach CloudWatch (#113)                                                                                        |
+| `channelHeld`   | `channel-held`                                                                                                                                 | 0089 emits its gauge                                                                                                                          |
+| `host`          | `openbao-down`, `certificate`, `credentials-stale`, `watchdog-restart`, `facilitator-failed`, `probe-silent`, `telemetry-silent`, `audit-disk` | #113's probe and agent run, after its restart window                                                                                          |
+| `backups`       | `wal-failing`, `wal-stale`, `backup-age`                                                                                                       | pgBackRest archives WAL and has made a backup; 0026 turns it on (decisions 40, 71)                                                            |
+| `snapshots`     | `snapshot-age`                                                                                                                                 | OpenBao's daily snapshot has run; 0026 turns it on (decisions 40, 71)                                                                         |
+| `disk`          | `disk` per mount                                                                                                                               | 80%, the warning before `audit-disk`'s 90% on the same mount (0027 decision 73)                                                               |
+| `memory`        | `memory`                                                                                                                                       | 90%, set after 3 days of data (0027 decision 72)                                                                                              |
+| `logVolume`     | `log-volume` per log group                                                                                                                     | With `host` (#113), at a coarse 200 MB an hour until measured (decision 65)                                                                   |
+| `watch`         | `balance-low`, `balance-critical`, `watch-errors`, `watch-no-invocations`                                                                      | The Watch stack's Lambda publishes `spendable_stroops` (#115)                                                                                 |
+| `watchSecurity` | `account-state`, `account-effects`, `backup-secret-read`                                                                                       | The check's theft and secret-read sections publish: task 0127 (decisions 68, 71)                                                              |
+| `protocol`      | `protocol-changed`, `protocol-upgrade-coming`                                                                                                  | The check's protocol section publishes both versions for each network in `watch.protocol` (decision 70)                                       |
+| `upstream`      | `upstream-changed`, `upstream-silent`                                                                                                          | The check's 08:00 UTC run publishes `upstream_files_changed` (task 0029)                                                                      |
+| `heartbeat`     | `monitoring-heartbeat`, in the Heartbeat stack: deploy it with `make deploy-production-heartbeat`                                              | The topic's `NumberOfMessagesPublished` shows Alertmanager's `Watchdog` every minute (docs/monitoring.md, monitoring-heartbeat, step 1; 0139) |
+
+`heartbeat` is the exception to what follows: check-series builds only the Alarms stack, so it
+says "no alarm to check" for it. Its check is the topic's `NumberOfMessagesPublished`
+(docs/monitoring.md, monitoring-heartbeat, step 1), and its deploy `make deploy-production-heartbeat`.
 
 To turn one on: `make check-series GROUP=<group>` until it passes, then set the flag (and any
 threshold it needs; synth refuses a group without one), `make deploy-production-alarms`, and

@@ -14,6 +14,7 @@ import {
   type CatalogStore,
   type NewSettlement,
   type RateLimitStore,
+  type SearchCardStore,
   type SettlementKey,
   type SettlementStore,
   type SpendLimit,
@@ -2143,6 +2144,71 @@ export function catalogAttemptStoreContract(make: Make<CatalogAttemptStore>) {
       expect(await attempts.prune(5, 2)).toBe(2);
       expect(await attempts.prune(5, 2)).toBe(1);
       expect(await attempts.prune(5, 2)).toBe(0);
+    });
+  });
+}
+
+export function searchCardStoreContract(
+  make: Make<{ catalog: CatalogStore; cards: SearchCardStore }>,
+) {
+  describe("SearchCardStore contract (0120)", () => {
+    let catalog: CatalogStore;
+    let cards: SearchCardStore;
+    beforeEach(async () => {
+      ({ catalog, cards } = await make());
+    });
+
+    const list = (url: string, checkedAt: number) =>
+      catalog.upsert({
+        keyVersion: CATALOG_KEY_VERSION,
+        ledger: null,
+        checkedAt,
+        key: { network: "stellar:testnet", payTo: PAY_TO, method: "GET", resourceUrl: url },
+        resource: {
+          resource: url,
+          type: "http",
+          x402Version: 2,
+          accepts: [requirements()],
+          lastUpdated: "2026-11-24T00:00:00.000Z",
+        },
+      });
+    const fields = { name: "n", tags: "", description: "", parameters: "" };
+    const urls = async (rules: number, limit = 10) =>
+      (await cards.stale(rules, limit)).map((listing) => listing.resource.resource);
+    const writeAll = async (rules: number) => {
+      for (const listing of await cards.stale(rules, 10))
+        await cards.write({ seq: listing.seq, checkedAt: listing.checkedAt, rules, fields });
+    };
+
+    it("names a listing without a card, then not once its card is written", async () => {
+      await list("https://a.example", 1);
+      const [stale] = await cards.stale(1, 10);
+      expect(stale).toMatchObject({ checkedAt: 1, resource: { resource: "https://a.example" } });
+      await writeAll(1);
+      expect(await urls(1)).toEqual([]);
+    });
+
+    it("names a listing again once it is checked again, or the rules change", async () => {
+      await list("https://a.example", 1);
+      await list("https://b.example", 1);
+      await writeAll(1);
+      await list("https://a.example", 2);
+      expect(await urls(1)).toEqual(["https://a.example"]);
+      await writeAll(1);
+      expect(await urls(2)).toEqual(["https://a.example", "https://b.example"]);
+    });
+
+    it("returns at most `limit` listings, in catalog order", async () => {
+      for (const host of ["a", "b", "c"]) await list(`https://${host}.example`, 1);
+      expect(await urls(1, 2)).toEqual(["https://a.example", "https://b.example"]);
+    });
+
+    it("replaces a listing's card", async () => {
+      await list("https://a.example", 1);
+      const [listing] = await cards.stale(1, 10);
+      await cards.write({ seq: listing!.seq, checkedAt: 1, rules: 1, fields });
+      await cards.write({ seq: listing!.seq, checkedAt: 1, rules: 2, fields });
+      expect(await urls(2)).toEqual([]);
     });
   });
 }

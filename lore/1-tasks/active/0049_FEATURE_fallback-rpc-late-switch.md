@@ -185,13 +185,13 @@ mainnet, sorobanrpc.com first: 0%; Ankr first: 3.4%.
 | 7 | This PR series does hedging only; the items above (frozen endpoints, transport-only errors, `fromUrls` names, the `Attempt.sent` split, the three review notes) follow as later PRs here | owner | changes it | — |
 | 8 | The endpoint that answers first becomes active, if it trails by at most 2 ledgers, and stays active until another one answers first; calls no longer return to `RPC_URLS[0]` on their own, so the probe goes. Replaces rows 4 and 5: the probe kept `RPC_URLS[0]` preferred, and production showed it bringing calls back to a slow endpoint (2026-11-10, 6 failovers and 5 failbacks in 10 minutes, every failback at 0 ledgers of lag) | owner, 2026-11-23 | changes it | viem `fallback` with `rank` and alloy `FallbackLayer` keep the best-ranked endpoint, with no return to the first |
 | 9 | After the hedge delay the read goes to every other endpoint at once, not to the next one only: with three endpoints and the first two slow, a fast third can still win. Replaces row 1's "the next endpoint" | owner, 2026-11-23 | changes it | alloy `FallbackLayer` sends to several at once |
+| 10 | The channel's sequence read is hedged like other account entries (row 3). A node one ledger behind can return an old number; the network then refuses with `txBadSeq` and the existing resync reads it again. Measured 2026-11-23: public RPCs trailed by 1 ledger in 1-2% of 129 samples each and never by 2; production had 5 resyncs in 60 days, all within one restart hour | owner, 2026-11-23 | matches | no standard |
+| 11 | Upstream verify is not hedged: it runs on the active endpoint, which rows 8 and 9 keep the fastest, and moves to the next one after 10 s as today. Hedging it would run the whole verify twice, double the Horizon load, and let a node a ledger behind refuse a valid payment first. Measured: 5 verify failovers in 30 days, all on 2026-11-10 from the return to `RPC_URLS[0]` that row 8 removes. Replaces row 3's "upstream verify"; row 6 goes with it | owner, 2026-11-23 | changes it | no standard |
 
 ### PR split
 
-1. `signer-pool`: `FallbackRpc` hedges its reads (rows 1-3, 8, 9) and drops the probe, with a
-   path that never hedges for a transaction's lifecycle.
-2. `facilitator`: upstream verify hedges across `RPC_URLS` (rows 1, 2), the 15 s deadline and no
-   cap (row 6).
+1. `signer-pool`: `FallbackRpc` hedges its reads (rows 1-3, 8-10) and drops the probe, with a
+   path that never hedges for a transaction's lifecycle. Upstream verify stays as it is (row 11).
 
 ## Acceptance Criteria
 
