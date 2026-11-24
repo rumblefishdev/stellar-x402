@@ -51,10 +51,11 @@ The measurements are in
   stored listing, next to the validator that knows its shape. They go into the listing's search
   card: a row of its own table, `catalog_search`, one per catalog listing, which the words part,
   the meaning part and the text's hash all read, so they can't disagree about what a listing says.
-  One background loop in the facilitator is the card's only writer: it writes the card of a
-  listing that has none, that was checked again since, or whose card another version of the rules
-  built, so a rolled-back release rewrites the cards to its own rules. A listing enters search once its card exists. A change to the rules is a version bump the
-  loop carries to every card, and the catalog table is never rewritten for search.
+  The catalog's write stores the listing and its card in one statement, so search finds what the
+  catalog holds from the moment it holds it. A change to the rules is a version bump: a background
+  loop rewrites every card another version of the rules built, so a rolled-back release rewrites
+  them to its own rules, and writes the cards of listings stored before cards existed. The catalog
+  table is never rewritten for search.
 
 - **Matches.** A listing matches a query when its meaning is close enough: cosine similarity
   0.60 or more (below). Words never add a listing; they only order the listings that match. On
@@ -287,10 +288,9 @@ The measurements are in
   catalog column computed by PostgreSQL was the first shape: adding it rewrote the catalog under
   its lock (285–576 ms for 2,500 listings, 5.5 s for 35,000), and so would every later change to
   the fields, past what ADR 0012 lets a transactional migration hold.
-- A new listing, or a listing checked again, is searched as its card says until the loop's next
-  pass, a few seconds later; a listing without a card comes before every rewrite of old cards. A
-  listing written twice within one millisecond of check time can keep the first write's card until
-  it is checked again, since a card follows the check time it was built from.
+- Each catalog write computes the card's fields, but only when the listing changes: a repeat
+  payment whose copy is unchanged writes nothing. After a rules bump, a card keeps the older
+  rules' fields until the loop reaches it, at 500 listings every 5 seconds.
 - A seller can repeat words in its listing to rise in the words ranking, since `ts_rank_cd` counts
   each occurrence. Parameters are capped above; name, tags and description only by ADR 0008's
   listing limit. Fusion takes ranks, not scores, which bounds the gain, but the effect of

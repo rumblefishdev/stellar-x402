@@ -16,17 +16,17 @@ export interface SearchCardWriterDeps {
 export interface SearchCardWriter {
   /** A pass every 5 s, ±10%, until `close()`; the timer keeps no process alive. */
   start(): void;
-  /** One pass: writes the cards of up to 500 listings whose card is missing or stale. */
+  /** One pass: writes the cards of up to 500 listings whose card is missing or of other rules. */
   runOnce(): Promise<void>;
   /** Stops the timer and waits for a pass under way, so the pools can end after it. */
   close(): Promise<void>;
 }
 
 /**
- * Keeps each catalog listing's search card (0120, ADR 0014) in step with the listing and the
- * field rules: the one writer of `catalog_search`. A listing enters search once its card exists.
- * Every process runs one: two passes over the same listing write the same card. A failure is
- * logged and counted, and the next pass tries again.
+ * Carries the search cards (0120, ADR 0014) to this release's field rules, and writes the cards of
+ * listings stored before cards existed; the catalog's write keeps each card in step with its
+ * listing. Every process runs one: a card these rules already built is never written again. A
+ * failure is logged and counted, and the next pass tries again.
  */
 export function createSearchCardWriter(deps: SearchCardWriterDeps): SearchCardWriter {
   const { store, logger, metrics } = deps;
@@ -47,13 +47,12 @@ export function createSearchCardWriter(deps: SearchCardWriterDeps): SearchCardWr
       // A shutdown waits for this pass, so it stops between cards.
       if (closed) break;
       try {
-        await store.write({
+        const card = {
           seq: listing.seq,
-          checkedAt: listing.checkedAt,
           rules: SEARCH_FIELDS_VERSION,
           fields: searchFields(listing.resource),
-        });
-        written++;
+        };
+        if (await store.write(card)) written++;
       } catch (error) {
         logger.warn("search_card_failed", { seq: listing.seq, error });
         metrics.increment("search_card_failures_total");
