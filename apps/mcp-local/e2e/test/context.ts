@@ -17,13 +17,13 @@ import { type ExampleSeller, startExampleSeller } from "../src/seller.js";
 
 /** The example seller's price: 0.001 testnet USDC. */
 export const PRICE = "10000";
-/** Enough testnet USDC for two payments and a rerun; below it the run stops before any check. */
+/** Enough testnet USDC for three payments and a rerun; below it the run stops before any check. */
 const MIN_BUYER_USDC = 100_000n;
 
 export let keys: Keys;
 export let unfunded: Keypair;
 export let catalog: FakeCatalog;
-let facilitator: { stop(): Promise<void> };
+export let facilitator: { url: string; stop(): Promise<void> };
 export let example: ExampleSeller;
 /** The example seller's 402; the fake sellers answer copies of it, so a real key signs them. */
 export let terms: PaymentRequired;
