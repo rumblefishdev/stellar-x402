@@ -136,7 +136,8 @@ export class PostgresCatalogStore implements CatalogStore {
    * search card's (`catalog_search`), which the upsert writes with it; a listing stored before
    * cards existed is found once the rewrite at start writes its card. The rank goes out and
    * comes back as PostgreSQL's text for the `real` it is, so the next page compares the same
-   * number. Only the page's rows read `resource`, as in `list`.
+   * number; that text holds every digit while `extra_float_digits` is at least 1, the default
+   * since PostgreSQL 12. Only the page's rows read `resource`, as in `list`.
    */
   async search(query: CatalogSearch): Promise<CatalogSearchHit[]> {
     const { text, type, payTo, network, limit, after } = query;
