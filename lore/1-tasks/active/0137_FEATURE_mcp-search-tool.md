@@ -51,7 +51,8 @@ can find a paid service and then call it with the paid-call tool.
 - Without a `network` the route searches both networks; the tool's description names the network
   this server pays on, and says only HTTP resources can be paid.
 - A cursor the route refuses is the error code `invalid_cursor`, so the agent starts again; any
-  other catalog failure stays `upstream_error`.
+  other `400` is `invalid_input`, naming the parameter only when it is one of the tool's inputs;
+  any other catalog failure stays `upstream_error`.
 - The e2e suite of `apps/mcp-local` runs search, then a paid call on a result, against our own
   facilitator.
 
