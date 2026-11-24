@@ -85,7 +85,7 @@ describe("parseConfig", () => {
         balanceIntervalMs: 30_000,
       },
       searchModel: { url: "http://search-model:8080", timeoutMs: 2_000 },
-    catalog: { listLocal: false },
+      catalog: { listLocal: false },
     });
   });
 
@@ -164,7 +164,7 @@ describe("parseConfig", () => {
         balanceIntervalMs: 18_000,
       },
       searchModel: { url: "http://search-model:8080", timeoutMs: 2_000 },
-    catalog: { listLocal: true },
+      catalog: { listLocal: true },
     });
   });
 

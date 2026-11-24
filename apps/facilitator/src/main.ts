@@ -348,7 +348,12 @@ export function compose(
   // The search model (ADR 0014): the route asks it for each query's vector, the vectors for each
   // listing's. The cards serve every network, so they write through the root.
   const embedder = createSearchModelClient(config.searchModel);
-  const vectors = createSearchVectors({ store: stores.searchCards, embedder, logger, metrics: root });
+  const vectors = createSearchVectors({
+    store: stores.searchCards,
+    embedder,
+    logger,
+    metrics: root,
+  });
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
   // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
