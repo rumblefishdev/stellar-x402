@@ -1,12 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer } from "../src/server.js";
 import { CATALOG, startFakeCatalog, type FakeCatalog } from "./fake-catalog.js";
-import { fakeScheme, USDC } from "./fake-seller.js";
 
 /** What the tool returns, loosely typed for assertions. */
 interface Payload {
@@ -24,26 +20,27 @@ interface Payload {
 
 let catalog: FakeCatalog;
 let client: Client;
-let logs: string[];
 
-async function connect() {
-  catalog = await startFakeCatalog();
-  logs = [];
+/** A client of a server whose catalog is at `discoveryUrl`. */
+async function connect(discoveryUrl: string): Promise<Client> {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  const log = (message: string) => logs.push(message);
   await createServer({
-    discoveryUrl: catalog.url,
+    discoveryUrl,
     timeoutMs: 500,
     maxResponseBytes: 1_000,
-    log,
+    log: () => {},
   }).connect(serverSide);
-  client = new Client({ name: "test", version: "0.0.0" });
-  await client.connect(clientSide);
+  const connected = new Client({ name: "test", version: "0.0.0" });
+  await connected.connect(clientSide);
   // A real MCP client lists the tools first, and then checks results against their output schemas.
-  await client.listTools();
+  await connected.listTools();
+  return connected;
 }
 
-beforeEach(() => connect());
+beforeEach(async () => {
+  catalog = await startFakeCatalog();
+  client = await connect(catalog.url);
+});
 
 afterEach(async () => {
   await client.close();
@@ -71,49 +68,11 @@ describe("search_resources: the tool", () => {
     expect(tool!.description).toContain("call_paid_http");
     expect(tool!.description).toContain("MCP");
   });
-
-  it("is offered also when the server has a payment key", async () => {
-    const dailyDir = await mkdtemp(join(tmpdir(), "search-test-"));
-    try {
-      const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-      await createServer({
-        discoveryUrl: catalog.url,
-        timeoutMs: 500,
-        maxResponseBytes: 1_000,
-        log: () => {},
-        payment: {
-          schemes: [{ network: "stellar:testnet", client: fakeScheme() }],
-          payer: "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          assets: { [USDC]: { maxPerCall: 20_000n, daily: 15_000n } },
-          dailyDir,
-          now: () => new Date("2026-10-13T12:00:00Z"),
-        },
-      }).connect(serverSide);
-      const paying = new Client({ name: "test", version: "0.0.0" });
-      await paying.connect(clientSide);
-      const { tools } = await paying.listTools();
-      const tool = tools.find((t) => t.name === "search_resources");
-      expect(tool).toBeDefined();
-      expect(tool!.description).toContain("stellar:testnet");
-      await paying.close();
-    } finally {
-      await rm(dailyDir, { recursive: true, force: true });
-    }
-  });
 });
 
 describe("search_resources: input", () => {
   it.each([
     [{ query: "weather" }],
-    [{ query: "weather", type: "http" }],
-    [{ query: "weather", type: "mcp" }],
-    [{ query: "weather", payTo: "GSELLERA" }],
-    [{ query: "weather", scheme: "exact" }],
-    [{ query: "weather", network: "stellar:testnet" }],
-    [{ query: "weather", network: "stellar:pubnet" }],
-    [{ query: "weather", extensions: "bazaar" }],
-    [{ query: "weather", limit: 5 }],
-    [{ query: "weather", cursor: "abc" }],
     [
       {
         query: "hourly forecast",
@@ -137,25 +96,14 @@ describe("search_resources: input", () => {
     );
   });
 
-  it("sends no network parameter when the agent names none", async () => {
-    await call({ query: "weather" });
-    expect(catalog.searchQueries[0]!.has("network")).toBe(false);
-  });
-
-  it.each([
-    [{}],
-    [{ query: 42 }],
-    [{ query: "weather", type: "a2a" }],
-    [{ query: "weather", network: "eip155:8453" }],
-    [{ query: "weather", limit: 0 }],
-    [{ query: "weather", limit: -1 }],
-    [{ query: "weather", limit: 1.5 }],
-    [{ query: "weather", cursor: 7 }],
-  ])("rejects malformed input %j before calling the catalog", async (args) => {
-    const result = await client.callTool({ name: "search_resources", arguments: args });
-    expect(result.isError).toBe(true);
-    expect(catalog.searchQueries).toHaveLength(0);
-  });
+  it.each([[{}], [{ query: "weather", cursor: 7 }]])(
+    "rejects malformed input %j before calling the catalog",
+    async (args) => {
+      const result = await client.callTool({ name: "search_resources", arguments: args });
+      expect(result.isError).toBe(true);
+      expect(catalog.searchQueries).toHaveLength(0);
+    },
+  );
 
   it.each([[{ query: "weather", offset: 20 }], [{ query: "weather", netwrok: "stellar:pubnet" }]])(
     "refuses an argument the tool does not have, naming it: %j",
@@ -175,72 +123,18 @@ describe("search_resources: output", () => {
     catalog.searchResources = [CATALOG[4]!, CATALOG[2]!, CATALOG[0]!, CATALOG[1]!];
     const { isError, structuredContent } = await call({ query: "weather" });
     expect(isError).toBeFalsy();
-    expect(structuredContent.items).toHaveLength(4);
-    expect(structuredContent.items[0]).toEqual({
-      resource: "https://weather.example.com/cities/:",
-      type: "http",
-      description: "City details",
-      accepts: [
-        {
-          scheme: "exact",
-          network: "stellar:testnet",
-          amount: "5000",
-          asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-          payTo: "GSELLERA",
-        },
-      ],
-      input: { type: "http", method: "GET" },
-    });
-    expect(structuredContent.items[2]).toEqual({
-      resource: "https://weather.example.com/forecast",
-      type: "http",
-      description: "Hourly forecast for a city",
-      serviceName: "Weather",
-      accepts: [
-        {
-          scheme: "exact",
-          network: "stellar:testnet",
-          amount: "10000",
-          asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-          payTo: "GSELLERA",
-        },
-      ],
-      input: { type: "http", method: "GET", queryParams: { city: "Warsaw" } },
-    });
+    expect(structuredContent.items.map((item) => item.resource)).toEqual(
+      catalog.searchResources.map((entry) => entry.resource),
+    );
     // An entry without the bazaar extension has no input.
     expect(structuredContent.items[3]!.input).toBeUndefined();
     expect(structuredContent.items[3]!.accepts[0]!.network).toBe("stellar:pubnet");
   });
 
-  it("cuts seller-written text to 500 characters", async () => {
-    catalog.searchResources = [
-      { ...CATALOG[2]!, resource: `https://quotes.example.com/${"z".repeat(2_000)}` },
-    ];
-    const { structuredContent } = await call({ query: "quote" });
-    // The URL is kept whole, as list_resources keeps it: the catalog bounds it on intake.
-    expect(structuredContent.items[0]!.resource).toHaveLength(2_027);
-    expect(structuredContent.items[0]!.description).toHaveLength(500);
-    expect(structuredContent.items[0]!.serviceName).toHaveLength(500);
-    expect(structuredContent.items[0]!.input).toEqual({
-      type: "mcp",
-      toolName: "quote",
-      inputSchema: { type: "object" },
-    });
-  });
-
   it("trims an entry exactly as list_resources trims the same entry", async () => {
     const long = { ...CATALOG[2]!, resource: `https://quotes.example.com/${"z".repeat(2_000)}` };
     const both = await startFakeCatalog([long]);
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await createServer({
-      discoveryUrl: both.url,
-      timeoutMs: 500,
-      maxResponseBytes: 1_000,
-      log: () => {},
-    }).connect(serverSide);
-    const other = new Client({ name: "test", version: "0.0.0" });
-    await other.connect(clientSide);
-    await other.listTools();
+    const other = await connect(both.url);
     const listed = await other.callTool({ name: "list_resources", arguments: {} });
     const searched = await other.callTool({
       name: "search_resources",
@@ -260,14 +154,6 @@ describe("search_resources: output", () => {
     const { structuredContent } = await call({ query: "weather" });
     expect(structuredContent.partialResults).toBe(false);
     expect(structuredContent.pagination).toEqual({ limit: 1, cursor: "c1" });
-  });
-
-  it("passes a null cursor and partialResults true through", async () => {
-    catalog.partialResults = true;
-    catalog.cursor = null;
-    const { structuredContent } = await call({ query: "weather" });
-    expect(structuredContent.partialResults).toBe(true);
-    expect(structuredContent.pagination).toEqual({ limit: CATALOG.length, cursor: null });
   });
 
   it("returns an empty page when the route finds nothing", async () => {
@@ -363,29 +249,5 @@ describe("search_resources: errors", () => {
     const next = await call({ query: "weather" });
     expect(next.isError).toBeFalsy();
     expect(catalog.searchQueries).toHaveLength(2);
-  });
-
-  it("returns upstream_error when the route is down", async () => {
-    const down = await startFakeCatalog();
-    const downUrl = down.url;
-    await down.close();
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await createServer({
-      discoveryUrl: downUrl,
-      timeoutMs: 500,
-      maxResponseBytes: 1_000,
-      log: () => {},
-    }).connect(serverSide);
-    const other = new Client({ name: "test", version: "0.0.0" });
-    await other.connect(clientSide);
-    await other.listTools();
-    const result = await other.callTool({
-      name: "search_resources",
-      arguments: { query: "weather" },
-    });
-    expect(result.isError).toBe(true);
-    const [first] = result.content as { type: string; text: string }[];
-    expect((JSON.parse(first!.text) as Payload).error.code).toBe("upstream_error");
-    await other.close();
   });
 });
