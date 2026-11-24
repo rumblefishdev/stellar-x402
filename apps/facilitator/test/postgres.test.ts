@@ -1,3 +1,5 @@
+import { PostgresSealedKeyStore } from "@stellar-x402/api-keys";
+import { apiKeyStoreContract, sealedKeyStoreContract } from "@stellar-x402/api-keys/testing";
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
@@ -22,7 +24,6 @@ import type { Check } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { transferPayload } from "./payment.js";
 import {
-  apiKeyStoreContract,
   catalogAttemptStoreContract,
   catalogStoreContract,
   rateLimitStoreContract,
@@ -201,6 +202,73 @@ describe("PostgreSQL stores", () => {
   catalogStoreContract(async () => (await stores()).catalog);
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
   apiKeyStoreContract(async () => (await stores()).apiKeys);
+  sealedKeyStoreContract(async () => ({
+    registry: (await stores()).apiKeys,
+    sealed: new PostgresSealedKeyStore(pool),
+  }));
+
+  describe("the sealed store's revoke beside an issue for the same owner (0106)", () => {
+    const OWNER = "discord:412345678901234567";
+    const OLD = "a".repeat(64);
+    const NEW = "b".repeat(64);
+    const COPY_OLD = Buffer.from("sealed copy of a");
+    const COPY_NEW = Buffer.from("sealed copy of b");
+    const copies = async () =>
+      (
+        await pool.query<{ key_hash: string }>(
+          "SELECT key_hash FROM api_key_copies ORDER BY key_hash",
+        )
+      ).rows.map((row) => row.key_hash);
+
+    /** `pool`, but each client runs `between` once, just before a revoke deletes copies. */
+    const pausedBeforeDelete = (between: () => Promise<unknown>) =>
+      ({
+        connect: async () => {
+          const client = await pool.connect();
+          return {
+            query: async (text: string, values?: unknown[]) => {
+              if (text.includes("DELETE FROM api_key_copies")) await between();
+              return client.query(text, values);
+            },
+            release: () => client.release(),
+          };
+        },
+      }) as unknown as pg.Pool;
+
+    it("never deletes the copy of a key an issue committed between its two statements", async () => {
+      await db.empty();
+      const sealed = new PostgresSealedKeyStore(pool);
+      // The owner's last key is revoked already, so the revoke below revokes nothing and holds no
+      // lock that would make the issue wait: it commits between the UPDATE and the DELETE.
+      await sealed.issue({ hash: OLD, owner: OWNER, sealed: COPY_OLD, now: 1_000 });
+      await sealed.revoke(OWNER, 2_000);
+      let issued: boolean | undefined;
+      const racing = new PostgresSealedKeyStore(
+        pausedBeforeDelete(async () => {
+          issued = await sealed.issue({ hash: NEW, owner: OWNER, sealed: COPY_NEW, now: 3_000 });
+        }),
+      );
+      expect(await racing.revoke(OWNER, 3_000)).toBe(false);
+      expect(issued).toBe(true);
+      expect(await sealed.keysOf(OWNER)).toEqual({
+        active: { hash: NEW, createdAt: 3_000, sealed: COPY_NEW },
+        lastRevokedAt: 2_000,
+      });
+      expect(await copies()).toEqual([NEW]);
+    });
+
+    it("still deletes the copy a revoke by the registry alone left behind", async () => {
+      const { apiKeys } = await stores();
+      const sealed = new PostgresSealedKeyStore(pool);
+      await sealed.issue({ hash: OLD, owner: OWNER, sealed: COPY_OLD, now: 1_000 });
+      // The operator's script revokes through the registry, which knows nothing of copies.
+      await apiKeys.revoke(OWNER, 2_000);
+      await sealed.issue({ hash: NEW, owner: OWNER, sealed: COPY_NEW, now: 3_000 });
+      expect(await copies()).toEqual([OLD, NEW]);
+      expect(await sealed.revoke(OWNER, 4_000)).toBe(true);
+      expect(await copies()).toEqual([]);
+    });
+  });
 
   /**
    * Resolves the pid of a backend waiting on a lock `holder` holds, once one is. Other test files
@@ -888,6 +956,21 @@ describe("PostgreSQL stores", () => {
     expect(rows).toEqual([{ count: 3 }]);
   });
 
+  it("0014_api_key_copies: a copy belongs to a key the registry holds, and is neither empty nor long (0106)", async () => {
+    await db.empty();
+    const copy = (hash: string, sealed: Buffer) =>
+      pool.query("INSERT INTO api_key_copies (key_hash, sealed) VALUES ($1, $2)", [hash, sealed]);
+    await expect(copy("a".repeat(64), Buffer.from("x"))).rejects.toThrow(/foreign key/);
+    await pool.query(
+      "INSERT INTO api_keys (key_hash, owner, created_at) VALUES ($1, 'discord:1', 1)",
+      ["a".repeat(64)],
+    );
+    await expect(copy("a".repeat(64), Buffer.alloc(0))).rejects.toThrow(/check/);
+    await expect(copy("a".repeat(64), Buffer.alloc(1025))).rejects.toThrow(/check/);
+    await copy("a".repeat(64), Buffer.alloc(1024));
+    await expect(copy("a".repeat(64), Buffer.from("x"))).rejects.toThrow(/api_key_copies_pkey/);
+  });
+
   it("applies the migrations once when two runs race", async () => {
     const fresh = `${schema}_m`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -941,6 +1024,10 @@ describe("PostgreSQL stores", () => {
     );
     expect(await settlements.get(s.key)).toMatchObject({ state: "rejected", reopened: -1 });
     expect(await settlements.reopen(s.key, s.fingerprint, ["unsent"], 5_000)).toBeUndefined();
+    // Nor does a refusal move it to `refused`, which the pruner would delete (0086).
+    expect(
+      await settlements.refuse(s, { errorReason: "invalid_fee" }, ["unsent"], 5_000),
+    ).toMatchObject({ state: "rejected", errorReason: "unsent", reopened: -1 });
     // This release's own claims start at 0, and reopen.
     const t = settlement("2");
     await settlements.claim(t);
@@ -1016,6 +1103,9 @@ describe("PostgreSQL stores", () => {
           "0011_settlement_in_flight",
           "0012_settlement_inner_hash",
           "0013_api_keys",
+          "0014_api_key_copies",
+          "0015_settlement_refused",
+          "0016_catalog_seed",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1048,6 +1138,9 @@ describe("PostgreSQL stores", () => {
         "0011_settlement_in_flight",
         "0012_settlement_inner_hash",
         "0013_api_keys",
+        "0014_api_key_copies",
+        "0015_settlement_refused",
+        "0016_catalog_seed",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

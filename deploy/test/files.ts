@@ -42,7 +42,12 @@ export const FILES: readonly FileRow[] = [
   { path: `${ENV}/postgres-testnet.log`, group: "app", stream: "postgres-testnet", emf: false },
   { path: `${ENV}/cloudflared.log`, group: "app", stream: "cloudflared", emf: false },
   { path: `${ENV}/deploy.log`, group: "app", stream: "deploy", emf: false },
+  // The portal's backend and its deploy (0106). The backend's lines carry jti, act, the outcome and
+  // a short key_id, never the owner or a Discord id.
+  { path: `${ENV}/portal.log`, group: "app", stream: "portal", emf: false },
+  { path: `${ENV}/portal-deploy.log`, group: "app", stream: "portal-deploy", emf: false },
   { path: "openbao/openbao.log", group: "app", stream: "openbao", emf: false },
+  { path: "metrics/agent.log", group: "app", stream: "metrics-agent", emf: false },
   { path: "host/metrics.log", group: "metrics", stream: "host", filter: "include-emf", emf: true },
 ];
 

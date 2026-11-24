@@ -149,14 +149,19 @@ The ages are `Seconds`, the percentages `Percent`, the two counters `Count`, and
 
 ## Off the server, namespace `x402-watch`
 
-Published with `PutMetricData` by two Lambdas. `spendable_stroops`, `protocol_version`,
-`protocol_supported_version`, `account_state_mismatches` and `account_effects_unexpected` are
-network-scoped. `ready`, `backup_secret_reads`, `upstream_files_changed` and `upstream_library_behind` are process-scoped: one probe, one AWS account.
-`ready`, `spendable_stroops` and the two protocol versions are `None`, the rest `Count`.
+Published with `PutMetricData` by the Lambdas: the uptime probes and the off-server check.
+`spendable_stroops`, `protocol_version`, `protocol_supported_version`, `account_state_mismatches`
+and `account_effects_unexpected` are network-scoped. `ready`, `portal_ready`, `hub_ready`,
+`backup_secret_reads`, `upstream_files_changed` and `upstream_library_behind` are
+process-scoped: one probe, one AWS account.
+The three `ready` metrics, `spendable_stroops` and the two protocol versions are `None`, the rest
+`Count`.
 
 | Metric | Source | Alarm statistic | Alarm |
 | --- | --- | --- | --- |
 | `ready` | The uptime probe, every minute: `/health`'s `ready`, 0 when it can't read it | `Minimum` | `uptime` |
+| `portal_ready` | The portal's uptime probe, every minute: the portal backend's `/health` `ready`, 0 when it can't read it (task 0106) | `Minimum` | `portal-uptime` |
+| `hub_ready` | The hub's uptime probe, every minute: 1 when the API hub's `https://sorobanscan.com/api/hub/me` answers 200 with `"authenticated": false`, through the explorer's CloudFront (task 0106) | `Minimum` | `hub-uptime` |
 | `spendable_stroops` | The off-server check, every 5 minutes, `checkFacilitatorBalance` | `Minimum` | `balance-low`, `balance-critical` |
 | `protocol_version` | The check, every 5 minutes: Horizon's `current_protocol_version`, for each network in `watch.protocol`, served or not | `Maximum` | `protocol-changed` |
 | `protocol_supported_version` | The check: Horizon's `core_supported_protocol_version`, the highest version the Stellar Core behind that Horizon supports (SDF's fleet, not the validators' vote) | `Maximum` | `protocol-upgrade-coming` |

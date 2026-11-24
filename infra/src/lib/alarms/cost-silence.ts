@@ -2,7 +2,7 @@
 import type { MetricName } from "@stellar-x402/metrics-catalog";
 import type { EnvironmentConfig } from "../config.js";
 import { names } from "../names.js";
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
 /** The six facilitator gauges `gauges-silent` watches, by id in its expression (decision 28). */
 const GAUGES = {
@@ -20,13 +20,15 @@ const GAUGES = {
  */
 const HELD = { held: "channel_longest_hold_seconds" } as const satisfies Record<string, MetricName>;
 
-export function addCostSilenceAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
+/** The gauges whose silence an alarm watches: `gauges-silent` here, the stamp rule in Prometheus. */
+export function watchedGauges(c: EnvironmentConfig): Record<string, MetricName> {
+  return { ...GAUGES, ...(c.alarmGroups.channelHeld && HELD) };
+}
+
+export function addCostSilenceAlarms(f: Alarms, c: EnvironmentConfig): void {
   const n = names(c.envName);
   const t = c.thresholds;
-  const gauges: Record<string, MetricName> = {
-    ...GAUGES,
-    ...(c.alarmGroups.channelHeld && HELD),
-  };
+  const gauges = watchedGauges(c);
 
   if (t.logVolumeBytesPerHour !== null)
     for (const [qualifier, group] of [

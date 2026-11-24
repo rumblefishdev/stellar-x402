@@ -19,8 +19,16 @@ export const names = (envName: string) => ({
   alarmTopic: `x402-${envName}-alarms`,
   slackChannel: `x402-${envName}-alarms`,
   uptimeProbe: `x402-${envName}-uptime-probe`,
+  /** The same probe on the portal's backend and on the API hub's backend (0106 decision 21). */
+  portalUptimeProbe: `x402-${envName}-portal-uptime-probe`,
+  hubUptimeProbe: `x402-${envName}-hub-uptime-probe`,
   /** #115's off-server check: the `watch-*` alarms read `AWS/Lambda` by this name. */
   watchFunction: `x402-${envName}-watch`,
+  /** The topic Alertmanager's Watchdog reaches every minute, and its alarm (ADR 0011, 0139). */
+  heartbeatTopic: `x402-${envName}-monitoring-heartbeat`,
+  heartbeatAlarm: `x402-${envName}-monitoring-heartbeat`,
+  /** The monitoring VM's identity: its own anchor, role and profile. */
+  monitoringVm: `x402-${envName}-monitoring-vm`,
 });
 
 /** `stellar:testnet` -> `testnet`: the suffix of a network-scoped alarm's name. */

@@ -273,6 +273,49 @@ CREATE TABLE api_keys (
 CREATE UNIQUE INDEX api_keys_one_active ON api_keys (owner) WHERE state = 'active';
 `,
   },
+  {
+    // 0106: the portal shows an owner its key again, and the registry holds a hash, so each key
+    // the portal issues has a copy here, sealed with a key only the portal holds. The portal
+    // deletes it when the key is revoked. Nothing in the facilitator reads the table, and a key
+    // the operator's script issues has no row. A new table, so the release before it keeps
+    // working.
+    name: "0014_api_key_copies",
+    sql: `
+CREATE TABLE api_key_copies (
+  key_hash text PRIMARY KEY REFERENCES api_keys (key_hash),
+  sealed bytea NOT NULL CHECK (octet_length(sealed) BETWEEN 1 AND 1024)
+);
+`,
+  },
+  {
+    // 0086: a check refusal is recorded as a `refused` record, with the checks' message, our
+    // own code next to upstream's reason (`extra.reason`) and the payer's expiration ledger, so
+    // the same payment never settles here once it would pass; the pruner deletes it once that
+    // ledger has closed, through the partial index. Transactional, as online migrations wait for
+    // 0080: `ADD COLUMN` takes ACCESS EXCLUSIVE until the group commits, so reads and writes of
+    // `settlements` wait for as long as one scan of it, milliseconds on testnet's few thousand
+    // rows and nothing on a new mainnet database. The group has 1 s a statement and 1.5 s in all,
+    // and one that runs out fails the run (`25P04`, not retried). Nullable columns and a new
+    // index, so the release before keeps working: it never writes `refused`, and reads such a
+    // record as not final, so it answers a repeat `settlement_pending` and never settles it.
+    name: "0015_settlement_refused",
+    sql: `
+ALTER TABLE settlements ADD COLUMN error_message text;
+ALTER TABLE settlements ADD COLUMN error_detail text;
+ALTER TABLE settlements ADD COLUMN expiration_ledger bigint;
+CREATE INDEX settlements_refused ON settlements (created_at) WHERE state = 'refused';
+`,
+  },
+  {
+    // 0155: a seeded listing has no settlement behind it, so neither a ledger nor a payer. Each
+    // statement only changes the catalog, without a scan. The release before keeps working: it
+    // always writes both, and never reads either.
+    name: "0016_catalog_seed",
+    sql: `
+ALTER TABLE catalog ALTER COLUMN ledger DROP NOT NULL;
+ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

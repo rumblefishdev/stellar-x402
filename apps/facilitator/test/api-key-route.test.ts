@@ -3,7 +3,7 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import type { PaymentRequirements } from "@x402/core/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
-import { apiKeyHash, newApiKey } from "../src/http/api-key.js";
+import { apiKeyHash, newApiKey } from "@stellar-x402/api-keys";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";

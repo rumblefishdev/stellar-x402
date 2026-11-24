@@ -76,8 +76,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 89 with two networks", () => {
-    expect(alarms).toHaveLength(89);
+  test("has every alarm of the list once per network, 91 with two networks", () => {
+    expect(alarms).toHaveLength(91);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -175,6 +175,18 @@ describe("the Alarms template", () => {
       "account-state",
       "backup-secret-read",
     ]);
+  });
+
+  test("gives the portal's and the hub's probes a group each, on their own metric (0106 decision 21)", () => {
+    const of = (g: string) =>
+      records.filter((r) => r.group === g).map((r) => [r.alarmName, r.series[0]?.metricName]);
+    expect(of("portalUptime")).toEqual([["x402-production-portal-uptime", "portal_ready"]]);
+    expect(of("hubUptime")).toEqual([["x402-production-hub-uptime", "hub_ready"]]);
+    expect(of("uptime").map(([, m]) => m)).toEqual(["ready", "ready"]);
+    for (const name of ["x402-production-portal-uptime", "x402-production-hub-uptime"]) {
+      const d = byName.get(name)!["AlarmDescription"] as string;
+      expect(d, name).toContain(name === "x402-production-hub-uptime" ? "/api/hub/me" : "/health");
+    }
   });
 
   test("puts the upstream alarms in their own group, so they go on only after the first daily run", () => {
@@ -419,6 +431,8 @@ const LEVEL: Record<
 > = {
   uptime: ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
   "uptime-flapping": ["<", 1, "Minimum", 60, t.uptimeFlapFailingMinutes, t.uptimeFlapWindowMinutes],
+  "portal-uptime": ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
+  "hub-uptime": ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
   "rpc-stalled": [">", t.rpcStalledSeconds, "Maximum", 60, 5, 5],
   "balance-stale": [">", t.balanceStaleSeconds, "Maximum", 60, 1, 1],
   "balance-low": ["<", t.balanceLowStroops, "Minimum", 300, 1, 1],

@@ -18,6 +18,16 @@ export interface LeaseKeeperDeps {
   holder?: string;
   /** The app clock, as for every stored time. */
   now?: () => number;
+  /**
+   * Runs after the store grants the lease and before `held()` turns true, e.g. to hold back the
+   * channels the previous holder left a transaction open on (0090). If it rejects, or takes more than
+   * a third of the TTL, the acquire counts as failed and the keeper tries again at its next attempt.
+   * One that runs on past that limit isn't stopped, so what it does must stay safe to repeat.
+   * Accepted trade-off: the limit (10 s at the default TTL) equals `FallbackRpc`'s timeout, so a
+   * primary RPC that hangs during a deploy fails the first acquire, and `/settle` answers 503 for one
+   * more interval until the fallback takes over.
+   */
+  onAcquired?: () => Promise<void>;
 }
 
 export interface LeaseKeeper {
@@ -41,6 +51,24 @@ export interface LeaseKeeper {
    * rejects: a failed release leaves the lease to its TTL.
    */
   release(): Promise<void>;
+}
+
+/** `promise`, or a rejection once `ms` pass first; the timer doesn't keep the process alive. */
+function within<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`onAcquired took more than ${ms} ms`)), ms);
+    timer.unref();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
 }
 
 /**
@@ -85,6 +113,8 @@ export function createLeaseKeeper(deps: LeaseKeeperDeps): LeaseKeeper {
       else {
         const lease = await store.acquireLease(name, holder, ttlMs, at);
         ok = lease !== undefined;
+        // Within a third of the TTL, so the expiry counted from `at` is still well ahead.
+        if (ok && deps.onAcquired) await within(deps.onAcquired(), intervalMs);
         token = lease?.token;
       }
       if (ok) {

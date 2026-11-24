@@ -69,12 +69,17 @@ export interface AlarmRecord {
   readonly series: readonly SeriesRef[];
 }
 
+/** A Prometheus rule's `severity` (0139 decision 1); CloudWatch doesn't read it. */
+export type Severity = "critical" | "warning";
+
 interface Common {
   readonly group: AlarmGroup;
   readonly network?: StellarNetwork;
   /** Ends the name after the network, for a row with one alarm per mount or log group. */
   readonly qualifier?: string;
   readonly description: Description;
+  /** Default `warning`. `critical`: it would page on mainnet (the phone route, 0138's D11). */
+  readonly severity?: Severity;
 }
 
 export interface EventSpec extends Common {
@@ -101,6 +106,12 @@ export interface LevelSpec extends Common {
   readonly threshold: number;
   /** Default `ignore` (decision 19); `uptime` breaches on a missing point. */
   readonly missing?: "ignore" | "breaching" | "notBreaching";
+  /**
+   * Whole UTC days, not CloudWatch's default sliding window: a sliding 24 hours loses yesterday's
+   * 08:00 point before today's lands and would fire and clear every morning (AWS, "Alarm
+   * evaluation window"). A day's point is read once the day ends, at 00:00 UTC.
+   */
+  readonly wholeDays?: boolean;
 }
 
 export interface SilenceSpec extends Common {
@@ -147,6 +158,16 @@ export function describe(base: string, d: Description, shape?: Shape): string {
 
 const isMath = (s: Signal | MathSignal): s is MathSignal => "expression" in s;
 
+/**
+ * What the alarm modules call: the CloudWatch factory below, or the Prometheus rules built from
+ * the same rows (`../rules.ts`, lore 0139 step 6).
+ */
+export interface Alarms {
+  event(base: string, spec: EventSpec): void;
+  level(base: string, spec: LevelSpec): void;
+  silence(base: string, spec: SilenceSpec): void;
+}
+
 export interface AlarmFactoryProps {
   readonly envName: string;
   readonly groups: Readonly<Record<AlarmGroup, boolean>>;
@@ -154,7 +175,7 @@ export interface AlarmFactoryProps {
   readonly action: cloudwatch.IAlarmAction;
 }
 
-export class AlarmFactory {
+export class AlarmFactory implements Alarms {
   /** The alarms made, in order: groups that are off make none. */
   readonly records: AlarmRecord[] = [];
 
@@ -181,7 +202,7 @@ export class AlarmFactory {
 
   /** The Level shape: past the threshold in M of M periods; keeps its state without data. */
   level(base: string, spec: LevelSpec): cloudwatch.Alarm | undefined {
-    return this.make(base, "level", spec, {
+    const alarm = this.make(base, "level", spec, {
       metric: this.metric(spec.signal, spec.statistic, spec.periodMinutes),
       comparisonOperator: COMPARISON[spec.comparison],
       threshold: spec.threshold,
@@ -189,6 +210,9 @@ export class AlarmFactory {
       datapointsToAlarm: spec.datapoints ?? spec.periods,
       treatMissingData: MISSING[spec.missing ?? "ignore"],
     });
+    if (alarm && spec.wholeDays)
+      (alarm.node.defaultChild as cloudwatch.CfnAlarm).evaluationWindow = { wallClockWindow: {} };
+    return alarm;
   }
 
   /**

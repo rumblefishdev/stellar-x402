@@ -5,17 +5,22 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 /**
  * Lifecycle of a settlement record (AD-16). States only move forward:
  * `claimed → signed → pending → success | failed | rejected | expired`.
- * A record can skip a state, e.g. `signed → success`. One written exception (0073 decision 5):
- * {@link SettlementStore.reopen} moves a `rejected` record that never had a hash back to `claimed`.
+ * A record can skip a state, e.g. `signed → success`. Two written exceptions:
+ * {@link SettlementStore.reopen} moves a `rejected` record that never had a hash back to `claimed`
+ * (0073 decision 5), and {@link SettlementStore.refuse} moves such a record to `refused` (0086).
+ *
+ * `refused` is a second start (0086): the checks refused the payment before any claim, and it
+ * never settles here. It is final, so nothing follows it, and it holds no payer and asset slot.
  */
 export type SettlementState =
-  "claimed" | "signed" | "pending" | "success" | "failed" | "rejected" | "expired";
+  "claimed" | "signed" | "pending" | "success" | "failed" | "rejected" | "expired" | "refused";
 
 export const FINAL_SETTLEMENT_STATES: readonly SettlementState[] = [
   "success",
   "failed",
   "rejected",
   "expired",
+  "refused",
 ];
 
 /** `network:payer:nonce`; the nonce is the payer auth entry's int64 nonce as a decimal string (AD-6). */
@@ -40,6 +45,10 @@ export interface SettlementRecord {
   feeCharged?: bigint;
   /** x402 `errorReason` for a final state other than `success`. */
   errorReason?: string;
+  /** The checks' message for a `refused` record, so a repeat gets the same answer (0086). */
+  errorMessage?: string;
+  /** Our own code next to upstream's reason (`extra.reason`) for a `refused` record (0086). */
+  errorDetail?: string;
   /** Why an included transaction failed, as far as the RPC said (`failed` only). */
   failure?: FailureCause;
   /** When a `/settle` call first answered this record's `success` (AD-6: once per record). */
@@ -61,6 +70,18 @@ export interface SettlementRecord {
   updatedAt: number;
 }
 
+/** The checks' refusal that {@link SettlementStore.refuse} records (0086). */
+export interface Refusal {
+  errorReason: string;
+  errorMessage?: string;
+  errorDetail?: string;
+  /**
+   * The payer's `signatureExpirationLedger`: the record is kept until that ledger has closed, as
+   * the payment can land until then. Unset when the payload has no single payer auth entry.
+   */
+  expirationLedger?: number;
+}
+
 export type NewSettlement = Omit<
   SettlementRecord,
   | "state"
@@ -69,6 +90,8 @@ export type NewSettlement = Omit<
   | "ledger"
   | "feeCharged"
   | "errorReason"
+  | "errorMessage"
+  | "errorDetail"
   | "failure"
   | "successAnsweredAt"
   | "version"
@@ -112,6 +135,8 @@ export interface AttemptBounds {
   maxTime?: number;
   /** The last ledger it may land in (inclusive). */
   maxLedger?: number;
+  /** The channel account whose sequence number it uses (0090); absent on older hashes. */
+  channel?: string;
 }
 
 /** One signed transaction of a settlement: a row of its hashes. */
@@ -287,6 +312,35 @@ export interface SettlementStore {
     reasons: readonly string[],
     now: number,
   ): Promise<ReopenResult>;
+  /**
+   * Records the checks' refusal of a payment (0086), so the same payment never settles here once
+   * it would pass: insert-if-absent of a `refused` record with `errorReason`, `errorMessage`,
+   * `errorDetail`, the payer's `expirationLedger`, no hash and `reopened` 0 (-1 marks a record
+   * claimed before 0073, whose answer has no advice). It takes no payer and asset slot (0024): a
+   * final record holds none.
+   * A record of the same `fingerprint` that is `rejected` with one of `unsent` as its reason, no
+   * hash and claimed since 0073 (`reopened` not -1), which a repeat could reopen, moves to
+   * `refused` instead, adding one to its `version`, so a concurrent reopen of it fails. Any other
+   * record stays as it is: it already answers for its key (AD-6). Resolves the record the key now
+   * has.
+   */
+  refuse(
+    settlement: NewSettlement,
+    refusal: Refusal,
+    unsent: readonly string[],
+    now: number,
+  ): Promise<SettlementRecord>;
+  /**
+   * Deletes up to `limit` `refused` records created before `before` whose payment can't land any
+   * more (0086): one with no expiration ledger, whose payload never passes the payer-auth check,
+   * or one of `ledger.network` whose expiration ledger is at most `ledger.latest`, the latest
+   * closed ledger. Without `ledger`, only the first kind. Resolves how many it deleted.
+   */
+  pruneRefusals(
+    before: number,
+    ledger: { network: StellarNetwork; latest: number } | undefined,
+    limit: number,
+  ): Promise<number>;
   /** Records not yet final, for the startup re-check (AD-16). */
   listNonFinal(network: StellarNetwork): Promise<SettlementRecord[]>;
 

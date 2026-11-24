@@ -34,18 +34,24 @@ describe("the rotation", () => {
     }
   });
 
-  test("copies and truncates, bounded in size and count, its own state elsewhere", () => {
+  test("copies and truncates, bounded in size, count and age, its own state elsewhere", () => {
     for (const directive of [
       "copytruncate",
-      "size 100M",
+      "daily",
+      "maxsize 100M",
       "rotate 10",
+      "maxage 30",
       "compress",
       "delaycompress",
       "missingok",
-      "notifempty",
+      "ifempty",
     ])
       expect(conf).toMatch(new RegExp(`^\\s+${directive}$`, "m"));
     expect(conf).not.toMatch(/^\s+(create|su|postrotate)\b/m);
+    // The hub's privacy policy keeps log lines up to 30 days (0106). `size` would override
+    // `daily`, and maxage is read only when a file rotates: a quiet file must still rotate daily,
+    // empty or not, so its old rotations go.
+    expect(conf).not.toMatch(/^\s+(size|notifempty|weekly|monthly|yearly)\b/m);
     const service = unit("x402-logrotate.service");
     expect(settings(service, "ExecStart")).toEqual([
       "/usr/sbin/logrotate --state /var/lib/x402-logrotate/status /etc/x402/logrotate.conf",
@@ -121,6 +127,23 @@ describe("the signing helper's unit", () => {
     expect(flag("private-key")).toBe("%d/cloudwatch-agent-key");
   });
 
+  test("the probe writes its textfiles where node_exporter reads them", () => {
+    const dir = read("metrics/compose.yaml").match(
+      /--collector\.textfile\.directory=\/host(\S+)/,
+    )![1]!;
+    expect(read("ansible/playbook.yaml")).toContain(
+      `- { path: ${dir}, owner: root, mode: "0755" }`,
+    );
+    expect(read("libexec/x402-host-probe")).toContain(`: "\${X402_TEXTFILE:=${dir}}"`);
+  });
+
+  test("reads the metrics agent's certificate where the playbook puts it", () => {
+    const dest = read("ansible/playbook.yaml").match(
+      /- name: The metrics agent's certificate\n[\s\S]*?dest: (\S+)/,
+    )![1]!;
+    expect(read("libexec/x402-host-probe")).toContain(`: "\${X402_METRICS_CERT:=${dest}}"`);
+  });
+
   test("reads the one certificate path the probe watches", () => {
     expect(flag("certificate")).toBe("/srv/x402/production/cloudwatch-agent.crt");
     expect(read("libexec/x402-host-probe")).toContain(`: "\${X402_CERT:=${flag("certificate")}}"`);
@@ -187,7 +210,12 @@ describe("the units' output", () => {
     "x402-tunnel@.service": "cloudflared",
     "x402-openbao.service": "openbao",
     "x402-deploy@.service": "deploy",
+    "x402-portal@.service": "portal",
+    "x402-portal-deploy@.service": "portal-deploy",
+    "x402-metrics.service": "metrics-agent",
   };
+  /** The oneshots that start no container of their own. */
+  const deploys = ["x402-deploy@.service", "x402-portal-deploy@.service"];
 
   test("every file a unit appends to is a row, and every unit's row has its unit", () => {
     const rows = new Set(FILES.map(absolute));
@@ -211,7 +239,11 @@ describe("the units' output", () => {
   });
 
   test("every docker compose up writes raw lines", () => {
-    for (const file of Object.keys(writers).filter((f) => f !== "x402-deploy@.service")) {
+    // The metrics agent's file runs two containers: the prefix says which one wrote a line.
+    const prefixed = ["x402-metrics.service"];
+    for (const file of Object.keys(writers).filter(
+      (f) => !deploys.includes(f) && !prefixed.includes(f),
+    )) {
       const ups = settings(unit(file), "ExecStart").filter((e) => / up /.test(e));
       expect(ups, file).toHaveLength(1);
       expect(ups[0], file).toMatch(/ up --no-log-prefix --no-color /);
@@ -263,12 +295,15 @@ describe("the units' output", () => {
   });
 
   // Under set -e, a failed echo into a full disk ended the deploy before its rollback.
-  test("the deploy prints only through say, which ignores a failed write", () => {
-    const script = read("libexec/x402-deploy");
-    expect(script).toContain(`say() { printf '%s\\n' "$*" || :; }`);
-    expect(script).not.toMatch(/^\s*(echo|printf '%s\\n' "\$\w+" >&2)\b/m);
-    expect(script.match(/\becho\b/g)).toBeNull();
-  });
+  test.each(["x402-deploy", "x402-portal-deploy"])(
+    "%s prints only through say, which ignores a failed write",
+    (name) => {
+      const script = read(`libexec/${name}`);
+      expect(script).toContain(`say() { printf '%s\\n' "$*" || :; }`);
+      expect(script).not.toMatch(/^\s*(echo|printf '%s\\n' "\$\w+" >&2)\b/m);
+      expect(script.match(/\becho\b/g)).toBeNull();
+    },
+  );
 });
 
 // OpenBao's snapshot job against the probe, the playbook and ADR 0013 (task 0026).

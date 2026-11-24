@@ -120,6 +120,11 @@ export interface SignedBounds {
   maxTime?: number;
   /** The last ledger it may land in (inclusive), when the call set `maxLedger`. */
   maxLedger?: number;
+  /**
+   * The channel account whose sequence number it uses, so a caller that stores the hash knows
+   * which channel it may still occupy (0090).
+   */
+  channel?: string;
 }
 
 export interface SubmitOptions {
@@ -157,8 +162,10 @@ export interface SubmitOptions {
   onSent?: (hash: string) => void;
   /**
    * Latest time, in milliseconds on the submitter's clock, to start sending: a call still waiting
-   * for a channel then is refused with {@link QueueTimeoutError}. Set it from the client's
-   * signature expiry, so a payment is not held until it can no longer settle.
+   * for a channel then is refused with {@link QueueTimeoutError}, and a channel's sequence read
+   * that keeps failing stops then with its own error (a channel with no entry is still read for
+   * `timeoutSeconds`, so it can be retired). Set it from the client's signature expiry, so a
+   * payment is not held until it can no longer settle.
    */
   deadline?: number;
   /**
@@ -232,15 +239,14 @@ export class SigningError extends Error {
 /** A submission's outcome before its attempts are attached. */
 type Outcome = Omit<SubmitResult, "attempts">;
 
-const errorAttempts = new WeakMap<object, Attempt[]>();
-
 /**
  * The attempts of a submission that `submit()` rejected with `error`, so the caller can tell
- * whether anything may have reached the network (see `onSigned`). Empty when nothing was signed
- * for it, or for an error `submit()` did not throw.
+ * whether anything may have reached the network (see `onSigned`). `submit()` puts them on the
+ * error it rejects with, its own or one it rethrows, as `attempts`; this reads that property.
+ * Empty when nothing was signed for it, or when the error has no `attempts`.
  */
 export function attemptsOf(error: unknown): Attempt[] {
-  return (typeof error === "object" && error !== null && errorAttempts.get(error)) || [];
+  return (error as { attempts?: Attempt[] } | null)?.attempts ?? [];
 }
 
 const BAD_SEQ = new Set(["txBadSeq"]);
@@ -390,6 +396,17 @@ export class SettlementSubmitter {
   }
 
   /**
+   * Keeps the channel at `address` from every call until `until` settles (0090): while a
+   * transaction another process sent on it may still land, a send here would only get `txBadSeq`.
+   * A free channel leaves the pool at once, one in use when its call lets it go. Calls queue for
+   * the other channels meanwhile, as when all are busy, and the channel's sequence number is read
+   * again before its next use.
+   */
+  hold(address: string, until: Promise<unknown>): void {
+    this.pool.hold(address, until);
+  }
+
+  /**
    * Stops the submitter for a shutdown (0025): every call that has given nothing to `onSigned`
    * and sent nothing fails with {@link ShutdownError}, whether it waits for a channel, waits
    * behind the channel's pending transaction, retries a sequence read or is about to sign, and so
@@ -454,7 +471,8 @@ export class SettlementSubmitter {
       });
       return result;
     } catch (error) {
-      if (typeof error === "object" && error !== null) errorAttempts.set(error, [...hold.attempts]);
+      if (typeof error === "object" && error !== null)
+        (error as { attempts?: Attempt[] }).attempts = [...hold.attempts];
       this.refused(channel.address, error);
       throw error;
     } finally {
@@ -548,7 +566,7 @@ export class SettlementSubmitter {
     }
     for (let resynced = false; ; resynced = true) {
       if (!prepared) {
-        channel.sequence ??= await this.readSequence(channel, hold);
+        channel.sequence ??= await this.readSequence(channel, hold, opts.deadline);
         prepared = await this.prepare(channel.address, channel.sequence, call, opts);
       }
       const result = await this.sendAndConfirm(channel, prepared, opts, hold);
@@ -590,9 +608,23 @@ export class SettlementSubmitter {
    * of existing channels with 502 or a JSON-RPC error (0007 step 7, measured in 0051). Only a
    * channel the RPC still has no entry for after that is taken out of the pool, so later calls
    * don't draw it; a failed read keeps the channel.
+   *
+   * Failed reads stop at the caller's `deadline` too, with the last read's error, and the channel
+   * goes back to the pool (0056): past it the caller refuses the send, so retrying only holds the
+   * channel. The check runs again after each wait, so no read starts past the window; the wait's
+   * own ledger poll can still overrun it by one RPC call. Once the RPC has answered "no entry", the
+   * read keeps its whole window instead, so a missing channel is still retired: the facilitator's
+   * deadline is shorter than `timeoutSeconds`, and nobody can use a missing channel meanwhile.
    */
-  private async readSequence(channel: Channel, hold: Hold): Promise<bigint> {
+  private async readSequence(
+    channel: Channel,
+    hold: Hold,
+    deadline: number | undefined,
+  ): Promise<bigint> {
     const giveUpAt = this.now() + this.timeoutSeconds * 1000;
+    // A NaN deadline would never be reached and failed reads would retry forever: ignore it.
+    const callerStop = deadline !== undefined && Number.isFinite(deadline) ? deadline : Infinity;
+    let noEntry = false;
     for (;;) {
       let account: xdr.AccountEntry | undefined;
       let failure: unknown;
@@ -604,19 +636,24 @@ export class SettlementSubmitter {
       if (account) return account.seqNum().toBigInt();
       // No entry and no failure: the RPC answered that the channel does not exist.
       const missing = failure === undefined;
+      noEntry ||= missing;
       const error = missing ? new Error(`Account not found: ${channel.address}`) : failure;
       const message = error instanceof Error ? error.message : String(error);
-      if (this.now() >= giveUpAt) {
+      const stopAt = noEntry ? giveUpAt : Math.min(giveUpAt, callerStop);
+      const giveUp = () => {
         if (missing) {
           this.pool.retire(channel);
           hold.retired = true;
           this.emit({ type: "channel-quarantined", channel: channel.address, reason: message });
         }
-        throw error;
-      }
+        return error;
+      };
+      if (this.now() >= stopAt) throw giveUp();
       if (this.closing) throw new ShutdownError("the submitter closed while a read was retried");
       this.emit({ type: "read-retry", channel: channel.address, message });
-      await Promise.race([this.clock.following(giveUpAt), this.closed]);
+      await Promise.race([this.clock.following(stopAt), this.closed]);
+      // The wait can end on its deadline: give up with this read's error rather than read again.
+      if (this.now() >= stopAt) throw giveUp();
     }
   }
 
@@ -774,7 +811,15 @@ export class SettlementSubmitter {
       this.pastLedgerBound(maxLedger, this.clock.current);
     // Nothing is sent until the caller has the hash: a store write that fails must stop the send.
     if (opts.onSigned) {
-      await this.awaitSigned(opts.onSigned, hash, innerHash, maxTime, maxLedger, boundAt);
+      await this.awaitSigned(
+        opts.onSigned,
+        hash,
+        innerHash,
+        maxTime,
+        maxLedger,
+        boundAt,
+        channel.address,
+      );
       // The write took time: an envelope already past a bound can only get txTooLate.
       if (pastBounds()) return { ...base, status: "expired", hash };
     }
@@ -834,7 +879,8 @@ export class SettlementSubmitter {
     }
     if (accepted) callSafely(opts.onSent, hash);
     const dueAt = (boundAt + this.confirmGraceSeconds) * 1000;
-    if (accepted && this.pipeline && this.pool.queued > 0) {
+    // A channel under a hold (0090) goes back through release(), which keeps it until the hold ends.
+    if (accepted && this.pipeline && this.pool.queued > 0 && !this.pool.isHeld(channel)) {
       const final = new Promise<void>((resolve) => (hold.finish = resolve));
       channel.pending = { sequence: txSequence, final, dueAt };
       this.pool.handOver(channel);
@@ -866,6 +912,7 @@ export class SettlementSubmitter {
     maxTime: number | undefined,
     maxLedger: number | undefined,
     boundAt: number,
+    channel: string,
   ): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let watchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -893,6 +940,7 @@ export class SettlementSubmitter {
       const bounds: SignedBounds = {
         ...(maxTime !== undefined && { maxTime }),
         ...(maxLedger !== undefined && { maxLedger }),
+        channel,
       };
       const written = Promise.resolve().then(() => onSigned(hash, bounds, innerHash)); // a synchronous throw too
       const outcome = await Promise.race([written, timedOut, pastLedger]).catch(

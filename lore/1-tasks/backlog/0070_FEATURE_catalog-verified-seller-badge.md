@@ -3,7 +3,7 @@ id: "0070"
 title: "Mark catalog listings whose seller proves its payTo with stellar.toml"
 type: FEATURE
 status: backlog
-milestone: 1
+milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0063"]
 tags: [bazaar, discovery, security, priority-low, effort-small]
@@ -43,6 +43,9 @@ else's account doesn't look as trusted as the real seller.
 - When a listing's 402 check passes, read the `payTo` account's `home_domain` and the resource
   host's `stellar.toml`; mark the listing verified when both point at each other.
 - Show the mark in `/discovery/resources`; a listing without it stays listed.
+- Decide with the owner (from 0154, ADR 0014 "Curation"): a verified listing is the search's
+  curated one, so this task sets its bonus in the quality factor q and how that bonus meets q's
+  1.2 cap. Until then no listing is curated.
 
 ## Acceptance Criteria
 

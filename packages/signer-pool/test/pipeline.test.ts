@@ -175,6 +175,27 @@ describe("pipelining", () => {
     expect(submitter.stats().preparedAhead).toEqual({ used: 0, rebuilt: 1 });
   });
 
+  it("doesn't hand a held channel to the next call; it waits for the hold to end (0090)", async () => {
+    const { fake, submitter } = setup();
+    let end!: () => void;
+    const until = new Promise<void>((r) => (end = r));
+    // The hold comes while the first call uses the channel, as after a lease taken back.
+    const first = submitter.submit(call(), {
+      onSent: () => submitter.hold(channels[0]!, until),
+    });
+    let secondDone = false;
+    const second = submitter.submit(call()).finally(() => (secondDone = true));
+    expect((await first).status).toBe("success");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(secondDone).toBe(false);
+    expect(fake.sent).toHaveLength(1);
+    end();
+    expect((await second).status).toBe("success");
+    // Not prepared ahead, and its sequence read again after the hold.
+    expect(innerSeqs(fake)).toEqual(["1001", "1002"]);
+    expect(submitter.stats().preparedAhead).toMatchObject({ used: 0 });
+  });
+
   it("can be turned off", async () => {
     const { fake, submitter, events, ahead } = setup({ pipeline: false });
     await Promise.all(Array.from({ length: 3 }, () => submitter.submit(call())));

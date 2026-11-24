@@ -16,7 +16,7 @@ import { EMF_LINE_PREFIX } from "@stellar-x402/metrics-catalog";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { ConfigError, parseConfig } from "../src/config.js";
-import { apiKeyHash, newApiKey } from "../src/http/api-key.js";
+import { apiKeyHash, newApiKey } from "@stellar-x402/api-keys";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main } from "../src/main.js";
@@ -185,7 +185,7 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      "NETWORK stellar:pubnet is refused until task 0090, per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
+      "NETWORK stellar:pubnet is refused until per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
     ]);
   });
 });
@@ -616,9 +616,10 @@ describe("main()", () => {
       const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
       const prune = vi.spyOn(app.stores.spend, "prune");
       try {
-        // A tick comes within a minute, ±10%.
+        // A tick comes within a minute, ±10%. It reads the latest ledger before any table, a
+        // real request to the RPC that fake timers don't wait for (0156).
         await vi.advanceTimersByTimeAsync(66_000);
-        expect(prune).toHaveBeenCalled();
+        await vi.waitFor(() => expect(prune).toHaveBeenCalled());
       } finally {
         await app.close();
       }

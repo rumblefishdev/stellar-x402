@@ -164,6 +164,8 @@ describe("CATALOG", () => {
     );
     expect(scopes).toEqual({
       ready: "process",
+      portal_ready: "process",
+      hub_ready: "process",
       spendable_stroops: "network",
       protocol_version: "network",
       protocol_supported_version: "network",
@@ -209,6 +211,15 @@ describe("CATALOG", () => {
         expect(billed.has(field), `${m.name}.${field}`).toBe(false);
       expect(new Set(m.fields ?? []).size, m.name).toBe((m.fields ?? []).length);
     }
+  });
+
+  test("a field's closed values are for a declared field, closed with 'other' (0139 step 4)", () => {
+    for (const m of ALL)
+      for (const [field, values] of Object.entries(m.fieldValues ?? {})) {
+        expect(m.fields, `${m.name}.${field}`).toContain(field);
+        expect(values, `${m.name}.${field}`).toContain("other");
+        expect(new Set(values).size, `${m.name}.${field}`).toBe(values.length);
+      }
   });
 
   test("byName returns undefined for an unknown name", () => {
@@ -272,6 +283,8 @@ describe("CATALOG", () => {
       settlement_oldest_open_seconds: [g, "Seconds", net],
       pool_queued: [g, "Count", net],
       pool_quarantined: [g, "Count", net],
+      pool_channels: [g, "Count", net],
+      pool_busy: [g, "Count", net],
       rpc_on_fallback: [g, "None", net],
       rpc_stalled_seconds: [g, "Seconds", net],
       balance_reading_age_seconds: [g, "Seconds", net],
@@ -289,6 +302,8 @@ describe("CATALOG", () => {
       mem_used_percent: [g, "Percent", proc],
       disk_used_percent: [g, "Percent", proc],
       ready: [g, "None", proc],
+      portal_ready: [g, "None", proc],
+      hub_ready: [g, "None", proc],
       spendable_stroops: [g, "None", net],
       protocol_version: [g, "None", net],
       protocol_supported_version: [g, "None", net],
@@ -355,6 +370,8 @@ describe("scope-split name types", () => {
       | "settlement_oldest_open_seconds"
       | "pool_queued"
       | "pool_quarantined"
+      | "pool_channels"
+      | "pool_busy"
       | "rpc_on_fallback"
       | "rpc_stalled_seconds"
       | "balance_reading_age_seconds"

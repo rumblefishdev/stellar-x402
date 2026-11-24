@@ -53,7 +53,7 @@ accepted there (akot, 2026-11-12). Nothing changes in the code.
   limiter counts a caller by it (0024 decision 31, ADR 0007's amendment of 2026-11-03;
   [0105](../backlog/0105_FEATURE_api-keys-on-pubnet.md),
   [0106](../backlog/0106_FEATURE_api-key-portal-discord.md)), with a fee budget of its own
-  ([0107](../backlog/0107_FEATURE_per-key-fee-quota.md)).
+  ([0107](../active/0107_FEATURE_per-key-fee-quota.md)).
 
 ## Design Decisions
 

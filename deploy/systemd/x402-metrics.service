@@ -1,0 +1,26 @@
+# The metrics agent and node_exporter (ADR 0011, lore 0139): their own project in
+# /srv/x402/metrics. The agent's client key is decrypted for the container at each start. Nothing
+# else waits on it: when it stops, the VM's rule on its silence fires.
+[Unit]
+Description=x402 metrics agent
+Documentation=https://github.com/rumblefishdev/stellar-x402/blob/develop/docs/runbook.md
+PartOf=docker.service
+After=docker.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+WorkingDirectory=/srv/x402/metrics
+# Both containers' output, for the CloudWatch agent: every unit's output ships (ADR 0011).
+StandardOutput=append:/var/log/x402/metrics/agent.log
+StandardError=inherit
+# Prometheus's image runs as nobody.
+ExecStartPre=/usr/local/libexec/x402/x402-creds metrics metrics-agent-key:65534
+ExecStart=/usr/bin/docker compose up --no-color --abort-on-container-exit
+ExecStop=/usr/bin/docker compose stop
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

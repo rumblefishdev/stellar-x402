@@ -1,0 +1,252 @@
+[
+  {
+    "id": "q01",
+    "class": "keyword",
+    "query": "xlm usdc price"
+  },
+  {
+    "id": "q02",
+    "class": "keyword",
+    "query": "btc 1h candles"
+  },
+  {
+    "id": "q03",
+    "class": "keyword",
+    "query": "honeypot token check"
+  },
+  {
+    "id": "q04",
+    "class": "keyword",
+    "query": "stellar account balance"
+  },
+  {
+    "id": "q05",
+    "class": "keyword",
+    "query": "company registration number lookup"
+  },
+  {
+    "id": "q06",
+    "class": "keyword",
+    "query": "ssl certificate expiry"
+  },
+  {
+    "id": "q07",
+    "class": "keyword",
+    "query": "whois domain"
+  },
+  {
+    "id": "q08",
+    "class": "keyword",
+    "query": "weather forecast berlin"
+  },
+  {
+    "id": "q09",
+    "class": "keyword",
+    "query": "remote developer jobs"
+  },
+  {
+    "id": "q10",
+    "class": "keyword",
+    "query": "flight prices warsaw london"
+  },
+  {
+    "id": "q11",
+    "class": "paraphrase",
+    "query": "how much is one lumen worth in dollars right now"
+  },
+  {
+    "id": "q12",
+    "class": "paraphrase",
+    "query": "is this new token a scam before I buy it"
+  },
+  {
+    "id": "q13",
+    "class": "paraphrase",
+    "query": "who are the directors of a british firm"
+  },
+  {
+    "id": "q14",
+    "class": "paraphrase",
+    "query": "is my website down"
+  },
+  {
+    "id": "q15",
+    "class": "paraphrase",
+    "query": "will it rain tomorrow where I am"
+  },
+  {
+    "id": "q16",
+    "class": "paraphrase",
+    "query": "how polluted is the air in delhi today"
+  },
+  {
+    "id": "q17",
+    "class": "paraphrase",
+    "query": "what would a two bedroom flat rent for at this address"
+  },
+  {
+    "id": "q18",
+    "class": "paraphrase",
+    "query": "how much will electricity cost tomorrow in germany"
+  },
+  {
+    "id": "q19",
+    "class": "paraphrase",
+    "query": "turn this paragraph into spanish"
+  },
+  {
+    "id": "q20",
+    "class": "paraphrase",
+    "query": "make a bill for my client in euros"
+  },
+  {
+    "id": "q21",
+    "class": "typo",
+    "query": "stelar acount trustlines"
+  },
+  {
+    "id": "q22",
+    "class": "typo",
+    "query": "wether forcast"
+  },
+  {
+    "id": "q23",
+    "class": "typo",
+    "query": "compnay registery uk"
+  },
+  {
+    "id": "q24",
+    "class": "typo",
+    "query": "tokn rugpul scaner"
+  },
+  {
+    "id": "q25",
+    "class": "typo",
+    "query": "domian dns recods"
+  },
+  {
+    "id": "q26",
+    "class": "typo",
+    "query": "cheap flihgt tickets"
+  },
+  {
+    "id": "q27",
+    "class": "typo",
+    "query": "tranlsate text to german"
+  },
+  {
+    "id": "q28",
+    "class": "typo",
+    "query": "electricty spot price"
+  },
+  {
+    "id": "q29",
+    "class": "long",
+    "query": "I run an online shop and want to check every morning that my store website answers quickly and that its certificate is not about to expire"
+  },
+  {
+    "id": "q30",
+    "class": "long",
+    "query": "before onboarding a new supplier I need their official company details and to make sure they are not on any sanctions list"
+  },
+  {
+    "id": "q31",
+    "class": "long",
+    "query": "my agent holds USDC on Stellar and needs the best rate to convert 500 of it into XLM through the network's order books"
+  },
+  {
+    "id": "q32",
+    "class": "long",
+    "query": "I want hourly candle data for ETH over the last month so I can backtest a simple moving average strategy"
+  },
+  {
+    "id": "q33",
+    "class": "long",
+    "query": "planning a trip from Warsaw to Lisbon in March, find what flights cost and what the weather will be like"
+  },
+  {
+    "id": "q34",
+    "class": "long",
+    "query": "we are building an x402 paid API and want to know whether our 402 response is formatted correctly for clients"
+  },
+  {
+    "id": "q35",
+    "class": "long",
+    "query": "give me a short summary of a news article so my agent does not have to read the whole page"
+  },
+  {
+    "id": "q36",
+    "class": "long",
+    "query": "where can I earn the highest interest on my USDC deposits on Stellar right now"
+  },
+  {
+    "id": "q37",
+    "class": "long",
+    "query": "our sign-up form gets fake addresses, check whether a customer's email can actually receive mail"
+  },
+  {
+    "id": "q38",
+    "class": "long",
+    "query": "I have a street address and need its coordinates to place it on a map"
+  },
+  {
+    "id": "q39",
+    "class": "mcp",
+    "query": "tool to quote a path payment between two stellar assets"
+  },
+  {
+    "id": "q40",
+    "class": "mcp",
+    "query": "tool that screens a wallet address against OFAC"
+  },
+  {
+    "id": "q41",
+    "class": "mcp",
+    "query": "tool to write alt text for an image"
+  },
+  {
+    "id": "q42",
+    "class": "mcp",
+    "query": "tool to search 10-K filings for a ticker"
+  },
+  {
+    "id": "q43",
+    "class": "mcp",
+    "query": "RSI buy sell signal for BTC on the 4h chart"
+  },
+  {
+    "id": "q44",
+    "class": "mcp",
+    "query": "tool to validate an x402 endpoint"
+  },
+  {
+    "id": "q45",
+    "class": "broad",
+    "query": "crypto market data"
+  },
+  {
+    "id": "q46",
+    "class": "broad",
+    "query": "risk check"
+  },
+  {
+    "id": "q47",
+    "class": "broad",
+    "query": "website information"
+  },
+  {
+    "id": "q48",
+    "class": "broad",
+    "query": "stellar defi"
+  },
+  {
+    "id": "q49",
+    "class": "broad",
+    "query": "renting a flat and finding a job in a new city"
+  },
+  {
+    "id": "q50",
+    "class": "broad",
+    "query": "environmental data for a location"
+  }
+]

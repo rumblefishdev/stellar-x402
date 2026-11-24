@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 2
 related_adr: []
-related_tasks: ["0078"]
+related_tasks: ["0078", "0145", "0102", "0094"]
 tags: [sdk, mcp, payments, priority-medium, effort-small]
 links: []
 history:
@@ -40,24 +40,36 @@ is the one missing.
 ## Context
 
 - 0078 names a missing trustline in `/verify`'s answer, but upstream's
-  `ExactStellarScheme.createPaymentPayload` simulates before it signs. At our `~2.28.0` pin it
-  throws `Stellar simulation failed with error message: HostError: Error(Contract, #13)`, and its
-  users never reach `/verify`.
-- `@x402/stellar` 2.29.0 (2026-10-28) throws `TrustlineMissingError`, a `SimulationFailedError` with
-  `account` and `asset`. Not checked: whether `@x402/fetch` rewraps it.
-- `packages/mcp/src/pay.ts` maps `#10` and `#13` alike to `insufficient_funds`, so a missing
-  trustline, a seller's too, reads as "The payer does not hold enough of the asset."
+  `ExactStellarScheme.createPaymentPayload` simulates before it signs, so its users never reach
+  `/verify`.
+- Since 0145 every `@x402/*` package is on `~2.31.0`. There `@x402/stellar` throws
+  `TrustlineMissingError` (a `SimulationFailedError` with `account` and `asset`, for the payer or
+  the `payTo`) and `InsufficientBalanceError`; the message is "Stellar trustline is missing for
+  account … and asset …: <raw RPC error>", so it still holds `Error(Contract, #13)`.
+- **Where the typed error survives** (checked 2026-11-18 in the 2.31 `dist`): `@x402/fetch`'s
+  `wrapFetchWithPayment` rewraps it as a plain
+  `Error("Failed to create payment payload: <message>")`, so a caller catching the fetch's error
+  loses the type and its fields. `x402Client`'s `onPaymentCreationFailure` hook gets the original
+  error first; `pay.ts` keeps it there as `signingError` (`:167-168`), so the MCP can tell the two
+  errors by type today.
+- `apps/mcp-local/src/pay.ts:212-219` maps `#10` and `#13` alike to `insufficient_funds`, so a
+  missing trustline, a seller's too, reads as "The payer does not hold enough of the asset."
+  `test/pay.test.ts:360` (`NO_TRUSTLINE` → `insufficient_funds`) and the testnet e2e E-14
+  (`e2e/test/after-signing.ts`) pin that today and change with this task.
 - The panel review response (§5, "Trustline onboarding") promises an actionable error before
   payment is attempted. For upstream's client that holds only once this task is done (0078
   decision 10).
 - `apps/facilitator/src/settlement/trustline.ts` shows how to read the account and the asset from
   the SAC's `#13` event.
-- `packages/sdk` doesn't exist yet: 0102 creates it with its first helper.
+- `packages/sdk` holds only the Rust seller crate (`packages/sdk/rust`, 0136); the TypeScript
+  helpers are 0102's, so the SDK criteria wait for it. The MCP criteria can be done now.
 
 ## Implementation
 
-- Bump the `@x402/*` packages to 2.29.0, and check whether `@x402/fetch` rewraps the error.
-- Catch `TrustlineMissingError` in `packages/mcp`, and in `packages/sdk` if 0102 has created it.
+- MCP: tell a missing trustline from a low balance by the type of `signingError`
+  (`TrustlineMissingError`, `InsufficientBalanceError`), not the `#10|#13` regex.
+- Catch `TrustlineMissingError` in the TypeScript SDK once 0102 has created it; an SDK helper
+  built on `wrapFetchWithPayment` needs the same hook, since the fetch's own error is rewrapped.
 - Throw an error that names the account, the asset and what to do; MCP gets a result of its own,
   not `insufficient_funds`.
 - Decide whether the SDK offers to add the trustline, or only reports it.

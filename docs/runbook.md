@@ -4,7 +4,8 @@ The facilitator's `production` environment on the company Hetzner server
 ([ADR 0011](adr/0011-facilitator-hosting.md)): one facilitator, today serving testnet, behind
 Cloudflare Tunnel at `https://x402-facilitator.sorobanscan.com`. Commands on the server run as an
 admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
-`infra-hetzner/ansible`).
+`infra-hetzner/ansible`). The portal's backend runs beside it, with a deploy of its own (The
+portal's backend, below).
 
 ## What is where
 
@@ -13,7 +14,8 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `/srv/x402/production/compose.yaml` | the Compose project `x402-production`                                                               |
 | `/srv/x402/production/deploy.sh`    | the deploy key's forced command                                                                     |
 | `/srv/x402/production/digest`       | the image `x402@production` runs; `digest.good` the last ready one                                  |
-| `/srv/x402/production/digest.next`  | the digest a deploy is installing, the deploy user's only file                                      |
+| `/srv/x402/production/digest.next`  | the digest a deploy is installing; with `portal.digest.next`, the deploy user's only files          |
+| `/srv/x402/production/portal.*`     | the portal's: `portal.compose.yaml`, and `portal.digest`, `.good` and `.next` as the facilitator's  |
 | `/srv/x402/production/creds/*.cred` | the credentials, encrypted with the host key                                                        |
 | `/run/x402/production/`             | the credentials decrypted for the containers (tmpfs)                                                |
 | `/srv/x402/openbao/`                | OpenBao's Compose project `x402-openbao`, its config and seal key                                   |
@@ -34,6 +36,8 @@ admin with `sudo`; the admins are the explorer's (`soroban-block-explorer`'s
 | `x402-tunnel@production`            | `cloudflared`                                             |
 | `x402-openbao`                      | OpenBao, the signer of every network                      |
 | `x402-deploy@production`            | a deploy (a oneshot, started by `deploy.sh`)              |
+| `x402-portal@production`            | the portal's backend                                      |
+| `x402-portal-deploy@production`     | its deploy (a oneshot, started by `deploy-portal.sh`)     |
 | `x402-watchdog@production.timer`    | every 30 s, restarts an `unhealthy` facilitator           |
 | `amazon-cloudwatch-agent`           | the CloudWatch agent, as `cwagent`                        |
 | `x402-cloudwatch-credentials.timer` | every hour, the agent's 12-hour AWS keys                  |
@@ -74,7 +78,8 @@ deploy.
 **A change under `deploy/`** reaches the server in this order:
 
 1. The pull request to `deploy/production` merges. Its image job starts at once, since the
-   workflow ignores only `lore/**`, `docs/**` and `**/*.md`; its `deploy` job then waits for the
+   workflow ignores only `lore/**`, `docs/**`, `**/*.md` and the portal's own app, page and
+   workflow (The portal's backend); its `deploy` job then waits for the
    production environment's approval. Approved before step 2, it runs with the files already on
    the server, so a change under `deploy/` must still work with the old ones until step 3. When
    it can't, for example a new credential the new image reads, split it into two pull requests:
@@ -117,7 +122,7 @@ deploy.
 Then check that each container kept what its compose file drops (task 0091):
 
 ```sh
-for p in x402-production x402-openbao; do  # one each: repeated label filters must all match
+for p in x402-production x402-portal-production x402-openbao; do  # one each: repeated label filters must all match
   sudo docker ps -q --filter label=com.docker.compose.project=$p
 done | xargs -r sudo docker inspect --format \
   '{{.Name}} user={{.Config.User}} drop={{.HostConfig.CapDrop}} add={{.HostConfig.CapAdd}} {{.HostConfig.SecurityOpt}}'
@@ -146,6 +151,7 @@ and go to no container: the snapshot script decrypts its own on the host, into
 | `approle-secret-id.testnet` | facilitator                    | `x402@`             |
 | `postgres-password.testnet` | `postgres-testnet`             | `x402-db-testnet@`  |
 | `tunnel-token`              | `cloudflared`                  | `x402-tunnel@`      |
+| `portal-*` (three)          | the portal's backend           | `x402-portal@`      |
 | `seal-key`                  | `openbao`                      | `x402-openbao`      |
 | `storage-box-ssh-key`       | Borg (the write sub-account)   | the snapshot job    |
 | `borg-passphrase`           | Borg                           | the snapshot job    |
@@ -979,11 +985,16 @@ agent's own log is `/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agen
 | `production/postgres-testnet.log` | `x402-db-testnet@production`                  | `postgres-testnet` in `app`                        |
 | `production/cloudflared.log`      | `x402-tunnel@production`                      | `cloudflared` in `app`                             |
 | `production/deploy.log`           | the deploys, their migrations, `x402-migrate` | `deploy` in `app`                                  |
+| `production/portal.log`           | `x402-portal@production`                      | `portal` in `app`                                  |
+| `production/portal-deploy.log`    | the portal's deploys                          | `portal-deploy` in `app`                           |
 | `openbao/openbao.log`             | `x402-openbao`                                | `openbao` in `app`                                 |
 | `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`                                |
+| `metrics/agent.log`               | `x402-metrics`                                | `metrics-agent` in `app`                           |
 
-`x402-logrotate.timer` rotates a file past 100 MB every 10 minutes and keeps 10: `*.log.1` as it
-was, the older ones compressed. A rotation during an AWS outage loses the app lines the agent
+`x402-logrotate.timer` runs every 10 minutes and rotates each file once a day, empty or not, or
+sooner once past 100 MB; it keeps 10, `*.log.1` as it was and the older ones compressed, and
+deletes any older than 30 days. So no line stays on the server past the 30 days the hub's privacy
+policy states, the facilitator's (whose lines name a pubnet caller) and the portal's alike (0106). A rotation during an AWS outage loses the app lines the agent
 hadn't sent yet from CloudWatch, never from the server: they are in `*.log.1` (ADR 0011).
 
 **The units' first move to files** (0027), after the admin step, in the window of The playbook's
@@ -1037,6 +1048,675 @@ sha256sum amazon-cloudwatch-agent.deb
 AWS doesn't sign the helper's Linux build: its SHA-256 is the one the Roles Anywhere user guide's
 credential helper page lists, which shows only the current version, so read it on the day of the
 pin.
+
+## The portal's backend
+
+The backend of x402's API keys (`apps/portal`, task 0106): it issues, shows and revokes a seller's
+pubnet key (0105) for the API hub. The hub (`rumblefishdev/sorobanscan-api-portal`, at
+`https://sorobanscan.com/api`) signs members in with Discord and shows them an x402 tab. Its
+backend calls this one server to server, at `https://x402-portal.sorobanscan.com/api/hub/v1/`,
+with a token on each call that lives 60 seconds and names one account and one act (`read`,
+`reveal`, `revoke` or `issue`), signed with a secret both hold. No browser calls it, and it has no
+sign-in, session or CORS. The four calls, their answers and the settings are in its
+[README](../apps/portal/README.md).
+
+It is `x402-portal@production`, one container in a Compose project of its own,
+`x402-portal-production` (`portal.compose.yaml`), on the facilitator's two networks and reached
+through its tunnel. It has its own image, deploy key, workflow and digest files, so nothing below
+restarts the facilitator, and a facilitator deploy never restarts it.
+
+It writes the facilitator's registry, `api_keys`, and `api_key_copies`, a sealed copy of each key
+it issues so that the hub can show the key again. Until pubnet has a database (0126) both are
+testnet's, where no request reads a key: the keys it issues today are for testing the hub's tab.
+
+```sh
+systemctl status x402-portal@production
+sudo /usr/local/libexec/x402/x402-portal-compose production exec -T portal \
+  node -e "fetch('http://127.0.0.1:4022/health').then((r) => r.text()).then(console.log)"
+curl -s https://x402-portal.sorobanscan.com/health   # {"ready":true}
+sudo tail -F /var/log/x402/production/portal.log
+```
+
+### Before its first deploy
+
+In this order. Until the first deploy the unit is skipped at boot: it runs only once a deploy has
+written `portal.digest`. It decrypts three credentials at each start, `portal-database-url` (step
+3), `portal-key-encryption-key` (step 4) and `portal-hub-token-secret` (step 5); without one it
+doesn't start.
+
+1. **A facilitator deploy with the migration `0014_api_key_copies`** (Deploy, above). The backend
+   runs no migration: on a database without `api_keys` or `api_key_copies` it logs
+   `startup_failed`, naming the table, and exits. The table is there when this prints its name:
+
+   ```sh
+   cd /srv/x402/production
+   sudo FACILITATOR_IMAGE=unused docker compose exec -T postgres-testnet \
+     psql -U postgres -d x402 -tAc "SELECT to_regclass('api_key_copies')"   # api_key_copies
+   ```
+
+2. **The playbook**, from the commit that has the portal's files (The playbook). It installs the
+   compose file, the units, `deploy-portal.sh`, the portal's deploy key and its sudo rule, enables
+   `x402-portal@production`, which its condition skips until the first deploy, and restarts the
+   CloudWatch agent, whose config gained two files. Nothing else restarts.
+3. **The database role.** The backend reads and writes the registry's two tables and nothing else
+   in the database: it can't read a settlement, change a key's owner or hash, or delete a key's
+   row. The two `SET`s keep the statements, with the password, out of Postgres's log if one
+   fails. The rest is one transaction, and the credential is written only once it has committed:
+   a failed run (a `GRANT` before `0014`, say) changes nothing, and the backend's password stays
+   the role's.
+
+   ```sh
+   (
+     cd /srv/x402/production || exit 1
+     pw=$(openssl rand -hex 24) || { echo "stopped: openssl failed; nothing was changed" >&2; exit 1; }
+     if sudo FACILITATOR_IMAGE=unused docker compose exec -T postgres-testnet \
+       psql -U postgres -d x402 -v ON_ERROR_STOP=1 <<SQL
+   SET log_statement = 'none';
+   SET log_min_error_statement = 'panic';
+   BEGIN;
+   SELECT 'CREATE ROLE x402_portal'
+     WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'x402_portal') \gexec
+   ALTER ROLE x402_portal LOGIN PASSWORD '$pw';
+   GRANT SELECT, INSERT ON api_keys TO x402_portal;
+   GRANT UPDATE (state, revoked_at) ON api_keys TO x402_portal;
+   GRANT SELECT, INSERT, DELETE ON api_key_copies TO x402_portal;
+   COMMIT;
+   SQL
+     then
+       printf 'postgres://x402_portal:%s@postgres-testnet:5432/x402' "$pw" |
+         sudo systemd-creds encrypt --with-key=host --name=portal-database-url - \
+           /srv/x402/production/creds/portal-database-url.cred ||
+         { echo "stopped: the role's new password is not in the credential; run this step again" >&2; exit 1; }
+     else
+       echo "stopped: the role was not made or changed; the credential is unchanged" >&2
+       exit 1
+     fi
+   )
+   ```
+
+   On success psql prints `SET`, `SET`, `BEGIN`, `CREATE ROLE` (the first time only),
+   `ALTER ROLE`, three `GRANT`s and `COMMIT`, and the step nothing more. A failed statement prints
+   psql's `ERROR:`, then `stopped: the role was not made or changed; the credential is unchanged`,
+   and the subshell exits 1. The subshell keeps `pw` and the `cd` out of your shell. Run again, it
+   converges: the role keeps its grants and takes a new password, and the credential follows.
+   That is also how the password changes later; restart the unit after it if the backend runs,
+   since it reads the credential when it starts.
+   `deploy/scripts/check-production-portal.sh` makes its role from these `GRANT` lines. A
+   migration that replaces either table with a new one must grant again: the grants are the
+   table's, not the name's. The grants don't keep anyone else from the copies: the facilitator
+   connects as the database's owner, so only the encryption does (0106 decision 18).
+
+4. **The key encryption key**, on the server. It seals the copies and is kept nowhere else; a
+   second one would leave every copy sealed under the first unable to open (Its other secrets,
+   below), so this makes none when the credential exists:
+
+   ```sh
+   c=/srv/x402/production/creds/portal-key-encryption-key.cred
+   if sudo test -e "$c"; then echo "$c exists: kept"; else
+     openssl rand -base64 32 | tr -d '\n' |
+       sudo systemd-creds encrypt --with-key=host --name=portal-key-encryption-key - "$c"
+   fi
+   ```
+
+5. **The hub's token secret**, in AWS Secrets Manager, and its copy on the server (0106 decision
+   23). The secret is `sorobanscan-hub/production/x402-token` in `eu-central-1`, in the account of
+   the `stellar` profile, as JSON:
+
+   ```json
+   { "current": "<base64 of 32 bytes>", "previous": "<base64 of 32 bytes>" }
+   ```
+
+   `current` is required and `previous` optional, each exactly what `openssl rand -base64 32`
+   prints. The hub's backend reads it through AWS, signs with `current` only, and reads it again
+   after 5 minutes. This backend reads a copy, the credential `portal-hub-token-secret`, once,
+   when it starts, and accepts a token under `current` or `previous`; it refuses to start without
+   one, or with anything else (0106 decision 26). Its container holds no AWS credentials. Whoever
+   can read the secret can sign a token for any Discord account, `issue` included.
+
+   It is made once, by akot, with a value no one sees. Every command here, this one included,
+   runs in bash on a machine with the `stellar` profile (after `aws sso login --profile stellar`,
+   if it is an SSO one), and passes a key over a pipe or in one command's environment, never in
+   its arguments, which `ps` shows to every user of the machine. First these, set once per shell.
+   They hold no key, and a step run without them stops:
+
+   ```bash
+   SECRET_ID=sorobanscan-hub/production/x402-token
+   SERVER=   # the server as you reach it with ssh: its address, or your ~/.ssh/config alias
+   # true only for {"current": K} or {"current": K, "previous": K}, K being standard padded
+   # base64 of 32 bytes: the rule the backend starts by (apps/portal/src/config.ts). The type
+   # comes first, so a value of another shape is refused before jq could quote it in an error.
+   KEYS_OK='def ok: type == "string" and test("^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$");
+     type == "object" and (keys - ["current", "previous"] == []) and (.current | ok)
+     and (if has("previous") then .previous | ok else true end)'
+   ```
+
+   Then the secret, checked with `KEYS_OK` before it is made, as every later put is:
+
+   ```bash
+   (
+     set -euo pipefail
+     NEW=$(openssl rand -base64 32) || { echo "stopped: openssl failed; nothing was made" >&2; exit 1; }
+     JSON=$(NEW="$NEW" jq -nc '{current: env.NEW}' \
+       | jq -ce "if ($KEYS_OK) then . else error(\"refused\") end" 2>/dev/null) ||
+       { echo "stopped: the new secret is not as it must be; nothing was made" >&2; exit 1; }
+     printf %s "$JSON" | aws secretsmanager create-secret --profile stellar --region eu-central-1 \
+       --name "$SECRET_ID" --secret-string file:///dev/stdin
+   )
+   ```
+
+   It prints the secret's `ARN`, `Name` and `VersionId`. The copy, and each step of Changing the
+   token's secret below, also needs SSH to the server.
+
+   The copy reads the secret as stored, checks it with `KEYS_OK`, and writes it into the server's
+   credential through a pipe, never a file or the screen. Then it compares a SHA-256 of what is
+   stored with one of the server's copy, each computed on its own side, and prints the copy's
+   field names. A stored secret that fails `KEYS_OK` is not written. Nothing here prints a key or
+   any part of one; a copy that stops says why, in its own words (`stopped: …`) or in those of the
+   tool that failed (`aws`, `ssh`, `systemd-creds`):
+
+   ```bash
+   (
+     set -euo pipefail
+     : "${SERVER:?set SERVER first}"
+     JSON=$(aws secretsmanager get-secret-value --profile stellar --region eu-central-1 \
+         --secret-id "$SECRET_ID" --query SecretString --output text \
+       | jq -ce "if ($KEYS_OK) then . else error(\"refused\") end" 2>/dev/null) ||
+       { echo "stopped: the stored secret was not read, or not as it must be" >&2; exit 1; }
+     printf %s "$JSON" | ssh "$SERVER" 'sudo systemd-creds encrypt --with-key=host --name=portal-hub-token-secret - /srv/x402/production/creds/portal-hub-token-secret.cred' ||
+       { echo "stopped: writing the server's copy failed" >&2; exit 1; }
+     here=$(printf %s "$JSON" | shasum -a 256 | cut -d' ' -f1)
+     there=$(ssh "$SERVER" 'sudo systemd-creds decrypt --name=portal-hub-token-secret /srv/x402/production/creds/portal-hub-token-secret.cred - | sha256sum' | cut -d' ' -f1) ||
+       { echo "stopped: the server's copy was not read back" >&2; exit 1; }
+     [ "$here" = "$there" ] || { echo "stopped: the server's copy is not the stored secret" >&2; exit 1; }
+     printf %s "$JSON" | jq -c keys   # ["current"]: what the server holds, never the values
+   )
+   ```
+
+   It ends on `["current"]`. Before the first deploy that is all: the deploy starts the backend on
+   it.
+
+6. **Cloudflare:** Browser Integrity Check off for `x402-portal.sorobanscan.com` (Cloudflare,
+   below). With it on, Cloudflare answers the hub's calls with error 1010 at its edge.
+7. **The deploy key and its environment**, apart from the facilitator's, so this key starts the
+   portal's deploy and no other. Made on 2026-11-17: the pair with
+   `ssh-keygen -t ed25519 -N '' -C x402-deploy-portal-production -f deploy-portal-production`, its
+   public half in `deploy/ansible/files/deploy-portal-production.pub`, the private half in the
+   `production-portal` environment's secret `DEPLOY_SSH_KEY`, then
+   `shred -u deploy-portal-production`. The environment has `production`'s reviewers with
+   "Prevent self-review", no admin bypass, deployment branches limited to `deploy/production`,
+   and the secret `DEPLOY_HOST`; no `DEPLOY_PORT`, as `production` has none, so the workflow uses
+   port 22. Step 2's playbook puts the key in `authorized_keys`, held to `deploy-portal.sh`. A new
+   key later is the facilitator's procedure (The deploy key and the host key) with these names.
+8. **The hostname,** `x402-portal.sorobanscan.com` to `http://portal:4022` on the tunnel `x402`,
+   in `soroban-infrastructure`'s `cloudflare/x402.tf` (#11, applied 2026-11-18). It answers 502
+   until the first deploy.
+9. **A stub of `deploy-portal-production.yml` on `main`,** as the facilitator's (#126; Rollback,
+   above), or **Run workflow** and `gh workflow run` don't find the workflow. `main` has none on
+   2026-11-18.
+
+### The first deploy, and the checks after a deploy
+
+The promotion that brings the portal starts **Deploy portal production** beside the facilitator's
+deploy (Deploy and rollback, below). Its image job pushes the first image, and its `deploy` job
+then waits for the `production-portal` environment's approval. Approve it once steps 1 to 6 are
+done, after making the GHCR package `x402-portal` public, so the server pulls without a login. If
+this deploy fails there is no good image to go back to: the backend stays down, and
+`portal.digest` is removed so the unit stays skipped.
+
+After it, and after every deploy, from anywhere:
+
+```sh
+curl -s -w ' %{http_code}\n' https://x402-portal.sorobanscan.com/health
+# {"ready":true} 200
+curl -s -A '' -w ' %{http_code}\n' https://x402-portal.sorobanscan.com/api/hub/v1/account
+# {"code":"invalid_token","message":"The token is missing or not valid."} 401
+curl -s -A '' -w ' %{http_code}\n' -H 'Authorization: Bearer v1.probe.probe' \
+  https://x402-portal.sorobanscan.com/api/hub/v1/account
+# {"code":"invalid_token","message":"The token is missing or not valid."} 401
+```
+
+- **The two `401 invalid_token` are the backend's own answers.** It is up, and since it doesn't
+  start without a well-formed secret, it holds one. The first is refused before a token is read
+  and logged at `debug` only; the second has its token read and refused, and logs one
+  `hub_call_refused` with `invalid_token`, which is expected. Neither says the secret is the
+  hub's: only a call from the hub's x402 tab shows that.
+- **`-A ''` sends no `User-Agent`,** as a server's call may not. Browser Integrity Check answers
+  such a request with 1010 (0026), so these probes also show the check is off.
+- **A `502`, or an error page with 1010, is not the backend's answer.** It comes from Cloudflare
+  or the tunnel, and the backend never saw the request. 1010 is Browser Integrity Check
+  (Cloudflare, below). A 502 is the tunnel not reaching `portal:4022`: the backend is down or not
+  on the `edge` network, and `systemctl status x402-portal@production` and the end of
+  `portal.log` say why.
+- **`{"ready":false} 503`** from `/health`: the backend runs and its database didn't answer its
+  last probe, at most 2 s old (`not_ready` in `portal.log`, once in 2 s at most).
+
+### Deploy and rollback
+
+A push to `deploy/production` that changes what the image is built from (`apps/portal`,
+`packages/api-keys`, the root `package.json`, the lockfile, `pnpm-workspace.yaml`,
+`tsconfig.base.json`, `.dockerignore` or the workflow itself, Markdown aside) starts **Deploy
+portal production**, which builds the image and waits for the `production-portal` environment's
+approval. A push that changes only the portal's app, its page (`apps/portal-web`) or its workflow
+starts no facilitator deploy; one that changes `packages/api-keys` starts both. By hand: **Run
+workflow** on `deploy/production` (once `main` has its stub, step 9 above), or on the server,
+through the same lock:
+
+```sh
+DIGEST=   # the image to deploy: sha256: and 64 hex digits
+sudo -u x402-deploy env SSH_ORIGINAL_COMMAND="$DIGEST" /srv/x402/production/deploy-portal.sh
+sudo tail -F /var/log/x402/production/portal-deploy.log
+```
+
+`deploy-portal.sh` refuses anything but a digest. The deploy unit pulls the image, restarts
+`x402-portal@production` on it and waits up to 60 s for `/health`, which answers once the
+database does. An image that doesn't is replaced by `portal.digest.good`, and the deploy fails.
+The restart takes seconds: open requests get 10 s to finish, and a call from the hub in that
+moment fails, so its member tries again.
+
+- **With a facilitator deploy in the same promotion:** each waits for its own approval. When the
+  promotion carries a migration the backend needs, approve the facilitator's first and the
+  portal's once that has ended: the backend runs no migration.
+- **Rollback by hand:** an earlier digest, from the portal's own deployments:
+
+  ```sh
+  gh api 'repos/rumblefishdev/stellar-x402/deployments?environment=production-portal&per_page=10' \
+    --jq '.[] | "\(.id) \(.sha[:7]) \(.created_at)"'
+  ID=   # the id of the deployment to go back to, from the list
+  gh api "repos/rumblefishdev/stellar-x402/deployments/${ID:?}/statuses" --jq '.[].description' |
+    grep sha256
+  DIGEST=   # the digest that printed
+  gh workflow run deploy-portal-production.yml --ref deploy/production -f digest="${DIGEST:?}"
+  ```
+
+  Without the stub on `main`, deploy that digest on the server instead (above). The older image
+  runs on the newer schema: every migration is expand/contract (Rollback, above).
+
+- **A change to `portal.compose.yaml` or its units:** the playbook, then
+  `sudo systemctl restart x402-portal@production`. The facilitator's units read none of them, but
+  they are under `deploy/`, so their promotion starts a facilitator deploy too (The playbook).
+
+### Changing the token's secret
+
+This backend keeps the value it read until it restarts; the hub picks up a new `current` within 5
+minutes. So a new key must be in the server's copy, and the backend restarted on it, **before**
+the hub can sign with it. Four steps, with the variables of step 5 above set. Each is safe to
+stop after, but not part-way through step 2: if step 2 fails or is cut off, run it again before
+going on. Steps 2 and 4 restart the backend, and for those few seconds the hub's calls fail and
+its tab shows x402 as unavailable; at no other moment is a good token refused.
+
+Each step builds the new JSON from the secret as stored, never from shell variables, so a step
+can be run in a new shell, and checks it with `KEYS_OK` before the put. No step prints a key or
+any part of one. A step that stops says why, in its own words (`stopped: …`) or in those of the
+tool that failed (`aws`, `ssh`, `systemd-creds`), and one that stops before its put changes
+nothing in AWS. A step run out of turn stops and says what to run instead: step 1 while a change
+is under way (the stored secret has a `previous`), step 2 between steps 3 and 4 (step 4), step 3
+before the backend has started on the stored secret (step 2), and step 3 once it has run (step
+4). Anywhere else step 2 can be run again; it is how the server catches up with AWS.
+
+1. **Add the new key as `previous`.** The hub keeps signing with the old one. The step stops
+   when the stored secret already has a `previous`: a change is under way, and a second new key
+   would replace the one step 2 may have given the backend.
+
+   ```bash
+   (
+     set -euo pipefail
+     STORED=$(aws secretsmanager get-secret-value --profile stellar --region eu-central-1 \
+         --secret-id "$SECRET_ID" --query SecretString --output text \
+       | jq -ce "if ($KEYS_OK) then . else error(\"refused\") end" 2>/dev/null) ||
+       { echo "stopped: the stored secret was not read, or not as it must be" >&2; exit 1; }
+     printf %s "$STORED" | jq -e 'has("previous") | not' > /dev/null || {
+       echo "stopped: a change is under way (the stored secret has a previous key); finish it from step 2, or drop it with step 4" >&2
+       exit 1
+     }
+     NEW=$(openssl rand -base64 32) || { echo "stopped: openssl failed; nothing was put" >&2; exit 1; }
+     JSON=$(printf %s "$STORED" | NEW="$NEW" jq -ce '{current} + {previous: env.NEW}' 2>/dev/null \
+       | jq -ce "if ($KEYS_OK) then . else error(\"refused\") end" 2>/dev/null) ||
+       { echo "stopped: the new secret is not as it must be; nothing was put" >&2; exit 1; }
+     printf %s "$JSON" | aws secretsmanager put-secret-value --profile stellar --region eu-central-1 \
+       --secret-id "$SECRET_ID" --secret-string file:///dev/stdin --query VersionId --output text
+   )
+   ```
+
+2. **Copy it to the server and restart the backend,** so it accepts both keys: the copy of step 5
+   above, then the restart. It stops first, changing nothing, between steps 3 and 4, when the
+   backend's copy is the stored secret with its two keys exchanged: a copy then would make step 3
+   look not yet run, and a second step 3 would swap the keys back.
+
+   ```bash
+   (
+     set -euo pipefail
+     : "${SERVER:?set SERVER first}"
+     JSON=$(aws secretsmanager get-secret-value --profile stellar --region eu-central-1 \
+         --secret-id "$SECRET_ID" --query SecretString --output text \
+       | jq -ce "if ($KEYS_OK) then . else error(\"refused\") end" 2>/dev/null) ||
+       { echo "stopped: the stored secret was not read, or not as it must be" >&2; exit 1; }
+     # After step 3 the copy the backend started on is the stored secret with its keys exchanged,
+     # in the bytes step 3 compares; empty with no previous.
+     SWAP=$(printf %s "$JSON" | jq -ce '{current: .previous, previous: .current}' 2>/dev/null \
+       | jq -ce "if ($KEYS_OK) then . else error(\"refused\") end" 2>/dev/null) || SWAP=
+     running=$(ssh "$SERVER" 'sudo sha256sum /run/x402/production/portal-hub-token-secret' 2>/dev/null \
+       | cut -d' ' -f1) || running=
+     [ -z "$SWAP" ] || [ "$(printf %s "$SWAP" | shasum -a 256 | cut -d' ' -f1)" != "$running" ] ||
+       { echo "stopped: step 3 has run; go on to step 4, then run this step" >&2; exit 1; }
+     printf %s "$JSON" | ssh "$SERVER" 'sudo systemd-creds encrypt --with-key=host --name=portal-hub-token-secret - /srv/x402/production/creds/portal-hub-token-secret.cred' ||
+       { echo "stopped: writing the server's copy failed; run this step again" >&2; exit 1; }
+     here=$(printf %s "$JSON" | shasum -a 256 | cut -d' ' -f1)
+     there=$(ssh "$SERVER" 'sudo systemd-creds decrypt --name=portal-hub-token-secret /srv/x402/production/creds/portal-hub-token-secret.cred - | sha256sum' | cut -d' ' -f1) ||
+       { echo "stopped: the server's copy was not read back; run this step again" >&2; exit 1; }
+     [ "$here" = "$there" ] ||
+       { echo "stopped: the server's copy is not the stored secret; run this step again" >&2; exit 1; }
+     printf %s "$JSON" | jq -c keys   # ["current","previous"]: what the server holds
+     ssh "$SERVER" 'sudo systemctl restart x402-portal@production' ||
+       { echo "stopped: the backend was not restarted; run this step again" >&2; exit 1; }
+     # The restart stopped the old process before the new one read the copy, so a 401 now is the
+     # new one's. Every 2 s for up to 60 s, as a deploy waits.
+     for _ in $(seq 30); do
+       code=$(curl -s -o /dev/null -A '' -w '%{http_code}' -H 'Authorization: Bearer v1.probe.probe' \
+         https://x402-portal.sorobanscan.com/api/hub/v1/account) || code=000
+       if [ "$code" = 401 ]; then echo "restarted on it: the backend answers 401"; exit 0; fi
+       sleep 2
+     done
+     echo "stopped: the backend doesn't answer since its restart ($code); portal.log says why" >&2
+     exit 1
+   )
+   ```
+
+   The subshell prints the copy's field names, never their values, restarts the backend only once
+   the server's copy is the stored secret, and then calls it with a made-up token until it answers.
+   A `401` says only that a backend is up; that it restarted on the copy is the subshell ending
+   without `stopped:`, on `restarted on it: the backend answers 401`. A backend that doesn't come
+   back leaves `startup_failed` in `portal.log` with the reason. After any `stopped:`, run the step
+   again. A deploy or a reboot between the steps reads the same credential again.
+
+3. **Swap them: the new key becomes `current`.** Within 5 minutes the hub signs with it, and the
+   backend accepts it as `previous` since step 2. With no `previous` in the stored secret the step
+   stops: there is nothing to swap. Before the swap it compares a SHA-256 of the stored secret
+   with one of the copy the running backend started on,
+   `/run/x402/production/portal-hub-token-secret`, which `x402-creds` decrypts from the
+   credential at each start, so a step 2 cut off before its restart doesn't pass. It puts nothing
+   unless the two are the same: the backend would not accept the key the hub is about to sign
+   with. When they differ it says which step to run: step 4 when the backend's copy is the stored
+   secret with its two keys exchanged, as this step leaves them, and step 2 otherwise. Nothing
+   changes on the server.
+
+   ```bash
+   (
+     set -euo pipefail
+     : "${SERVER:?set SERVER first}"
+     STORED=$(aws secretsmanager get-secret-value --profile stellar --region eu-central-1 \
+         --secret-id "$SECRET_ID" --query SecretString --output text \
+       | jq -ce "if ($KEYS_OK) then . else error(\"refused\") end" 2>/dev/null) ||
+       { echo "stopped: the stored secret was not read, or not as it must be" >&2; exit 1; }
+     # The swap, checked as every put is, in the bytes step 2 copies.
+     JSON=$(printf %s "$STORED" \
+       | jq -ce '{current: .previous, previous: .current}' 2>/dev/null \
+       | jq -ce "if ($KEYS_OK) then . else error(\"refused\") end" 2>/dev/null) ||
+       { echo "stopped: the stored secret has no previous to swap in" >&2; exit 1; }
+     here=$(printf %s "$STORED" | shasum -a 256 | cut -d' ' -f1)
+     swapped=$(printf %s "$JSON" | shasum -a 256 | cut -d' ' -f1)
+     there=$(ssh "$SERVER" 'sudo sha256sum /run/x402/production/portal-hub-token-secret' | cut -d' ' -f1) ||
+       { echo "stopped: the backend's copy was not read; is x402-portal@production running?" >&2; exit 1; }
+     if [ "$here" != "$there" ]; then
+       if [ "$swapped" = "$there" ]; then
+         echo "stopped: step 3 has already run; go on to step 4" >&2
+       else
+         echo "stopped: the server doesn't hold the stored secret; run step 2, then step 3" >&2
+       fi
+       exit 1
+     fi
+     printf %s "$JSON" | aws secretsmanager put-secret-value --profile stellar --region eu-central-1 \
+       --secret-id "$SECRET_ID" --secret-string file:///dev/stdin --query VersionId --output text
+   )
+   ```
+
+4. **After at least 10 minutes, drop the old key,** then run step 2's commands again, so the
+   backend no longer accepts it; its check then prints `["current"]`. The hub's cache is 5
+   minutes, and a read that started just before step 3 can land after it, so 5 leaves no margin.
+   While the hub still signs with the old key, dropping it here refuses every hub call. Run before
+   step 3, it drops the new key instead, which abandons the change; run step 2's commands after it
+   all the same.
+
+   ```bash
+   (
+     set -euo pipefail
+     JSON=$(aws secretsmanager get-secret-value --profile stellar --region eu-central-1 \
+         --secret-id "$SECRET_ID" --query SecretString --output text \
+       | jq -ce '{current}' 2>/dev/null \
+       | jq -ce "if ($KEYS_OK) then . else error(\"refused\") end" 2>/dev/null) ||
+       { echo "stopped: the stored secret was not read, or not as it must be" >&2; exit 1; }
+     printf %s "$JSON" | aws secretsmanager put-secret-value --profile stellar --region eu-central-1 \
+       --secret-id "$SECRET_ID" --secret-string file:///dev/stdin --query VersionId --output text
+   )
+   ```
+
+`put-secret-value` replaces the whole JSON, and each put prints the new version's id. Never
+`echo` a key. If a step goes wrong, this backend refuses the hub's tokens. The hub's x402 tab
+shows each refusal as a `502` (the hub turns a `401` or `403` from a product into one), and
+`portal.log` has a `hub_call_refused` with `invalid_token` for each call. The hub's calls come
+from a few addresses, and a token that doesn't verify counts against its address: past 30 such
+calls in a minute from one, the backend answers `429 rate_limited` instead, with one
+`hub_strangers_limited` a window and no `hub_call_refused` (`apps/portal/src/app.ts`), and the
+tab says "Too many requests for your account". So a burst of 429s on the tab, with
+`hub_call_refused` lines just before them, right after a change of the secret is the same fault.
+Put back the previous version, then run step 2's commands so the server holds it too:
+
+```bash
+aws secretsmanager list-secret-version-ids --profile stellar --region eu-central-1 \
+    --secret-id "$SECRET_ID" \
+    --query 'Versions[].[VersionId, join(`,`, VersionStages), CreatedDate]' \
+    --output text
+PREV_ID=   # the version on the line with AWSPREVIOUS, the good one
+BAD_ID=    # the version on the line with AWSCURRENT, the bad one
+aws secretsmanager update-secret-version-stage --profile stellar --region eu-central-1 \
+    --secret-id "$SECRET_ID" --version-stage AWSCURRENT \
+    --move-to-version-id "${PREV_ID:?}" --remove-from-version-id "${BAD_ID:?}"
+```
+
+**Skipping steps 1 and 2** (writing `{current: NEW, previous: OLD}` and copying it afterwards)
+leaves a window, from the hub's next read to the restart, in which the backend refuses every hub
+call.
+
+### Its other secrets
+
+- **The key encryption key** opens the sealed copies in `api_key_copies`, which let the hub show
+  an account its key again. It has no backup and no rotation yet. Lost or replaced, every key
+  still works, but none can be shown: `account` answers `showable: false`, so the tab offers no
+  Show, `reveal` answers `409 key_not_viewable`, and the backend logs `hub_key_copy_unreadable`.
+  A seller who has lost the key revokes it and waits for the next calendar month (UTC) for a new
+  one (0106 decision 24). With a database dump it gives every active key the portal issued; a
+  dump alone gives none. If both leaked, stop the backend, revoke every key the portal issued and
+  delete the copies, as `postgres`; each of those accounts then waits for the next calendar month
+  for a new key:
+
+  ```sh
+  sudo systemctl stop x402-portal@production
+  cd /srv/x402/production
+  sudo FACILITATOR_IMAGE=unused docker compose exec -T postgres-testnet \
+    psql -U postgres -d x402 -v ON_ERROR_STOP=1 <<'SQL'
+  BEGIN;
+  UPDATE api_keys SET state = 'revoked', revoked_at = (extract(epoch FROM now()) * 1000)::bigint
+    WHERE owner LIKE 'discord:%' AND state = 'active';
+  DELETE FROM api_key_copies;
+  COMMIT;
+  SQL
+  ```
+
+  Then replace the key, a new credential over the old one, and start the backend again:
+
+  ```sh
+  openssl rand -base64 32 | tr -d '\n' |
+    sudo systemd-creds encrypt --with-key=host --name=portal-key-encryption-key - \
+      /srv/x402/production/creds/portal-key-encryption-key.cred
+  sudo systemctl start x402-portal@production
+  ```
+
+- **The database password:** with the role (step 3 above).
+
+### Logs
+
+One JSON object per line in `/var/log/x402/production/portal.log`, shipped as `portal` in
+`/x402/production/app`. A call is named by its token's `jti` and `act`, a key by its `key_id`,
+the first 12 hex digits of its SHA-256; never a key, a token, a secret or a Discord id. No alarm
+reads them yet: what watches the backend is the uptime probe on its `/health` (Monitoring, below).
+
+| Event                                                           | Level | Means, and what to do                                                                                                                                                                     |
+| --------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `startup_failed`                                                | error | the process exits: `problems` names each bad setting, never its value, or `error` says the database is out of reach or lacks a table. **Act**                                             |
+| `hub_call_failed`, `pool_error`, `not_ready`                    | error | the database failed (`502 key_unavailable`, or `issue`'s `outcome: failed`), or something else in a call (`500 internal`). **Act** on a run of them                                       |
+| `hub_key_copy_unreadable`                                       | error | a copy exists and doesn't open: the wrong `KEY_ENCRYPTION_KEY`, or a damaged row. **Act**                                                                                                 |
+| `shutdown_failed`                                               | error | a stop didn't end cleanly, and the process exited 1                                                                                                                                       |
+| `hub_call_refused` with `invalid_token`                         | warn  | **expected from strangers**. Only a run of them while the hub's x402 tab fails means the two sides disagree: the secret changed on one side only, or the two clocks more than 5 s apart   |
+| `hub_call_refused` with `action_not_allowed`                    | warn  | the hub doesn't send one: a hub bug, or a captured token replayed. Look                                                                                                                   |
+| `hub_strangers_limited`                                         | warn  | one address (an IPv6 /56) is over 30 calls a minute with tokens that don't verify; once per window. Right after a change of the secret, the hub's own calls (Changing the token's secret) |
+| `hub_key_issued`, `hub_key_revealed`, `hub_key_revoked`         | info  | the key events, with `jti`, `act` and `key_id`                                                                                                                                            |
+| `hub_issue_refused`, `hub_reveal_refused`, `hub_revoke_refused` | info  | what a call came to, its `outcome` (`has_key`, `capped`, `too_young`, `no_key`, …): the account's state, not a fault                                                                      |
+| `hub_account_answered`                                          | info  | the `state` `account` gave                                                                                                                                                                |
+| `listening`                                                     | info  | started, with its port                                                                                                                                                                    |
+
+A call with no bearer at all is logged at `debug` only, which the backend doesn't write (its
+`LOG_LEVEL` is `info`). `startup_failed` repeats: the unit restarts the process after 5 s, up to 5
+starts in 300 s, then stays `failed`. Everything but the strangers' refusals:
+
+```sh
+sudo grep -E '"level":"(error|warn)"' /var/log/x402/production/portal.log |
+  grep -v '"reason":"invalid_token"' | tail -n 20
+```
+
+### Cloudflare
+
+The hub's backend calls `https://x402-portal.sorobanscan.com` through Cloudflare, and so does a
+developer's local hub tried on production's backend. HTTPS ends at Cloudflare (ADR 0011), so it
+sees each answer, `reveal`'s key included. Rules on this hostname must let those calls through:
+
+- **Browser Integrity Check off** for the hostname, as for the facilitator's: it answers a
+  request whose headers don't look like a browser's with error 1010, and only a server calls this
+  one (0106 decision 32). A rule beside `x402_facilitator_no_bic` in `soroban-infrastructure`'s
+  `cloudflare/x402.tf`, by pull request there, not by hand, so Terraform's state keeps agreeing.
+  That file's comment says the portal's clients are browsers: no longer so. Not applied on
+  2026-11-18.
+- **No challenge, and Bot Fight Mode off** (it is off on the zone, 0026): the hub's backend can't
+  answer one, and a challenge page isn't the contract's JSON.
+- **No rate limit by address that counts the hub as one caller.** Every member's call comes from
+  the hub's few addresses. The backend limits 60 calls a minute by account, and 30 by address for
+  calls whose token doesn't verify, reading the address from `CF-Connecting-IP`
+  (`CLIENT_IP=cloudflare`) and counting an IPv6 one by its /56: the container publishes no port,
+  so only the tunnel reaches it. A rate rule on this hostname must exempt `/api/hub/*` or sit
+  above the hub's peak.
+- **The `Authorization` header reaches the backend unchanged:** it carries the token.
+
+### A key, end to end
+
+A member presses "Get API Key" in the hub's x402 tab:
+
+1. The hub sends the browser through Discord again and checks the account: a member of Stellar
+   Developers who has cleared Membership Screening, and old enough. Then its backend signs a token
+   for `issue`, `sub` `discord:<id>`, `aud` `x402`, and calls
+   `POST https://x402-portal.sorobanscan.com/api/hub/v1/key/issue`.
+2. This backend checks the token's MAC under `current` or `previous` and its claims and time, its
+   `act` against the route, and the account's limit. Then the account's age, from its Discord id
+   (`MIN_ACCOUNT_AGE_MINUTES`, 5), and its keys: an active one is `has_key`, a revoke this month
+   `capped`. Otherwise it makes a key, its SHA-256 and the sealed copy, writes both in one
+   transaction, logs `hub_key_issued` with the `jti` and `key_id`, and answers
+   `{"outcome":"issued"}`.
+3. The hub logs the same `jti` with `discord:<id>`, and the browser lands on
+   `/api/dashboard/x402?issue=issued`.
+
+Show is a call with a `reveal` token: the copy is opened and the key answered (`hub_key_revealed`).
+Regenerate is one with a `revoke` token: the key is marked revoked and its copy deleted in one
+transaction (`hub_key_revoked`), and on pubnet the facilitator refuses it from its next request
+(0105); no new key until the next calendar month (UTC). The `jti` ties one call across both logs:
+the hub's names the account, this one the key. The account of a `key_id`:
+
+```sh
+KEY_ID=   # the 12 hex digits from the log line
+cd /srv/x402/production
+sudo FACILITATOR_IMAGE=unused docker compose exec -T postgres-testnet psql -U postgres -d x402 \
+  -c "SELECT owner, state, revoked_at FROM api_keys WHERE key_hash LIKE '${KEY_ID:?}%'"
+```
+
+Trying it touches real keys: a revoke holds back a new key until the next calendar month, so try
+revoke last, or with a second Discord account.
+
+### Monitoring
+
+An uptime probe in AWS, `x402-production-portal-uptime-probe`, reads
+`https://x402-portal.sorobanscan.com/health` through Cloudflare every minute and publishes
+`portal_ready` (1 for a 200 with `{"ready":true}`) to `x402-watch`; its alarm is `portal-uptime`
+(7 minutes in a row, a missing point counted as down), in the group `portalUptime`. A second probe,
+`x402-production-hub-uptime-probe`, reads the hub's `https://sorobanscan.com/api/hub/me` through
+the explorer's CloudFront, the whole path a member's browser takes, and publishes `hub_ready` (1
+for a 200 with `{"authenticated":false}`); its alarm is `hub-uptime`, in `hubUptime`. Both come
+with the Uptime stack (`infra/`, 0106 decision 21); what each alarm means and what to do is in
+[monitoring, Uptime](monitoring.md#uptime).
+
+Both groups are off when the probes are first deployed, since an alarm made before its probe has
+data pages at once:
+
+- **`portalUptime`**, once the portal's probe has published for a few minutes: from `infra/`,
+  `make deploy-production-uptime`, then `make check-series GROUP=portalUptime` until it passes,
+  then `"portalUptime": true` in `infra/envs/production.json`, `make deploy-production-alarms` and
+  `make fire-test` (infra/README.md, Alarm groups).
+- **`hubUptime`**, once the hub's backend is routed in the explorer's distribution (the hub's
+  runbook, step 4) and the probe reads 1: until then the distribution answers `/api/hub/me` with
+  a `302` to `/api/`, which the probe reads as down. The same steps, with `GROUP=hubUptime`; first
+  check the probe's last lines say `"ready":1` (`/aws/lambda/x402-production-hub-uptime-probe`).
+
+The hub's own alarms, on its Lambda's `Throttles` and `Url5xxCount`, are being added in its repo
+(`rumblefishdev/sorobanscan-api-portal`), publishing to this repo's `x402-production-alarms` topic,
+so they reach `#stellar-x402-bot` beside these. Later, not built: a watchdog for this backend,
+metric filters with alarms on its log lines (`startup_failed`, `hub_call_failed`,
+`hub_key_copy_unreadable`), and an alarm on the hub's Lambda nearing its concurrency
+(`ConcurrentExecutions`), which `Throttles` sees only once it is reached.
+
+### What this backend lacks
+
+- A watchdog: Docker marks a hung backend `unhealthy` and nothing restarts it; the probe above
+  sees it, and a person restarts it. Its logs ship (`portal` in `app`), and no metric filter or
+  alarm reads them yet.
+- The page's own publish, `aws s3 sync` to the explorer's bucket, and the page's Basic Auth
+  (0106 decisions 1 and 6): both are the explorer's distribution's.
+- A gate on the backend's hostname: there is none, on purpose. Every route but `/health` needs
+  the hub's token (0106 decisions 22 and 33).
+
+## The metrics agent
+
+`x402-metrics.service` runs `/srv/x402/metrics`: Prometheus in agent mode and node_exporter (ADR
+0011, "Metrics"). The agent scrapes node_exporter and itself every 15 s and sends the samples to
+the monitoring VM, `https://metrics.sorobanscan.com/api/v1/write`, with a client certificate from
+the ClickHouse project's CA. Its write-ahead log, the volume `x402-metrics-wal`, holds the samples
+while the VM can't be reached. node_exporter's textfile collector reads the host probe's files in
+`/var/lib/x402/textfile`: `host-probe.prom`, the gauges of its last run, replaced whole each
+minute, so its age is the probe's; and one file per counter (`watchdog_restarts_total.prom`,
+`facilitator_failures_total.prom`), the total since the file was made, written when the event
+happens and rewritten by every run, so every file's age is the probe's. The facilitator's
+`/metrics` joins at the switch (0139 step 7). ClickHouse's own endpoint is on, but listens on
+127.0.0.1 inside `app-clickhouse-1` (the explorer's
+`crates/db-clickhouse/config.d/prometheus.xml`), so the agent can't reach it yet: only
+`docker exec` or a scraper in that container's network namespace can. The VM lets only the CNs in
+`metrics_writer_cns` write (soroban-infrastructure, `monitoring/`).
+
+**The certificate,** as the CloudWatch agent's: the key was made on the server on 2026-11-18 as
+`/srv/x402/metrics/creds/metrics-agent-key.2026-11-18.cred` (`metrics-agent-key.cred` links to
+it), with `--name=metrics-agent-key`, and its CSR (`CN=x402-metrics-agent-production`,
+`CA:FALSE`, `digitalSignature`, `clientAuth`) was signed by the CA for 365 days. The certificate
+is `deploy/ansible/files/metrics-agent-production.crt`; the playbook checks it and that it is the
+key's before it copies it. Issued by `soroban-internal-ca-2026`, serial
+`03869E42EE8A16EB9F0060AABC2C0811`, valid until 2027-11-18 14:24:12 UTC. Renewal follows the
+CloudWatch agent's, with these names, except its last step: the playbook restarts the agent when
+it copies the new certificate, so there is no `systemctl start` to run.
+
+**The admin step,** as `deploy` with sudo, after the playbook run from that merge:
+
+```sh
+sudo systemctl start x402-metrics
+tail -n 20 /var/log/x402/metrics/agent.log   # no "remote_write" errors
+cd /srv/x402/metrics && sudo docker compose exec -T agent \
+  wget -qO- localhost:9090/metrics | grep prometheus_remote_storage_samples_total
+```
+
+On the VM, in Prometheus (`ssh -L 9090:localhost:9090 monitoring`), each of these answers for
+`ch-prod-01`: `up{job="node"} == 1`, `node_textfile_scrape_error == 0`, and
+`time() - node_textfile_mtime_seconds < 120` for all three of the probe's files.
 
 ## Not here yet
 

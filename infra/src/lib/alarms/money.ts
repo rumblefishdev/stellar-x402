@@ -8,12 +8,12 @@
 // section posts each finding to the topic itself and these are its backstop (decision 64).
 import type { EnvironmentConfig } from "../config.js";
 import { names } from "../names.js";
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
 const WATCH_SILENT = "Keeps its state; watch-errors and watch-no-invocations cover the check.";
 const xlm = (stroops: number) => `${stroops / 10_000_000} XLM`;
 
-export function addMoneyAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
+export function addMoneyAlarms(f: Alarms, c: EnvironmentConfig): void {
   const t = c.thresholds;
   const n = names(c.envName);
 

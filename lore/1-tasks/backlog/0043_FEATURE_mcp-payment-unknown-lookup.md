@@ -6,7 +6,7 @@ status: backlog
 milestone: 2
 related_adr: []
 related_tasks: ["0037"]
-tags: [mcp, payments, priority-low, effort-medium]
+tags: [mcp, dev-tools, priority-low, effort-medium]
 links: []
 history:
   - date: "2026-10-13"
@@ -118,7 +118,7 @@ Facts the round rests on, to check in the grilling:
 - An absent nonce means nothing once the entry's TTL ran out (the later of the expiry and the
   minimum temporary TTL, above): the tool needs the signing ledger to refuse a verdict past it.
 - The 300 s cap checks the seller's `maxTimeoutSeconds`, not the ledger signed
-  (`packages/mcp/src/pay.ts:125`); upstream signs from the RPC's latest ledger and Horizon's mean
+  (`apps/mcp-local/src/pay.ts:125`); upstream signs from the RPC's latest ledger and Horizon's mean
   ledger time, so the signed window can be longer. Decoding the payload for the nonce also gives
   the signed expiry to check before sending. **Decided 2026-11-09:** the buyer checks the ledgers
   it signed before it sends, here, in this task; nothing goes upstream for now (upstream's open
