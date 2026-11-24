@@ -1,0 +1,23 @@
+{
+  "name": "@stellar-x402/search-model",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The search model's container: turns a listing's or a query's text into its vector (ADR 0014)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .turbo",
+    "fetch-model": "node scripts/fetch-model.mjs",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@huggingface/tokenizers": "^0.2.0",
+    "onnxruntime-node": "1.31.1"
+  }
+}
