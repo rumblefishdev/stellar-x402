@@ -100,7 +100,9 @@ const SEARCH_RESOURCES_OUTPUT = {
 /**
  * The parameter a catalog's `400` names, read from upstream's error: its client throws a plain
  * Error whose message is `… failed (<status>): <body>`, and our route's body is
- * `{"error":"bad_request","param":"<name>"}`. Anything else gives `undefined`.
+ * `{"error":"bad_request","param":"<name>"}`. Anything else gives `undefined`. Only a name of the
+ * tool's own inputs is kept, `""` otherwise: the body is the catalog's text, and the agent's model
+ * reads the message.
  */
 function refusedParam(error: unknown): string | undefined {
   const answer = /failed \(400\): (.*)$/s.exec(String(error));
@@ -108,7 +110,9 @@ function refusedParam(error: unknown): string | undefined {
   try {
     const body: unknown = JSON.parse(answer[1]!);
     const param = (body as { param?: unknown }).param;
-    return typeof param === "string" ? param : "";
+    return typeof param === "string" && Object.hasOwn(SEARCH_RESOURCES_INPUT.shape, param)
+      ? param
+      : "";
   } catch {
     // A 400 without our route's body still names the agent's input as the cause.
     return "";
