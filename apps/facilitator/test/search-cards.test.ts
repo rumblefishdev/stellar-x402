@@ -7,7 +7,6 @@ import type { SearchCard, SearchCardStore, StaleListing } from "../src/ports/ind
 
 const stale = (seq: string, description: string): StaleListing => ({
   seq,
-  checkedAt: 7,
   resource: {
     resource: `https://seller.example/${seq}`,
     type: "http",
@@ -27,6 +26,7 @@ function memoryStore(listings: StaleListing[], fail?: { write?: Error; seq?: str
     write: async (card) => {
       if (fail?.write && (fail.seq === undefined || fail.seq === card.seq)) throw fail.write;
       written.push(card);
+      return true;
     },
   };
   return { store, written };
@@ -45,13 +45,11 @@ describe("search card writer", () => {
     expect(written).toEqual([
       {
         seq: "1",
-        checkedAt: 7,
         rules: SEARCH_FIELDS_VERSION,
         fields: { name: "1", tags: "", description: "Weather", parameters: "" },
       },
       {
         seq: "2",
-        checkedAt: 7,
         rules: SEARCH_FIELDS_VERSION,
         fields: { name: "2", tags: "", description: "Stocks", parameters: "" },
       },
@@ -102,12 +100,26 @@ describe("search card writer", () => {
     );
   });
 
+  it("counts only the cards the store wrote: a card these rules already built is not", async () => {
+    const store: SearchCardStore = {
+      stale: async () => [stale("1", "Weather")],
+      write: async () => false,
+    };
+    const lines: string[] = [];
+    await createSearchCardWriter({
+      store,
+      logger: jsonLogger("debug", (line) => lines.push(line)),
+      metrics: memoryMetrics(),
+    }).runOnce();
+    expect(lines).toEqual([]);
+  });
+
   it("logs and counts a failed read of the stale listings", async () => {
     const store: SearchCardStore = {
       stale: async () => {
         throw new Error("database down");
       },
-      write: async () => {},
+      write: async () => true,
     };
     const lines: string[] = [];
     const metrics = memoryMetrics();

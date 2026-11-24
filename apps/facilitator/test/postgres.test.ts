@@ -1,6 +1,6 @@
 import { PostgresSealedKeyStore } from "@stellar-x402/api-keys";
 import { apiKeyStoreContract, sealedKeyStoreContract } from "@stellar-x402/api-keys/testing";
-import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
+import { CATALOG_KEY_VERSION, SEARCH_FIELDS_VERSION, searchFields } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
 import pg from "pg";
@@ -985,9 +985,13 @@ describe("PostgreSQL stores", () => {
        RETURNING seq`,
     );
     const seq = listing[0]!.seq;
+    // A listing stored before cards existed has none, and the loop's store names it.
+    expect(await db.stores().searchCards.stale(SEARCH_FIELDS_VERSION, 10)).toEqual([
+      { seq, resource: {} },
+    ]);
     await pool.query(
-      `INSERT INTO catalog_search (seq, checked_at, rules, name, tags, description, parameters)
-       VALUES ($1, 1, 1, 'Tides', 'ocean', 'Weather', 'city')`,
+      `INSERT INTO catalog_search (seq, rules, name, tags, description, parameters)
+       VALUES ($1, 1, 'Tides', 'ocean', 'Weather', 'city')`,
       [seq],
     );
     const words = await pool.query("SELECT words::text FROM catalog_search WHERE seq = $1", [seq]);
@@ -999,23 +1003,45 @@ describe("PostgreSQL stores", () => {
          VALUES (-1, 1, '', '', '', '')`,
       ),
     ).rejects.toThrow(/foreign key/);
-    // The store writes each field to its column, and a listing never checked keeps a null check.
+    // The store writes each field to its column.
     await db.stores().searchCards.write({
       seq,
-      checkedAt: null,
-      rules: 1,
+      rules: 2,
       fields: { name: "N", tags: "T", description: "D", parameters: "P" },
     });
     const card = await pool.query(
-      "SELECT checked_at, name, tags, description, parameters FROM catalog_search WHERE seq = $1",
+      "SELECT rules, name, tags, description, parameters FROM catalog_search WHERE seq = $1",
       [seq],
     );
     expect(card.rows).toEqual([
-      { checked_at: null, name: "N", tags: "T", description: "D", parameters: "P" },
+      { rules: 2, name: "N", tags: "T", description: "D", parameters: "P" },
     ]);
     await pool.query("DELETE FROM catalog WHERE seq = $1", [seq]);
     const left = await pool.query("SELECT count(*)::int AS n FROM catalog_search");
     expect(left.rows).toEqual([{ n: 0 }]);
+  });
+
+  it("writes a listing's search card in the catalog's own write, and only when the listing changes (0120)", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const card = async () =>
+      (await pool.query("SELECT rules, name, tags, description, parameters FROM catalog_search"))
+        .rows;
+    const listing = (checkedAt: number, description: string) => {
+      const entry = catalogEntry();
+      return { ...entry, checkedAt, resource: { ...entry.resource, description } };
+    };
+    const fieldsOf = (description: string) => ({
+      rules: SEARCH_FIELDS_VERSION,
+      ...searchFields(listing(1, description).resource),
+    });
+    expect(await catalog.upsert(listing(1, "Weather"))).toBe("inserted");
+    expect(await card()).toEqual([fieldsOf("Weather")]);
+    expect(await catalog.upsert(listing(2, "Tides"))).toBe("updated");
+    expect(await card()).toEqual([fieldsOf("Tides")]);
+    // A check that started earlier writes neither the listing nor its card.
+    expect(await catalog.upsert(listing(1, "Stocks"))).toBe("stale");
+    expect(await card()).toEqual([fieldsOf("Tides")]);
   });
 
   it("applies the migrations once when two runs race", async () => {

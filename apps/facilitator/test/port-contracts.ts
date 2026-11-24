@@ -1,4 +1,4 @@
-import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
+import { CATALOG_KEY_VERSION, SEARCH_FIELDS_VERSION } from "@stellar-x402/bazaar";
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
@@ -2015,50 +2015,37 @@ export function searchCardStoreContract(
     const fields = { name: "n", tags: "", description: "", parameters: "" };
     const urls = async (rules: number, limit = 10) =>
       (await cards.stale(rules, limit)).map((listing) => listing.resource.resource);
-    const writeAll = async (rules: number) => {
-      for (const listing of await cards.stale(rules, 10))
-        await cards.write({ seq: listing.seq, checkedAt: listing.checkedAt, rules, fields });
-    };
+    const other = SEARCH_FIELDS_VERSION + 1;
 
-    it("names a listing without a card, then not once its card is written", async () => {
+    it("finds a stored listing's card at these rules, and names it to other rules", async () => {
       await list("https://a.example", 1);
-      const [stale] = await cards.stale(1, 10);
-      expect(stale).toMatchObject({ checkedAt: 1, resource: { resource: "https://a.example" } });
-      await writeAll(1);
-      expect(await urls(1)).toEqual([]);
-    });
-
-    it("names a listing again once it is checked again, or the rules change", async () => {
-      await list("https://a.example", 1);
-      await list("https://b.example", 1);
-      await writeAll(1);
-      await list("https://a.example", 2);
-      expect(await urls(1)).toEqual(["https://a.example"]);
-      await writeAll(1);
-      expect(await urls(2)).toEqual(["https://a.example", "https://b.example"]);
-    });
-
-    it("returns at most `limit` listings, those without a card first, then in catalog order", async () => {
-      for (const host of ["a", "b", "c"]) await list(`https://${host}.example`, 1);
-      expect(await urls(1, 2)).toEqual(["https://a.example", "https://b.example"]);
-      await writeAll(1);
-      await list("https://d.example", 1);
-      // Every card is older than rules 2, and the new listing, with none, still comes first.
-      expect(await urls(2, 2)).toEqual(["https://d.example", "https://a.example"]);
+      expect(await urls(SEARCH_FIELDS_VERSION)).toEqual([]);
+      expect(await cards.stale(other, 10)).toMatchObject([
+        { resource: { resource: "https://a.example" } },
+      ]);
     });
 
     it("names a card other rules built, older or newer, so a rollback rewrites it", async () => {
       await list("https://a.example", 1);
-      await writeAll(2);
-      expect(await urls(1)).toEqual(["https://a.example"]);
+      const [listing] = await cards.stale(other, 10);
+      expect(await cards.write({ seq: listing!.seq, rules: other, fields })).toBe(true);
+      expect(await urls(other)).toEqual([]);
+      expect(await urls(SEARCH_FIELDS_VERSION)).toEqual(["https://a.example"]);
     });
 
-    it("replaces a listing's card", async () => {
+    it("returns at most `limit` listings, in catalog order", async () => {
+      for (const host of ["a", "b", "c"]) await list(`https://${host}.example`, 1);
+      expect(await urls(other, 2)).toEqual(["https://a.example", "https://b.example"]);
+    });
+
+    it("never writes over a card these rules built, which the listing's own write may have", async () => {
       await list("https://a.example", 1);
-      const [listing] = await cards.stale(1, 10);
-      await cards.write({ seq: listing!.seq, checkedAt: 1, rules: 1, fields });
-      await cards.write({ seq: listing!.seq, checkedAt: 1, rules: 2, fields });
-      expect(await urls(2)).toEqual([]);
+      const [listing] = await cards.stale(other, 10);
+      expect(await cards.write({ seq: listing!.seq, rules: SEARCH_FIELDS_VERSION, fields })).toBe(
+        false,
+      );
+      expect(await cards.write({ seq: listing!.seq, rules: other, fields })).toBe(true);
+      expect(await cards.write({ seq: listing!.seq, rules: other, fields })).toBe(false);
     });
   });
 }
