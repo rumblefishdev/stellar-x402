@@ -773,7 +773,8 @@ listings that sellers write. Its first part ranks by words alone; the part by me
   through the discovery pool of 3 connections, apart from `/settle`'s, inside `/discovery/*`'s
   per-IP limit (ADR 0007). A cursor whose rank PostgreSQL can't hold is refused with `400`.
 - **Residual risk:** The queries share the database's CPU with payments. A client within its
-  limit can keep the discovery pool busy, which slows the database for every route. The cap bounds
-  the words, not the listings they match: on a catalog where every word matches nearly every
-  listing, 32 words took about 2 s at 10,000 listings, the pool's statement timeout, so such a
-  query answers 500 from that size on.
+  limit can keep the discovery pool busy, which slows the database for every route and makes
+  `/discovery/resources` wait too, since it reads through the same pool. The cap bounds the words,
+  not the listings they match: on 39,578 real listings (CDP's Bazaar) the 32 most common words
+  matched 39,170 of them and took 1.8–2.2 s, the pool's statement timeout, so such a query may
+  answer 500 at that size.

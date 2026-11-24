@@ -129,8 +129,9 @@ export class PostgresCatalogStore implements CatalogStore {
    * parameters 0.33 (ADR 0014, as 0134 measured it). Only the first 32 distinct words are looked
    * for: each costs a pass over every listing that holds it, so the cost grows with listings times
    * matching words. On 2,200 listings 330 common words took 1.1–1.2 s and the first 32 of them
-   * 67 ms; on a catalog where every word matches nearly every listing, 32 took 170–620 ms at 2,200
-   * and about 2 s, the discovery pool's statement timeout, at 10,000 (measured locally). The
+   * 67 ms. On 39,578 real listings (CDP's Bazaar) the 32 most common words match 39,170 of them
+   * and take 1.8–2.2 s, the discovery pool's statement timeout; ranking the matches is most of it
+   * (measured locally). The
    * longest of 0134's 40 real queries has 16 words, their median 4. The words are the listing's
    * search card's (`catalog_search`), which the upsert writes with it; a listing stored before
    * cards existed is found once the rewrite at start writes its card. The rank goes out and
