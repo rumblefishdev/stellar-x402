@@ -722,11 +722,11 @@ credential is broken. Meanwhile the Prometheus rules page no one. Its own stack,
 1. Did the Watchdog reach SNS? Two hours, one-minute periods:
 
    ```sh
-   S=$(date -u -d '-2 hour' +%FT%TZ 2>/dev/null || date -u -v-2H +%FT%TZ); E=$(date -u +%FT%TZ); aws cloudwatch get-metric-statistics --namespace AWS/SNS --metric-name NumberOfMessagesPublished --dimensions Name=TopicName,Value=x402-production-monitoring-heartbeat --statistics Sum --period 60 --start-time $S --end-time $E --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Sum]' --output text
+   S=$(date -u -d '-2 hour' +%FT%TZ 2>/dev/null || date -u -v-2H +%FT%TZ); E=$(date -u +%FT%TZ); aws cloudwatch get-metric-statistics --profile stellar --region eu-central-1 --namespace AWS/SNS --metric-name NumberOfMessagesPublished --dimensions Name=TopicName,Value=x402-production-monitoring-heartbeat --statistics Sum --period 60 --start-time $S --end-time $E --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Sum]' --output text
    ```
 
    No points since it fired: nothing reached the topic, go to 2. Points every minute and the
-   alarm still in ALARM: the alarm's own settings (`aws cloudwatch describe-alarms --alarm-names x402-production-monitoring-heartbeat`).
+   alarm still in ALARM: the alarm's own settings (`aws cloudwatch describe-alarms --profile stellar --region eu-central-1 --alarm-names x402-production-monitoring-heartbeat`).
 
 2. Is the VM up, and does Alertmanager send?
 
@@ -738,7 +738,14 @@ credential is broken. Meanwhile the Prometheus rules page no one. Its own stack,
    No SSH: the VM or Hetzner, in the Hetzner Cloud console. No `Watchdog` firing in Alertmanager:
    Prometheus doesn't evaluate or doesn't reach Alertmanager. `Watchdog` firing: Alertmanager
    doesn't publish; its log names an SNS or credential error (the VM's certificate, its signing
-   helper, or the role's IP condition after the VM's IP changed: `/x402/production/monitoring-vm-ip`).
+   helper, or the role's IP condition after the VM's IP changed). A new IP takes the parameter
+   and a deploy of the stack: CloudFormation reads the parameter only at deploy, so until then the
+   role keeps the old IP and denies every publish, the heartbeat's and the alarm topic's.
+
+   ```sh
+   aws ssm put-parameter --profile stellar --region eu-central-1 --type String --overwrite --name /x402/production/monitoring-vm-ip --value <IPv4>
+   cd infra && make deploy-production-heartbeat
+   ```
 
 3. Meanwhile, the server's agent keeps a few hours of samples in its write-ahead log, so the
    metrics come back with the VM; the CloudWatch alarms and the logs still cover the facilitator.

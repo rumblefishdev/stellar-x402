@@ -114,6 +114,35 @@ describe("the monitoring VM's role (ADR 0011, the VM's AWS identity)", () => {
     expect(ssm).toBeDefined();
     expect(JSON.stringify(allowed[0]?.Condition)).toContain(`{"Ref":"${ssm![0]}"}`);
   });
+
+  test("allows 12-hour sessions, in the role and in an enabled profile for this role", () => {
+    expect(role["MaxSessionDuration"]).toBe(43_200);
+    expect(ofType(on, "AWS::RolesAnywhere::Profile")[0]?.Properties).toMatchObject({
+      Enabled: true,
+      DurationSeconds: 43_200,
+      RoleArns: [{ "Fn::GetAtt": ["MonitoringVmRole", "Arn"] }],
+    });
+  });
+
+  test("has its own anchor, holding the committed CA certificate", () => {
+    expect(ofType(on, "AWS::RolesAnywhere::TrustAnchor")[0]?.Properties).toMatchObject({
+      Enabled: true,
+      Source: {
+        SourceType: "CERTIFICATE_BUNDLE",
+        SourceData: { X509CertificateData: expect.stringContaining("BEGIN CERTIFICATE") },
+      },
+    });
+  });
+});
+
+test("outputs the ARNs the VM is set up with, with no export another stack could pin", () => {
+  expect(Object.keys(on.Outputs ?? {}).sort()).toEqual([
+    "HeartbeatTopicArn",
+    "ProfileArn",
+    "RoleArn",
+    "TrustAnchorArn",
+  ]);
+  for (const o of Object.values(on.Outputs ?? {})) expect(o).not.toHaveProperty("Export");
 });
 
 test("the VM's CN differs from the server agent's: one CA signs both", () => {

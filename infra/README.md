@@ -87,7 +87,8 @@ make telemetry-arns             # what the server's credential helper is started
 
 Every deploy is agreed separately: the account is shared. On a fresh account or a rebuild,
 deploy Watch first, then `make check-series GROUP=watch`, `GROUP=protocol` and, after 08:00 UTC, `GROUP=upstream`, then Alarms: `--all` may create the
-alarms before the check has run, and `watch-no-invocations` pages on missing data.
+alarms before the check has run, and `watch-no-invocations` pages on missing data. Heartbeat goes in with its group off until the VM's
+Watchdog publishes to its topic, for the same reason.
 
 After a deliberate delete of the Telemetry stack, its log groups stay, and a new deploy fails on
 them until they are imported (`cdk import`) or deleted. Read the diff for removals too:
