@@ -2,11 +2,11 @@
 id: "0056"
 title: "Stop the channel sequence read at the caller's deadline"
 type: BUG
-status: active
+status: completed
 owner: okarcz
 milestone: 2
 related_adr: []
-related_tasks: ["0051", "0009"]
+related_tasks: ["0051", "0009", "0160"]
 tags: [signer-pool, payments, priority-medium, effort-small]
 links: []
 history:
@@ -23,6 +23,13 @@ history:
     status: active
     who: okarcz
     note: "Started by okarcz: Payments lane, M2."
+  - date: "2026-11-24"
+    status: completed
+    who: okarcz
+    note: >
+      PR #218 merged: failed sequence reads stop at the caller's deadline, a "no entry" channel is
+      still retired after timeoutSeconds. stkrolikiewicz's review fixed in the same PR (decisions
+      2-5). signer-pool 199 tests (+3). The unbounded ledger poll in the wait goes to 0160.
 ---
 
 # Stop the channel sequence read at the caller's deadline
@@ -49,9 +56,20 @@ This changes when a settlement gives up, so the options go to the owner before t
 
 ## Acceptance Criteria
 
-- [ ] Given an RPC outage and a call with a deadline, when its sequence read fails, then the call
-      gives up at the deadline and the channel stays in the pool
-- [ ] Given no entry for a channel, then it is still retired after `timeoutSeconds`
+- [x] Given an RPC outage and a call with a deadline, when its sequence read fails, then the call
+      gives up at the deadline and the channel stays in the pool (within one ledger poll of it;
+      the poll's own overrun is 0160)
+- [x] Given no entry for a channel, then it is still retired after `timeoutSeconds`
+
+## Implementation Notes
+
+- `readSequence` (`packages/signer-pool/src/submitter.ts`) stops at the earlier of `deadline` and
+  `timeoutSeconds` while no read has answered "no entry", and checks the window again right after
+  each wait. A non-finite deadline is ignored.
+- Tests in `packages/signer-pool/test/resilience.test.ts`: outage with failing reads and ledger
+  polls stops within a ledger of the deadline and keeps the channel; "no entry" past the deadline
+  is still quarantined at 60 s; one "no entry" then failures still reads to 60 s.
+- No existing test changed.
 
 ## Design Decisions
 
@@ -94,3 +112,7 @@ From stkrolikiewicz's review of PR #218 (okarcz, 2026-11-24):
    in a real outage, so its wait ends on the deadline (it passed with `following(giveUpAt)`
    before); a new test pins the sticky "no entry" flag (one "no entry", then failures past the
    deadline still read to `timeoutSeconds`; `noEntry = missing` used to pass the suite).
+
+## Future Work
+
+- Bound the ledger poll inside the wait between reads (0160).
