@@ -16,6 +16,9 @@ export type {
   CatalogPage,
   CatalogPayment,
   CatalogQuery,
+  CatalogSearch,
+  CatalogSearchHit,
+  CatalogSearchPosition,
   CatalogStore,
   UpsertOutcome,
 } from "./catalog-store.js";
