@@ -63,6 +63,7 @@ the alarms that read them. The [uptime figure](#the-uptime-figure) is under Upti
 | `certificate`             | `host`        | 2026-11-09 12:19 UTC | Not fired: every hour holds the real days left ([Drills](#drills))                                                                      |
 | `log-volume`              | `logVolume`   | 2026-11-09 12:19 UTC | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                   |
 | `memory`                  | `memory`      | 2026-11-09 15:11 UTC | Not fired: a `Minimum` alarm can't be faked while the agent writes real samples ([Drills](#drills))                                     |
+| `monitoring-heartbeat`    | `heartbeat`   | 2026-11-24 12:48 UTC | 2026-11-24, Alertmanager stopped ([Drills](#drills)): ALARM 13:11:33, OK 13:13:33 UTC; `make fire-test` at 12:49:12                     |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
 `breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). `log-volume` ends in
@@ -76,21 +77,20 @@ Built in `infra/` and defined in the alarm list, but their group is off in
 `infra/envs/production.json` until what they read exists. Each gets its section here, and is fired
 once, by the task that turns it on.
 
-| Alarm                  | Group           | Turned on by                                                                                     |
-| ---------------------- | --------------- | ------------------------------------------------------------------------------------------------ |
-| `account-effects`      | `watchSecurity` | 0127, the theft section                                                                          |
-| `account-state`        | `watchSecurity` | 0127, the theft section                                                                          |
-| `backup-age`           | `backups`       | 0026, once the first pgBackRest backup is made                                                   |
-| `backup-secret-read`   | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                               |
-| `channel-held`         | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred)           |
-| `hub-uptime`           | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1             |
-| `monitoring-heartbeat` | `heartbeat`     | 0139, once Alertmanager's Watchdog publishes to its topic (soroban-infrastructure `monitoring/`) |
-| `portal-uptime`        | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published                        |
-| `snapshot-age`         | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                                      |
-| `upstream-changed`     | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run                    |
-| `upstream-silent`      | `upstream`      | 0026, as above                                                                                   |
-| `wal-failing`          | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                                   |
-| `wal-stale`            | `backups`       | 0026, as above                                                                                   |
+| Alarm                | Group           | Turned on by                                                                           |
+| -------------------- | --------------- | -------------------------------------------------------------------------------------- |
+| `account-effects`    | `watchSecurity` | 0127, the theft section                                                                |
+| `account-state`      | `watchSecurity` | 0127, the theft section                                                                |
+| `backup-age`         | `backups`       | 0026, once the first pgBackRest backup is made                                         |
+| `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
+| `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
+| `hub-uptime`         | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
+| `portal-uptime`      | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
+| `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
+| `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
+| `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
+| `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
+| `wal-stale`          | `backups`       | 0026, as above                                                                         |
 
 **The logs.** The facilitator, the tunnel, Postgres, OpenBao and the deploy write their output to
 files under `/var/log/x402/` on the server, and the CloudWatch agent ships them ([runbook, The CloudWatch agent](runbook.md#the-cloudwatch-agent)):
@@ -1042,3 +1042,19 @@ reset-failed x402@production`, the agent, the credentials timer and the probe ti
   (about 3%) every minute, so a fake point can't move it without stopping the agent again.
 - **In the metrics' history:** `disk_used_percent` for `/` reads 85% from 15:15 to 15:30 on
   2026-11-09: the drill's, not a real reading.
+
+### 2026-11-24: the heartbeat
+
+- **After the deploy** that turned `heartbeat` on (12:48:08 UTC, with Alertmanager's `Watchdog`
+  publishing every minute since 11:55 through soroban-infrastructure#19): the alarm read OK at
+  12:49:12 on 5 messages a period; `make fire-test ALARM=x402-production-monitoring-heartbeat`
+  at 12:49:29, both actions to `x402-production-alarms` executed.
+- **How:** `ssh monitoring 'sudo docker stop monitoring-alertmanager-1'` at 12:50:54, and
+  `docker start` once the alarm fired. Nothing else on the VM alerts on x402 before the switch,
+  so the gap lost no alert.
+- **What happened:** ALARM at 13:11:33, 20 minutes 40 seconds after the stop, not the 10 to 15
+  that two empty 5-minute periods suggest: CloudWatch waits for late data before it reads a
+  period as missing. Alertmanager started at 13:11:50; OK at 13:13:33.
+- **What it shows:** the topic's count, the alarm's missing-data rule and its path to Slack. A
+  broken credential, the other cause, was seen for real at 11:43–11:46 before the helper's
+  `HOME` fix: `NotificationsFailed` posted it to Slack (soroban-infrastructure#19).
