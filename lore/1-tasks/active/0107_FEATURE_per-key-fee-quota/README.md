@@ -207,3 +207,21 @@ lock, so its time is every reserve's wait. Approach A stands: fallback B isn't n
 - Re-run against the test database (`127.0.0.1:15432` or `TEST_DATABASE_URL`). It uses a schema of
   its own, dropped at the end:
   `MEASURE_SPEND_COUNT=1 pnpm --filter @stellar-x402/facilitator exec vitest run test/spend-count.timing.test.ts --silent=false`
+
+**The balance-missing refusal on testnet (Task 6, run 2026-11-24).** The refusal and its fix both
+work. The run: a local facilitator with `MAX_FEE_STROOPS=100000`, payments of 1,000 stroops of XLM
+through its SAC, and a fresh contract as `payTo`. Results:
+[pay-to-balance-missing-testnet.json](../../../../apps/facilitator/test/live/results/pay-to-balance-missing-testnet.json).
+
+- The first payment's resource fee was 128,027 stroops, over the ceiling, with no archived entry.
+  `/verify` refused it with `invalid_exact_stellar_pay_to_balance_missing` and the fix. `/settle`
+  answered the same from its record.
+- The seller sent `payTo` 1 XLM from its own account in one transfer
+  (`b2c6339a219ba763e7d522a81154e9249b35dd0be7c111f899bb088b6ecef9e3`, 104,829 stroops charged).
+  That created the balance. The key the facilitator reads, the SAC's persistent
+  `Balance(payTo)`, was in the transfer's read-write footprint and on the ledger after it.
+- The payer's next payment cost 14,730 stroops of resources. It verified and settled
+  (`86fc98415a36f603484fdb2196a97e6d7c0bc19eee53214b0d549878c971d0ef`, 9,940 stroops charged). The
+  first payment stays refused, from its record.
+- Re-run in `apps/facilitator`, against a migrated database of its own:
+  `DATABASE_URL=<url> npx tsx test/live/pay-to-balance-missing.ts`

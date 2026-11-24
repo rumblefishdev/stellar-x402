@@ -56,11 +56,13 @@ import {
   reasonAfterFailure,
 } from "./reasons.js";
 import {
+  PAY_TO_BALANCE_MISSING,
   UpstreamTimeoutError,
   payerExpiration,
   payerNonce,
   type Check,
   type Verified,
+  type VerifyTrace,
 } from "./verify.js";
 
 /**
@@ -81,6 +83,8 @@ export const REFUSED_AFTER_VERIFY = new Set<string>([
   SETTLE_REASONS.ledgerBound,
   // Upstream's code, from `/settle`'s re-check of the checks.
   "invalid_exact_stellar_payload_fee_exceeds_maximum",
+  // The same refusal from the re-check, when the payment would create `payTo`'s balance (0107).
+  PAY_TO_BALANCE_MISSING,
 ]);
 
 /** The pool as `/settle` uses it. */
@@ -138,6 +142,11 @@ export interface Settled {
   key?: SettlementKey;
   /** Answered from an existing record, not by the call that claimed it. */
   replay?: boolean;
+  /**
+   * The checks' {@link VerifyTrace.upstreamMessage}, when they refused: for the `settled` log,
+   * never sent.
+   */
+  upstreamMessage?: string;
   /**
    * Answered from a record claimed before 0073 (`reopened` -1), which never reopens: its answer
    * stays "sign a new payment", with no `extra.retryable` (0073 decision 25).
@@ -843,8 +852,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
       response: failure(SETTLE_REASONS.timeout, undefined),
     });
     let checked: Awaited<ReturnType<Check>>;
+    const trace: VerifyTrace = {};
     try {
-      checked = await bounded(deps.check(payload, requirements), left());
+      checked = await bounded(deps.check(payload, requirements, trace), left());
     } catch (error) {
       if (error instanceof OutOfTimeError) return unclaimed();
       // An RPC that gave no answer judged nothing, as `/verify`'s 503 says: nothing is claimed, so
@@ -873,6 +883,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
           });
           return {
             key: identity.key,
+            upstreamMessage: trace.upstreamMessage,
             response: failure(
               verdict.invalidReason ?? SETTLE_REASONS.unexpected,
               verdict.payer,
@@ -921,6 +932,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
           // payment" while this one's auth entry can still land elsewhere.
           return {
             key: record.key,
+            upstreamMessage: trace.upstreamMessage,
             response: failure(errorReason, verdict.payer, verdict.invalidMessage),
           };
         }
@@ -928,6 +940,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
       return {
         ...untouched,
         reopenRefused: reopening !== undefined,
+        upstreamMessage: trace.upstreamMessage,
         response: failure(
           verdict.invalidReason ?? SETTLE_REASONS.unexpected,
           verdict.payer,

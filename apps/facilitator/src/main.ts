@@ -56,7 +56,7 @@ import {
   failureReason,
   type UpstreamSeams,
 } from "./settlement/upstream.js";
-import { createAssetKinds } from "./spend/asset-kinds.js";
+import { createAssetKinds, type AssetKinds } from "./spend/asset-kinds.js";
 import { BALANCE_STALE_ALARM_MS, createBalanceFloor } from "./spend/balance-floor.js";
 import { longestSpendWindowMs } from "./spend/limits.js";
 import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
@@ -143,7 +143,7 @@ function verifyOnlySigner(address: string): FacilitatorStellarSigner {
  * The verify checks' dependencies from the config (AD-3, AD-5, AD-10, AD-22): {@link buildUpstream},
  * the channels and the validity minimum. `/verify` and `/settle` build their checks from the same
  * object. `fees` is the caller's, so the pool is built from the same `fees.pool` and shares its
- * bid.
+ * bid. `assets` is the spend policy's too, so the two share one cache of the tokens' kinds.
  */
 export function buildChecks(
   config: Config,
@@ -155,7 +155,7 @@ export function buildChecks(
   logger: Pick<Logger, "warn" | "info">,
   metrics: NetworkMetrics,
   seams?: UpstreamSeams,
-): VerifierDeps {
+): VerifierDeps & { assets: AssetKinds } {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
   // facilitator are `createChecker`'s check (AD-5).
   const facilitator = verifyOnlySigner(config.signer.address);
@@ -170,6 +170,9 @@ export function buildChecks(
     missingTrustline: createTrustlineLookup(rpc, config.network, logger),
     nonceUsed: createNonceLookup(rpc, config.network, logger),
     metrics,
+    // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
+    assets: createAssetKinds({ rpc, known: [getUsdcAddress(config.network)] }),
+    rpc,
   };
 }
 
@@ -425,8 +428,7 @@ export function compose(
   }
   const policy = createSpendPolicy({
     store: stores.spend,
-    // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
-    assets: createAssetKinds({ rpc, known: [getUsdcAddress(config.network)] }),
+    assets: checks.assets,
     floor,
     budgets: {
       windowMs: config.spend.windowMs,

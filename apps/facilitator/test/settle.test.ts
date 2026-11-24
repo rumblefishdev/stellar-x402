@@ -72,6 +72,8 @@ import {
 } from "../src/settlement/settle.js";
 import {
   PAYER_AUTH_REASON,
+  PAY_TO_BALANCE_MISSING,
+  PAY_TO_BALANCE_MISSING_MESSAGE,
   UpstreamTimeoutError,
   createChecker,
   payerNonce,
@@ -1163,6 +1165,57 @@ describe("createSettler", () => {
     );
   });
 
+  it("answers payTo's missing balance from its re-check with nothing signed, a fee refusal too (0107)", async () => {
+    // The real checks, over a SAC and a C-address payTo whose balance entry isn't there.
+    const check = createChecker({
+      network,
+      metrics: memoryMetrics().for({ network }),
+      upstream: {
+        verify: async () => ({
+          isValid: false,
+          invalidReason: "invalid_exact_stellar_payload_fee_exceeds_maximum",
+          invalidMessage: "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops",
+          payer,
+        }),
+      },
+      facilitator: Keypair.random().publicKey(),
+      channels: [Keypair.random().publicKey()],
+      minValidityLedgers: 2,
+      maxValidityLedgers: 66,
+      latestLedger: async () => CURRENT,
+      missingTrustline: async () => undefined,
+      nonceUsed: async () => false,
+      assets: { kind: async () => "sac" },
+      rpc: { getLedgerEntries: async () => ({ entries: [], latestLedger: CURRENT }) },
+    });
+    const { settle, submit, hooks, metrics } = setup(landing(), { check });
+    const toContract = { ...requirements, payTo: StrKey.encodeContract(Buffer.alloc(32, 9)) };
+    const expected = {
+      success: false,
+      errorReason: PAY_TO_BALANCE_MISSING,
+      errorMessage: `${untilExpiry.errorMessage}; ${PAY_TO_BALANCE_MISSING_MESSAGE}`,
+      extra: untilExpiry.extra,
+    };
+    const first = await settle(payload(), toContract);
+    expect(first.response).toMatchObject(expected);
+    // Upstream's message, with the fee, for the `settled` log only.
+    expect(first.upstreamMessage).toBe(
+      "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops",
+    );
+    expect(JSON.stringify(first.response)).not.toContain("302000");
+    // A repeat answers from the record.
+    expect((await settle(payload(), toContract)).response).toMatchObject(expected);
+    expect(hooks.beforeSubmit).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    // The fee went over the ceiling, as for upstream's own code.
+    expect(
+      metrics.value("settlement_refused_after_verify_total", {
+        reason: PAY_TO_BALANCE_MISSING,
+        stage: "check",
+      }),
+    ).toBe(1);
+  });
+
   it("warns and counts a fee or ledger refusal, which means the pool disagreed with /verify", async () => {
     for (const [error, reason] of [
       [new FeeLimitError("x"), "settle_exact_stellar_fee_exceeds_maximum"],
@@ -1215,6 +1268,8 @@ describe("createSettler", () => {
       latestLedger: async () => CURRENT,
       missingTrustline: async () => undefined,
       nonceUsed: async () => false,
+      assets: { kind: async () => "wasm" },
+      rpc: { getLedgerEntries: async () => ({ entries: [], latestLedger: CURRENT }) },
     });
     const { settle, submit } = setup(landing(), { check });
     const { response } = await settle(payload(), requirements);

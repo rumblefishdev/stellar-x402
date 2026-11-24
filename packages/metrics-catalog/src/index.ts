@@ -100,6 +100,7 @@ export const CATALOG = [
         "settle_exact_stellar_fee_exceeds_maximum",
         "settle_exact_stellar_signature_expiration_too_soon",
         "invalid_exact_stellar_payload_fee_exceeds_maximum",
+        "invalid_exact_stellar_pay_to_balance_missing",
         "other",
       ],
     },
