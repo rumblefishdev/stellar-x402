@@ -1,6 +1,7 @@
 export { apiKeyHash, isApiKey, newApiKey } from "./key.js";
 export {
   DEFAULT_ACCOUNT_PLANS,
+  FREE_PLAN,
   parseAccountPlans,
   type AccountPlan,
   type AccountPlanRecord,

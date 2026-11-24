@@ -14,8 +14,11 @@ export interface AccountPlan {
  */
 export const DEFAULT_ACCOUNT_PLANS = "free:1000:20000000,basic:10000:25000000,pro:100000:100000000";
 
-/** The plan of an account without a row in the registry. */
-const FREE = "free";
+/**
+ * The plan of an account without a row in the registry, which every plan text must define. The
+ * facilitator counts the accounts on it in one shared fee budget.
+ */
+export const FREE_PLAN = "free";
 const PLAN_ENTRY = /^([a-z][a-z0-9_-]*):(\d+):(\d+)$/;
 /** Largest int64: a fee budget is summed against the store's `bigint` columns. */
 const INT64_MAX = 9_223_372_036_854_775_807n;
@@ -44,8 +47,10 @@ export function parseAccountPlans(text: string): Map<string, AccountPlan> {
     if (plans.has(name)) throw new RangeError(`the ${name} plan is given twice`);
     plans.set(name, plan);
   }
-  if (!plans.has(FREE))
-    throw new RangeError(`the account plans must have ${FREE}: an account without a plan is on it`);
+  if (!plans.has(FREE_PLAN))
+    throw new RangeError(
+      `the account plans must have ${FREE_PLAN}: an account without a plan is on it`,
+    );
   return plans;
 }
 

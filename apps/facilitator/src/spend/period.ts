@@ -14,3 +14,11 @@ export function monthEnd(now: number): number {
   const at = new Date(now);
   return Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1);
 }
+
+/**
+ * An instant as an answer writes it: RFC 3339 in UTC, to the second (`2026-12-01T00:00:00Z`).
+ * The milliseconds are dropped, not rounded, so an instant never moves into the next second.
+ */
+export function utcInstant(ms: number): string {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+}

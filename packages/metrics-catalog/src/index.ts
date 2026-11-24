@@ -505,7 +505,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["op"],
-    fieldValues: { op: ["breaker", "reserve", "release", "other"] },
+    fieldValues: { op: ["breaker", "reserve", "release", "plan", "other"] },
     emit: "eager-first",
   },
   {
@@ -529,6 +529,9 @@ export const CATALOG = [
         "settle_exact_stellar_spend_limit_asset",
         "settle_exact_stellar_spend_limit_other",
         "settle_exact_stellar_spend_limit_global",
+        "settle_exact_stellar_quota_exhausted",
+        "settle_exact_stellar_spend_limit_account",
+        "settle_exact_stellar_spend_limit_free",
         "other",
       ],
     },

@@ -476,6 +476,24 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         });
       });
 
+      it("clears a transition's errorMessage with its reason (0107)", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        const rejected = await store.transition(s.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_b",
+          errorMessage: "why",
+          updatedAt: 2_000,
+        });
+        expect(rejected).toMatchObject({ errorReason: "unsent_b", errorMessage: "why" });
+        expect(await store.get(s.key)).toMatchObject({ errorMessage: "why" });
+        // The message is the reason's: a reopened claim has neither.
+        expect(await store.reopen(s.key, s.fingerprint, UNSENT, 5_000)).not.toHaveProperty(
+          "errorMessage",
+        );
+        expect(await store.get(s.key)).not.toHaveProperty("errorMessage");
+      });
+
       it("refuses another fingerprint, another reason, a record with a hash, or one not rejected", async () => {
         const s = await rejected("1");
         expect(await store.reopen(s.key, "fp-other", UNSENT, 5_000)).toBeUndefined();

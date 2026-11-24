@@ -1,4 +1,4 @@
-import { PostgresApiKeyStore } from "@stellar-x402/api-keys";
+import { PostgresAccountPlanStore, PostgresApiKeyStore } from "@stellar-x402/api-keys";
 import type { StellarNetwork } from "@stellar-x402/config";
 import pg from "pg";
 import {
@@ -68,6 +68,9 @@ import { PostgresCatalogAttemptStore, PostgresCatalogStore } from "./postgres-ca
  *   Its own pool keeps that queue off `/settle`'s connections and off `hit`, which every request
  *   on a network without keys still needs. A request with a real key waits in that queue too.
  *   Its writes, the operator's and the portal's, stay on the main pool.
+ * - An account's plan is read on `pools.apiKeys` too, once per keyed settlement (0107), beside
+ *   the registry read that let the request in. The service never sets a plan: the operator's
+ *   script does, on a pool of its own.
  */
 export function postgresStores(
   pool: pg.Pool,
@@ -80,6 +83,7 @@ export function postgresStores(
     rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
     apiKeys: new PostgresApiKeyStore(pools.apiKeys ?? pool, pool),
+    accountPlans: new PostgresAccountPlanStore(pools.apiKeys ?? pool),
   };
 }
 
@@ -282,6 +286,7 @@ const UPDATE_COLUMNS = {
   ledger: "ledger",
   feeCharged: "fee_charged",
   errorReason: "error_reason",
+  errorMessage: "error_message",
   failure: "failure",
 } as const;
 
@@ -602,7 +607,8 @@ export class PostgresSettlementStore implements SettlementStore {
       return await inTransaction(this.pool, async (client) => {
         const { rows } = await client.query<SettlementRow>(
           `UPDATE settlements s
-           SET state = 'claimed', error_reason = NULL, reopened = s.reopened + 1,
+           SET state = 'claimed', error_reason = NULL, error_message = NULL,
+               reopened = s.reopened + 1,
                version = s.version + 1, created_at = $4, updated_at = $4
            WHERE s.key = $1 AND s.state = 'rejected' AND s.fingerprint = $2
              AND s.error_reason = ANY ($3::text[]) AND s.reopened >= 0

@@ -20,6 +20,8 @@ import { apiKeyHash, newApiKey } from "@stellar-x402/api-keys";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main } from "../src/main.js";
+import { spendHorizonMs } from "../src/pruner.js";
+import { longestSpendWindowMs } from "../src/spend/limits.js";
 import { start, type Started } from "../src/start.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
@@ -583,7 +585,8 @@ describe("main()", () => {
       RATE_LIMIT_WINDOW_MS: String(hour),
     });
     try {
-      // A budget's window is never longer than SPEND_WINDOW_MS, which 0024 keeps.
+      // On testnet, which takes no API key, no limit sums more than SPEND_WINDOW_MS, which 0024
+      // keeps: no account month is counted (`longestSpendWindowMs`).
       const reserve = (id: string, at: number) =>
         app.stores.spend.reserve({
           id,
@@ -608,6 +611,17 @@ describe("main()", () => {
     } finally {
       await app.close();
     }
+  });
+
+  it("keeps an account's month of reservations where a key is required (0107)", () => {
+    const day = 86_400_000;
+    // An account's payments count from its month's 1st, up to 31 days back; the pruner keeps
+    // twice its window, so about 62 days, as 0107 decision 24 has it.
+    expect(longestSpendWindowMs(day, true)).toBe(31 * day);
+    expect(spendHorizonMs(longestSpendWindowMs(day, true))).toBe(62 * day);
+    expect(longestSpendWindowMs(40 * day, true)).toBe(40 * day);
+    // Where none is, no month is counted: SPEND_WINDOW_MS alone, as in the test above.
+    expect(longestSpendWindowMs(5 * day, false)).toBe(5 * day);
   });
 
   it("prunes on its timer until it closes", async () => {

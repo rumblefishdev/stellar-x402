@@ -30,6 +30,7 @@ import type { PaymentPayload, PaymentRequirements, SettleResponse } from "@x402/
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
 import type { LabelsOf, NetworkMetrics } from "../metrics.js";
+import { monthEnd, utcInstant } from "../spend/period.js";
 import {
   LeaseFencedError,
   type ClaimResult,
@@ -208,13 +209,16 @@ export function createSettler(deps: SettlerDeps): Settle & {
       return { success: true, transaction, network, payer: record.payer };
     }
     if (isFinal(record)) {
-      return failure(
+      const response = failure(
         record.errorReason ?? SETTLE_REASONS.unexpected,
         record.payer,
-        // Only a `refused` record has one: the checks' message (0086).
+        // A `refused` record's is the checks' message (0086), a `rejected` one's the
+        // before-submit hook's (0107); no other record has one.
         record.errorMessage,
         transaction,
       );
+      const extra = refusalExtra(record);
+      return extra ? { ...response, extra } : response;
     }
     // Not final yet: sent or about to be, unless nothing was signed.
     return transaction
@@ -1050,21 +1054,25 @@ export function createSettler(deps: SettlerDeps): Settle & {
       verdictOfHook = { allow: false, errorReason: SETTLE_REASONS.refused };
     }
     if (!verdictOfHook.allow) {
+      const { errorReason, errorMessage } = verdictOfHook;
+      // The message is stored with the reason, so a repeat answers the same (0107).
+      const refusal = {
+        state: "rejected" as const,
+        errorReason,
+        ...(errorMessage !== undefined && { errorMessage }),
+      };
       // Nothing was submitted, so the refusal stands even if it can't be stored. The record then
       // stays `claimed` with no hash, and a repeat after the budget ends it with `…_timeout`.
       try {
         await bounded(
-          advance(
-            key,
-            { state: "rejected", errorReason: verdictOfHook.errorReason },
-            { claim: claim.record.reopened },
-          ),
+          advance(key, refusal, { claim: claim.record.reopened }),
           Math.max(left(), storeGraceMs),
         );
       } catch (error) {
         recordFailed(key, error);
       }
-      return { key, response: failure(verdictOfHook.errorReason, payer) };
+      // Answered from the record this refusal stores, as a repeat of the payment is.
+      return { key, response: answer({ ...claim.record, ...refusal }) };
     }
 
     // The checks and the hook used up the budget: nothing is submitted.
@@ -1165,6 +1173,19 @@ function transferFrom(transaction: Transaction): string | undefined {
   if (operation?.type !== "invokeHostFunction") return undefined;
   const from: unknown = scValToNative(operation.func.invokeContract().args()[0]!);
   return typeof from === "string" ? from : undefined;
+}
+
+/**
+ * What a final record's answer carries in `extra`, from the record alone, so the first answer and
+ * a repeat's agree: for an account's used-up quota (0107), `resetsAt`, the start of the month
+ * after the claim the policy refused. Its message names the next month's start after the policy's
+ * own reading of the clock, taken after the checks: the two differ only when a month's first
+ * instant falls between the claim's start and that reading.
+ */
+function refusalExtra(record: SettlementRecord): SettleResponse["extra"] {
+  return record.errorReason === SETTLE_REASONS.quotaExhausted
+    ? { resetsAt: utcInstant(monthEnd(record.createdAt)) }
+    : undefined;
 }
 
 /** `settlement_reopened_total`'s labels: `reason`, a log field, only when it isn't empty (0027). */

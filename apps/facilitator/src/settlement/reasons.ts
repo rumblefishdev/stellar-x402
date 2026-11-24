@@ -110,6 +110,22 @@ export const SETTLE_REASONS = {
   spendLimitOther: "settle_exact_stellar_spend_limit_other",
   /** The facilitator's fee budget for this window is spent. Use another facilitator. */
   spendLimitGlobal: "settle_exact_stellar_spend_limit_global",
+  /**
+   * The API key holder's account used up its plan's payments this calendar month (0107). Nothing
+   * was sent, and a repeat of this payment answers the same: the account settles a new payment
+   * from `extra.resetsAt`, the next month's start, or once the operator raises its plan.
+   */
+  quotaExhausted: "settle_exact_stellar_quota_exhausted",
+  /**
+   * The account's fee budget for the last 24 hours is spent (0107): its payments cost more than
+   * usual. Nothing was sent; it frees up as the day's settlements leave the window.
+   */
+  spendLimitAccount: "settle_exact_stellar_spend_limit_account",
+  /**
+   * The fee budget the accounts on the free plan share is spent (0107). Nothing was sent; an
+   * account on a raised plan still settles.
+   */
+  spendLimitFree: "settle_exact_stellar_spend_limit_free",
   /** The payer's settlements failed on chain too often: its breaker is open for a while. */
   breakerOpenPayer: "settle_exact_stellar_breaker_open_payer",
   /** Settlements to this recipient failed on chain too often: its breaker is open for a while. */

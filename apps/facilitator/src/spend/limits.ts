@@ -1,4 +1,4 @@
-import type { AccountPlan } from "@stellar-x402/api-keys";
+import { FREE_PLAN, type AccountPlan } from "@stellar-x402/api-keys";
 import type { SpendLimit, SpendScope } from "../ports/index.js";
 import { SETTLE_REASONS } from "../settlement/reasons.js";
 import type { AssetTier } from "./asset-kinds.js";
@@ -7,6 +7,11 @@ import type { AssetTier } from "./asset-kinds.js";
 export interface SpendBudgets {
   windowMs: number;
   globalStroops: bigint;
+  /**
+   * The accounts on the free plan together (0107), so many Discord accounts use up only the free
+   * traffic, not the room of the accounts the operator raised.
+   */
+  freeStroops: bigint;
   /** One payer in the known assets together, or in one other token. */
   perPayerStroops: bigint;
   perPayToStroops: bigint;
@@ -27,7 +32,7 @@ export interface AccountBudget {
 }
 
 /** Which budget a scope is, as the `budget` label and the refusal name it: a closed set. */
-export type BudgetKind = "payer" | "pay_to" | "asset" | "other" | "global";
+export type BudgetKind = "payer" | "pay_to" | "asset" | "other" | "global" | "account" | "free";
 
 /**
  * The payer's scope, for its budget and its breaker alike: one for the known assets, and one per
@@ -52,9 +57,13 @@ export function assetScope(asset: string): SpendScope {
 }
 
 /**
- * Every budget a settlement counts against, narrowest first (payer, payTo, asset, `tier:other`
- * for another token, global): `reserve` names the first one that is full, so a refusal names the
- * narrowest budget.
+ * Every budget a settlement counts against, narrowest first: `reserve` names the first one that
+ * is full, so a refusal names the narrowest budget.
+ *
+ * - With an account (a key's settlement, 0107): its month's payments, its day's fees, `free` on
+ *   the free plan, and global. Never the payer, payTo, asset or tier scopes: another key's
+ *   payments could fill those for this one.
+ * - Without (testnet): payer, payTo, asset, `tier:other` for another token, and global.
  */
 export function spendLimits(
   ctx: { payer: string; payTo: string; asset: string; account?: AccountBudget },
@@ -67,6 +76,17 @@ export function spendLimits(
     maxStroops,
     windowMs: budgets.windowMs,
   });
+  const { account } = ctx;
+  if (account) {
+    const scope: SpendScope = `account:${account.owner}`;
+    const { plan } = account;
+    return [
+      { scope, maxCount: plan.payments, since: account.monthStart },
+      limit(scope, plan.dailyFeeStroops),
+      ...(plan.name === FREE_PLAN ? [limit("free", budgets.freeStroops)] : []),
+      limit("global", budgets.globalStroops),
+    ];
+  }
   return [
     limit(payerScope(ctx.payer, ctx.asset, tier), budgets.perPayerStroops),
     limit(payToScope(ctx.payTo, ctx.asset, tier), budgets.perPayToStroops),
@@ -82,9 +102,11 @@ export function spendLimits(
 export function budgetKind(scope: SpendScope): BudgetKind {
   if (scope === "global") return "global";
   if (scope === "tier:other") return "other";
+  if (scope === "free") return "free";
   if (scope.startsWith("payer:")) return "payer";
   if (scope.startsWith("payTo:")) return "pay_to";
   if (scope.startsWith("asset:")) return "asset";
+  if (scope.startsWith("account:")) return "account";
   throw new Error(`unknown spend scope: ${scope}`);
 }
 
@@ -94,9 +116,28 @@ const SPEND_LIMIT_REASONS: Record<BudgetKind, string> = {
   asset: SETTLE_REASONS.spendLimitAsset,
   other: SETTLE_REASONS.spendLimitOther,
   global: SETTLE_REASONS.spendLimitGlobal,
+  account: SETTLE_REASONS.spendLimitAccount,
+  free: SETTLE_REASONS.spendLimitFree,
 };
 
-/** The `errorReason` of a refusal by a full budget of this kind. */
-export function spendLimitReason(kind: BudgetKind): string {
-  return SPEND_LIMIT_REASONS[kind];
+/**
+ * The `errorReason` of a refusal by a full budget of this kind: its stroops, or for an account its
+ * count of the month's payments, its quota.
+ */
+export function spendLimitReason(kind: BudgetKind, limit: "stroops" | "count" = "stroops"): string {
+  return kind === "account" && limit === "count"
+    ? SETTLE_REASONS.quotaExhausted
+    : SPEND_LIMIT_REASONS[kind];
+}
+
+/** The longest a quota month runs, which its count sums back from at most. */
+const QUOTA_MONTH_MAX_MS = 31 * 86_400_000;
+
+/**
+ * The longest window any limit sums, which the pruner keeps the rows of (0107 decision 26): the
+ * budgets' rolling window, and on a network that requires an API key the account's month too,
+ * counted from its 1st.
+ */
+export function longestSpendWindowMs(windowMs: number, keyed: boolean): number {
+  return keyed ? Math.max(windowMs, QUOTA_MONTH_MAX_MS) : windowMs;
 }

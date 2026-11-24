@@ -1,4 +1,4 @@
-import type { ApiKeyStore } from "@stellar-x402/api-keys";
+import type { AccountPlanStore, ApiKeyStore } from "@stellar-x402/api-keys";
 import type { CatalogAttemptStore, CatalogStore } from "./catalog-store.js";
 import type { RateLimitStore } from "./rate-limit-store.js";
 import type { SettlementStore } from "./settlement-store.js";
@@ -57,4 +57,6 @@ export interface Stores {
   rateLimits: RateLimitStore;
   spend: SpendStore;
   apiKeys: ApiKeyStore;
+  /** Each API key holder's plan (0107), beside the registry. */
+  accountPlans: AccountPlanStore;
 }

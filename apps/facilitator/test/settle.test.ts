@@ -11,6 +11,13 @@ import {
   xdr,
   rpc,
 } from "@stellar/stellar-sdk";
+import {
+  PostgresAccountPlanStore,
+  PostgresAccountUsageReader,
+  apiKeyHash,
+  newApiKey,
+  parseAccountPlans,
+} from "@stellar-x402/api-keys";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import {
   FallbackRpc,
@@ -70,6 +77,7 @@ import {
   payerNonce,
   type Check,
 } from "../src/settlement/verify.js";
+import { createSpendPolicy } from "../src/spend/policy.js";
 import { testDatabase } from "./database.js";
 import measured from "./fixtures/nonce-consumed-elsewhere.json" with { type: "json" };
 import { holdLease } from "./port-contracts.js";
@@ -3099,6 +3107,224 @@ describe("createSettler", () => {
       expect(submit).not.toHaveBeenCalled();
       expect(await store.get(key)).toMatchObject({ state: "rejected", reopened: 0 });
     });
+  });
+});
+
+/** Hands each `keyed()` setup nonces of its own, so a late `onFinal` can't reach another's ids. */
+let keyedNonces = 0;
+
+describe("an account's quota and fee budget (0107)", () => {
+  /** Keyed settlements' time: late in November 2026, UTC. */
+  const NOVEMBER = Date.UTC(2026, 10, 24, 12);
+  const DECEMBER = Date.UTC(2026, 11, 1);
+  const DAY = 86_400_000;
+  const CEILING = 250_000n;
+  const OWNER = "discord:1";
+  const QUOTA_MESSAGE =
+    "the account's monthly quota of 2 payments is used up until 2026-12-01T00:00:00Z; " +
+    "contact us for a higher plan";
+
+  /**
+   * `/settle` with the real spend policy, over the test database's spend store and account plans,
+   * on a network that requires an API key; the free plan allows 2 payments a month. Each payment
+   * the pool gets ends as `outcomes` says in turn, then `success`, under a hash of its own, and is
+   * charged `fee`.
+   */
+  function keyed(
+    opts: {
+      freeStroops?: bigint;
+      fee?: bigint;
+      outcomes?: SubmitResult["status"][];
+      check?: Check;
+    } = {},
+  ) {
+    const clock = { now: NOVEMBER };
+    const stores = db.stores();
+    const plans = new PostgresAccountPlanStore(db.pool);
+    const policy = createSpendPolicy({
+      store: stores.spend,
+      assets: { tier: () => "known", kind: async () => "sac", confirmed: () => true },
+      floor: { below: () => false },
+      budgets: {
+        windowMs: DAY,
+        globalStroops: 500_000_000n,
+        freeStroops: opts.freeStroops ?? 250_000_000n,
+        perPayerStroops: 20_000_000n,
+        perPayToStroops: 100_000_000n,
+        perKnownAssetStroops: 250_000_000n,
+        perOtherAssetStroops: 20_000_000n,
+        tierOtherStroops: 100_000_000n,
+      },
+      plans,
+      accountPlans: parseAccountPlans("free:2:20000000,basic:10000:25000000"),
+      keyed: true,
+      logger: jsonLogger("error", () => {}),
+      metrics: memoryMetrics(),
+      now: () => clock.now,
+    });
+    const outcomes = [...(opts.outcomes ?? [])];
+    let sent = 0;
+    const { settle, submit } = setup(
+      async (submitOpts) => {
+        const hash = (++sent).toString(16).padStart(64, "0");
+        await submitOpts.onSigned?.(hash, BOUNDS);
+        return { ...result(outcomes.shift() ?? "success", hash), feeCharged: opts.fee ?? 41_000n };
+      },
+      {
+        hooks: {
+          beforeSubmit: policy.beforeSubmit,
+          onFinal: policy.onFinal,
+          onSuccess: async () => {},
+        },
+        now: () => clock.now,
+        ...(opts.check && { check: opts.check }),
+      },
+    );
+    const base = (keyedNonces += 100);
+    /** Payment `n` of the payer, sent to `/settle` with a key of `owner`'s. */
+    const pay = (n: number, owner = OWNER) =>
+      settle(payload([authEntry(payer, String(base + n))]), requirements, undefined, { owner });
+    const keyOf = (n: number) => `${network}:${payer}:${base + n}` as const;
+    return { pay, keyOf, submit, plans, stores, clock };
+  }
+
+  it("an account past its quota is refused with nothing signed", async () => {
+    const { pay, keyOf, submit, stores } = keyed();
+    expect((await pay(1)).response.success).toBe(true);
+    expect((await pay(2)).response.success).toBe(true);
+
+    // The advice of every answer that ended a payment, then the quota's own message.
+    expect((await pay(3)).response).toEqual({
+      success: false,
+      errorReason: SETTLE_REASONS.quotaExhausted,
+      errorMessage: `${untilExpiry.errorMessage}; ${QUOTA_MESSAGE}`,
+      payer,
+      transaction: "",
+      network,
+      extra: { resetsAt: "2026-12-01T00:00:00Z", ...untilExpiry.extra },
+    });
+    // Refused before anything was signed: the pool never saw it (criterion 2).
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(await stores.settlements.get(keyOf(3))).toMatchObject({
+      state: "rejected",
+      errorReason: SETTLE_REASONS.quotaExhausted,
+      errorMessage: QUOTA_MESSAGE,
+      hashes: [],
+    });
+  });
+
+  it("the same payment again answers the same refusal", async () => {
+    const { pay, submit, clock } = keyed();
+    await pay(1);
+    await pay(2);
+    const first = await pay(3);
+    expect(first.response).toMatchObject({
+      errorReason: SETTLE_REASONS.quotaExhausted,
+      errorMessage: expect.stringContaining(QUOTA_MESSAGE),
+      extra: { resetsAt: "2026-12-01T00:00:00Z" },
+    });
+
+    // From the record, without the hook: the same reason, message and `extra.resetsAt`, byte for
+    // byte, once the month has rolled too.
+    const again = await pay(3);
+    expect(again.replay).toBe(true);
+    expect(JSON.stringify(again.response)).toBe(JSON.stringify(first.response));
+    clock.now = DECEMBER;
+    expect(JSON.stringify((await pay(3)).response)).toBe(JSON.stringify(first.response));
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it("the quota carries over to a new key", async () => {
+    const { pay, stores } = keyed();
+    /** The owner `admit` lets a request with `key` in as. */
+    const ownerOf = async (key: string) => (await stores.apiKeys.ownerOf(apiKeyHash(key)))!;
+    const first = newApiKey();
+    await stores.apiKeys.issue({ hash: apiKeyHash(first), owner: OWNER, now: NOVEMBER });
+    expect((await pay(1, await ownerOf(first))).response.success).toBe(true);
+    expect((await pay(2, await ownerOf(first))).response.success).toBe(true);
+
+    // 0106's third criterion: a revoke and a new key start no new count.
+    await stores.apiKeys.revoke(OWNER, NOVEMBER);
+    const second = newApiKey();
+    await stores.apiKeys.issue({ hash: apiKeyHash(second), owner: OWNER, now: NOVEMBER });
+    expect(await stores.apiKeys.ownerOf(apiKeyHash(first))).toBeUndefined();
+    expect((await pay(3, await ownerOf(second))).response.errorReason).toBe(
+      SETTLE_REASONS.quotaExhausted,
+    );
+  });
+
+  it("the month's roll gives the quota back", async () => {
+    const { pay, clock } = keyed();
+    await pay(1);
+    await pay(2);
+    clock.now = DECEMBER - 1;
+    expect((await pay(3)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    // The 1st at 00:00:00.000 UTC is the new month's.
+    clock.now = DECEMBER;
+    expect((await pay(4)).response.success).toBe(true);
+  });
+
+  it("a raised plan settles at once", async () => {
+    const { pay, plans } = keyed();
+    await pay(1);
+    await pay(2);
+    expect((await pay(3)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    // The operator's `keys plan`: the account's next request reads it (criterion 2).
+    await plans.setPlan({ owner: OWNER, plan: "basic", now: NOVEMBER, setBy: "operator:test" });
+    expect((await pay(4)).response.success).toBe(true);
+  });
+
+  it("free accounts fill free; a raised account still settles", async () => {
+    // Each settlement is charged the ceiling, so two fill `free` (criterion 3).
+    const { pay, plans } = keyed({ freeStroops: 2n * CEILING, fee: CEILING });
+    const raised = { owner: "operator:acme", plan: "basic", now: NOVEMBER, setBy: "operator:test" };
+    await plans.setPlan(raised);
+    expect((await pay(1, "discord:1")).response.success).toBe(true);
+    expect((await pay(2, "discord:2")).response.success).toBe(true);
+
+    const refused = (await pay(3, "discord:3")).response;
+    expect(refused).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.spendLimitFree,
+      errorMessage:
+        `${untilExpiry.errorMessage}; the free plan's shared allowance is used up for now; ` +
+        "try again later, or contact us for a higher plan",
+    });
+    expect(refused.extra).toEqual(untilExpiry.extra);
+    expect((await pay(4, raised.owner)).response.success).toBe(true);
+  });
+
+  it("a failed, included settlement counts as a payment; a refused one doesn't", async () => {
+    const check = vi.fn(passing);
+    const { pay, submit } = keyed({ outcomes: ["failed"], check });
+    // Included and failed: the network charged its fee, so it is one of the month's payments.
+    expect((await pay(1)).response.errorReason).toBe(SETTLE_REASONS.failed);
+    // Refused by the checks: never claimed, so never reserved.
+    const invalidReason = "invalid_exact_stellar_payload_fee_exceeds_maximum";
+    check.mockResolvedValueOnce({ response: { isValid: false, invalidReason, payer } });
+    expect((await pay(2)).response.errorReason).toBe(invalidReason);
+    expect((await pay(3)).response.success).toBe(true);
+    expect((await pay(4)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it("a payment the policy refused isn't one of the month's payments", async () => {
+    // `free` holds one ceiling a day, and each settlement is charged the ceiling.
+    const { pay, clock } = keyed({ freeStroops: CEILING, fee: CEILING });
+    /** The account's payments this month, as the portal's view counts them. */
+    const payments = () =>
+      new PostgresAccountUsageReader(db.pool).paymentsSince(OWNER, Date.UTC(2026, 10, 1));
+    expect((await pay(1)).response.success).toBe(true);
+    expect((await pay(2)).response.errorReason).toBe(SETTLE_REASONS.spendLimitFree);
+    expect(await payments()).toBe(1);
+
+    // A day on, `free` has room again, and the refusal left the month a payment short of its 2.
+    clock.now += DAY;
+    expect((await pay(3)).response.success).toBe(true);
+    clock.now += DAY;
+    expect((await pay(4)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    // Nor does the quota's own refusal count.
+    expect(await payments()).toBe(2);
   });
 });
 

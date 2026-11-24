@@ -28,6 +28,7 @@ import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import type { AppDeps } from "./http/app.js";
+import { requiresApiKey } from "./http/api-key.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";
@@ -57,6 +58,7 @@ import {
 } from "./settlement/upstream.js";
 import { createAssetKinds } from "./spend/asset-kinds.js";
 import { BALANCE_STALE_ALARM_MS, createBalanceFloor } from "./spend/balance-floor.js";
+import { longestSpendWindowMs } from "./spend/limits.js";
 import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
 import { verifyWithRefusals } from "./settlement/refusals.js";
 import { start } from "./start.js";
@@ -76,6 +78,14 @@ export const FAILBACK_MAX_LAG_LEDGERS = 2;
 
 /** The statement timeout of the public listings' pool, against the other pools' 10 s. */
 export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
+
+/**
+ * The plans an API key holder's account can be on, and the fee budget per 24 h the accounts on
+ * the free plan share (0107, S-design §10), until the config carries them. Nothing settles with a
+ * key before then: `config.ts` refuses pubnet.
+ */
+const ACCOUNT_PLANS = parseAccountPlans(DEFAULT_ACCOUNT_PLANS);
+const FREE_STROOPS = 250_000_000n;
 
 /**
  * The one RPC client over `RPC_URLS` (AD-3): the pool, the AD-22 ledger read and the fee-stats bid
@@ -421,12 +431,18 @@ export function compose(
     budgets: {
       windowMs: config.spend.windowMs,
       globalStroops: config.spend.globalStroops,
+      freeStroops: FREE_STROOPS,
       perPayerStroops: config.spend.perPayerStroops,
       perPayToStroops: config.spend.perPayToStroops,
       perKnownAssetStroops: config.spend.perAssetStroops,
       perOtherAssetStroops: config.spend.perOtherAssetStroops,
       tierOtherStroops: config.spend.tierOtherStroops,
     },
+    // On a network that requires an API key, each settlement counts in its caller's account,
+    // by the plan the registry names (0107).
+    plans: stores.accountPlans,
+    accountPlans: ACCOUNT_PLANS,
+    keyed: requiresApiKey(config.network),
     logger,
     metrics,
   });
@@ -570,7 +586,8 @@ export async function main(
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
     // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
-    // Every budget sums the one window (0024 S-design §5).
+    // Every budget sums the one window (0024 S-design §5); where a key is required, an account's
+    // payments are counted from the start of its month too (0107).
     const pruner = createPruner({
       settlements: stores.settlements,
       ledger: {
@@ -580,7 +597,7 @@ export async function main(
       spend: stores.spend,
       rateLimits: stores.rateLimits,
       catalogAttempts: stores.catalogAttempts,
-      spendWindowMs: config.spend.windowMs,
+      spendWindowMs: longestSpendWindowMs(config.spend.windowMs, requiresApiKey(config.network)),
       rateLimitWindowMs: config.http.rateLimit.windowMs,
       logger,
       metrics,
