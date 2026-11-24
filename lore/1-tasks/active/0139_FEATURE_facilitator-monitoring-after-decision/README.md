@@ -100,6 +100,12 @@ losing an alarm that protects money or a payment.
    standing alert still comes back once a day. An Event alert resolves after its 15-minute window
    with no resolved message, so it never repeats. All routes: `group_wait` 30 s,
    `group_interval` 5 min, `group_by` `[alertname, check, network, project]`.
+3. **The last counts before an exit are lost to the alerts (2026-11-24).** The agent scrapes
+   `/metrics` every 15 s, so a count made after the last scrape and before the process exits (the
+   end of a drain, a crash) never reaches the VM: an Event check (`breaker-opened-*`,
+   `landed-after-expired`, `commit-unmatched`) for it sends no alert. EMF wrote those at once and
+   flushed at the exit. Accepted, at most 15 s of counts: the app line still reaches the logs, so
+   the record is kept and only the alert is lost (Adam's review of #241).
 
 ## For the switch
 

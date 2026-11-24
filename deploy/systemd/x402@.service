@@ -15,9 +15,9 @@ StartLimitBurst=5
 
 [Service]
 WorkingDirectory=/srv/x402/%i
-# Raw lines for the CloudWatch agent (0027 decision 1): stdout carries the logger's JSON and the
-# EMF lines, which the agent splits into two log groups; stderr, Compose's progress and a crash's
-# trace. append:, so copytruncate leaves no hole. The playbook makes the directory and the files.
+# Raw lines for the CloudWatch agent (0027 decision 1): stdout carries the logger's JSON (the
+# metrics are on /metrics since 0139); stderr, Compose's progress and a crash's trace. append:, so
+# copytruncate leaves no hole. The playbook makes the directory and the files.
 StandardOutput=append:/var/log/x402/%i/facilitator.log
 StandardError=append:/var/log/x402/%i/facilitator.err.log
 ExecStartPre=/usr/local/libexec/x402/x402-creds %i database-url.testnet:1000 rpc-urls.testnet:1000 approle-role-id.testnet:1000 approle-secret-id.testnet:1000
