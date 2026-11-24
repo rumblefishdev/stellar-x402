@@ -1,7 +1,6 @@
 import { Address, Transaction, rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
 import type { SorobanRpc } from "@stellar-x402/signer-pool";
 import type { Logger } from "../logger.js";
-import { withTimeout } from "./verify.js";
 
 /** The payer holds no trustline to the payment's classic asset. */
 export const PAYER_TRUSTLINE_REASON = "invalid_exact_stellar_payer_trustline_missing";
@@ -16,8 +15,6 @@ export const TRUSTLINE_REASONS: ReadonlySet<string | undefined> = new Set([
 
 /** The Stellar Asset Contract's `TrustlineMissingError`. */
 const TRUSTLINE_MISSING_CODE = 13;
-/** How long the whole lookup may take. It only names the cause of a refusal already decided. */
-const LOOKUP_TIMEOUT_MS = 3_000;
 
 export interface PaymentToExplain {
   /** The payload's transaction, as upstream simulated it. */
@@ -41,18 +38,18 @@ export type FindMissingTrustline = (
 /**
  * Upstream drops the RPC's error, so after its `simulation_failed` we simulate again and read the
  * SAC's error event, which names the account. A SAC stops at its first failure, the payer's side
- * first, so the payer's answer can't speak for `payTo`. A failed lookup is `undefined` too: the
- * payment is refused either way, and upstream's answer is still true.
+ * first, so the payer's answer can't speak for `payTo`. The RPC's own timeout and its failover to
+ * the next URL apply. A lookup that still fails is `undefined` too: the payment is refused either
+ * way, and upstream's answer is still true.
  */
 export function createTrustlineLookup(
   deps: Pick<SorobanRpc, "simulateTransaction" | "getLedgerEntries">,
   network: string,
   logger: Pick<Logger, "warn">,
-  timeoutMs = LOOKUP_TIMEOUT_MS,
 ): FindMissingTrustline {
   return async (payment) => {
     try {
-      return await withTimeout(lookup(deps, payment), timeoutMs, "trustline lookup");
+      return await lookup(deps, payment);
     } catch (error) {
       logger.warn("trustline_lookup_failed", { network, error });
       return undefined;

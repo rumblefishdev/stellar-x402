@@ -2,6 +2,7 @@ import type { Logger } from "../logger.js";
 import type { NetworkMetrics } from "../metrics.js";
 import type { BreakerBackoff, ScopeUsage, SpendScope, SpendStore } from "../ports/index.js";
 import type { BeforeSubmitResult, SettlementHooks } from "../settlement/hooks.js";
+import { NONCE_CONSUMED_SETTLE_REASON } from "../settlement/nonce-used.js";
 import { SETTLE_REASONS } from "../settlement/reasons.js";
 import type { Verify } from "../settlement/verify.js";
 import type { AssetKinds } from "./asset-kinds.js";
@@ -264,6 +265,9 @@ export function createSpendPolicy(deps: {
       }
       // Rejected, expired and uncharged failures never reach a breaker: nobody paid for them.
       if (state !== "failed" || feeCharged === undefined) return;
+      // Another transaction used the payer's nonce first (0141): nobody's fault, also when the
+      // RPC gave no error event that names it, which is all `attribute` reads.
+      if (record.errorReason === NONCE_CONSUMED_SETTLE_REASON) return;
 
       const kind = await assets.kind(asset);
       const tier = assets.tier(asset);
