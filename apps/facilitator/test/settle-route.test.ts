@@ -56,6 +56,7 @@ describe("POST /settle", () => {
       ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: Keypair.random().publicKey(),
     };
     const config = { ...parseConfig(env), port: 0 };
@@ -342,6 +343,7 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
     };
     const config = { ...parseConfig(env), port: 0 };
     const app = await start({
@@ -394,6 +396,7 @@ describe("POST /settle without the channel lease (0025)", () => {
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
     };
     const config = { ...parseConfig(env), port: 0 };
     const app = await start({
@@ -483,6 +486,7 @@ describe("shutdown (0025)", () => {
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
     };
     const config = { ...parseConfig(env), port: 0 };
     const lines: string[] = [];

@@ -9,6 +9,7 @@ const env = {
   ...signerEnv(Keypair.random().publicKey()),
   DATABASE_URL: "postgres://db.internal/x402",
   CLIENT_IP: "socket",
+  SEARCH_MODEL_URL: "http://127.0.0.1:9",
   CHANNELS: Keypair.random().publicKey(),
 };
 

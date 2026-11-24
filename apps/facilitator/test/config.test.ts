@@ -30,6 +30,7 @@ const minimal = {
   CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
+  SEARCH_MODEL_URL: "http://search-model:8080",
 };
 /** Pubnet is refused until per-key fee budgets (0107) land, with 0027 and 0048; 0090 has. */
 const pubnet = { NETWORK: "stellar:pubnet" };
@@ -83,7 +84,8 @@ describe("parseConfig", () => {
         floorStroops: 50_000_000n,
         balanceIntervalMs: 30_000,
       },
-      catalog: { listLocal: false },
+      searchModel: { url: "http://search-model:8080", timeoutMs: 2_000 },
+    catalog: { listLocal: false },
     });
   });
 
@@ -91,6 +93,7 @@ describe("parseConfig", () => {
     // Distinct values, so two settings swapped in the mapping would fail. NETWORK can only be
     // testnet, its default, while pubnet is refused.
     const config = parseConfig({
+      SEARCH_MODEL_URL: "http://search-model:8080",
       NETWORK: "stellar:testnet",
       PORT: "8080",
       LOG_LEVEL: "debug",
@@ -160,7 +163,8 @@ describe("parseConfig", () => {
         floorStroops: 17n,
         balanceIntervalMs: 18_000,
       },
-      catalog: { listLocal: true },
+      searchModel: { url: "http://search-model:8080", timeoutMs: 2_000 },
+    catalog: { listLocal: true },
     });
   });
 
@@ -171,6 +175,7 @@ describe("parseConfig", () => {
       CHANNELS: ` ${CHANNEL_A} `,
       CLIENT_IP: " socket ",
       DATABASE_URL: " postgres://db.internal/x402 ",
+      SEARCH_MODEL_URL: " http://search-model:8080 ",
       RPC_URLS: "",
       PORT: " ",
     });
@@ -191,6 +196,7 @@ describe("parseConfig", () => {
       "CHANNELS is required",
       "DATABASE_URL is required",
       "CLIENT_IP is required",
+      "SEARCH_MODEL_URL is required",
     ]);
   });
 

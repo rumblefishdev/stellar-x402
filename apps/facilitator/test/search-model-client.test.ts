@@ -133,6 +133,10 @@ describe("search model config (0120 D)", () => {
     DATABASE_URL: "postgres://db.internal/x402",
   };
 
+  it("refuses an environment without the search model's URL", () => {
+    expect(() => parseConfig(minimal)).toThrow(/SEARCH_MODEL_URL/);
+  });
+
   it("waits 2,000 ms for the search model by default", () => {
     const config = parseConfig({ ...minimal, SEARCH_MODEL_URL: "http://search-model:8080" });
     expect(config).toMatchObject({

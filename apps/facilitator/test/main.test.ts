@@ -65,6 +65,7 @@ const env = {
   DATABASE_URL: db.urlFor(db.schema),
   ...signerEnv(facilitator),
   CLIENT_IP: "socket",
+  SEARCH_MODEL_URL: "http://127.0.0.1:9",
   CHANNELS: Keypair.random().publicKey(),
   BODY_LIMIT_BYTES: "1024",
 };

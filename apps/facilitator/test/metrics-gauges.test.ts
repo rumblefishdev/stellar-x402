@@ -61,6 +61,7 @@ function composed(env: Record<string, string> = {}) {
     ...signerEnv(Keypair.random().publicKey()),
     DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
+    SEARCH_MODEL_URL: "http://127.0.0.1:9",
     CHANNELS: channel,
     RPC_URLS: URLS.join(","),
     ...env,

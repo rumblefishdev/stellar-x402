@@ -181,6 +181,7 @@ describe("GET /discovery/resources", () => {
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       // Every case calls from one address; rate-limit.test.ts covers the route's limit.
       RATE_LIMIT_DISCOVERY: "1000000",
     };

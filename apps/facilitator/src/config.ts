@@ -280,13 +280,10 @@ const envSchema = z
       .default("false")
       .transform((value) => value === "true"),
     /**
-     * The search model container (ADR 0014), on the environment's internal network. Unset, search
-     * ranks by words alone and no listing gets a vector.
+     * The search model container (ADR 0014), on the environment's internal network. Required, so
+     * an environment that forgot it stops at start instead of searching by words alone.
      */
-    SEARCH_MODEL_URL: z
-      .string()
-      .refine(isHttpUrl, "must be an http(s) URL without credentials")
-      .optional(),
+    SEARCH_MODEL_URL: z.string().refine(isHttpUrl, "must be an http(s) URL without credentials"),
 
     /** The breakers are fixed in code now (0024, `BREAKERS` in `spend/policy.ts`); refused, like `STORE`. */
     BREAKER_FAILURES: z.string().optional(),
@@ -448,8 +445,8 @@ export interface Config {
     balanceIntervalMs: number;
   };
   catalog: { listLocal: boolean };
-  /** The search model container; unset, search ranks by words alone. */
-  searchModel?: { url: string; timeoutMs: number };
+  /** The search model container (ADR 0014). */
+  searchModel: { url: string; timeoutMs: number };
 }
 
 /** Names every invalid setting; never echoes a value, so a secret can't leak into logs. */
@@ -585,10 +582,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       balanceIntervalMs: e.SPEND_BALANCE_INTERVAL_MS,
     },
     catalog: { listLocal: e.CATALOG_LIST_LOCAL },
-    searchModel:
-      e.SEARCH_MODEL_URL === undefined
-        ? undefined
-        : { url: e.SEARCH_MODEL_URL, timeoutMs: SEARCH_MODEL_TIMEOUT_MS },
+    searchModel: { url: e.SEARCH_MODEL_URL, timeoutMs: SEARCH_MODEL_TIMEOUT_MS },
   };
 }
 

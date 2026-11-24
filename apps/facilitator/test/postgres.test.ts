@@ -740,6 +740,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -751,7 +752,7 @@ describe("PostgreSQL stores", () => {
       // The startup sweep reads the settlements on the main pool, and only there; so does the
       // search card rewrite.
       await app.reconciled;
-      await app.searchCardsRewritten;
+      await app.searchVectorsWritten;
       const main = pools?.main.totalCount;
       expect(main).toBeGreaterThan(0);
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
@@ -842,6 +843,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -872,6 +874,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -910,6 +913,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",

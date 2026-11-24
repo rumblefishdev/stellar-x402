@@ -337,7 +337,7 @@ export function compose(
   /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
   rpcStall: RpcStallTracker;
   /** Unstarted: `main()` starts the pass after the search card rewrite. None without a model. */
-  vectors: SearchVectors | undefined;
+  vectors: SearchVectors;
 } {
   const { logger } = opts;
   const { stores } = opts;
@@ -347,9 +347,8 @@ export function compose(
   const metrics = root.for({ network: config.network });
   // The search model (ADR 0014): the route asks it for each query's vector, the vectors for each
   // listing's. The cards serve every network, so they write through the root.
-  const embedder = config.searchModel && createSearchModelClient(config.searchModel);
-  const vectors =
-    embedder && createSearchVectors({ store: stores.searchCards, embedder, logger, metrics: root });
+  const embedder = createSearchModelClient(config.searchModel);
+  const vectors = createSearchVectors({ store: stores.searchCards, embedder, logger, metrics: root });
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
   // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
@@ -593,7 +592,7 @@ export async function main(
     const searchCards = createSearchCardRewrite({ store: stores.searchCards, logger, metrics });
     const searchCardsRewritten = searchCards.start();
     // After the rewrite, so each vector is made from the card's text under this release's rules.
-    void searchCardsRewritten.then(() => vectors?.start());
+    const searchVectorsWritten = searchCardsRewritten.then(() => vectors.start());
     // Catalog writes, a prune, the search card rewrite and the vector pass already under way
     // finish before the process exits, and before the pools end, even if closing the server fails;
     // the pools end even if draining fails.
@@ -604,7 +603,7 @@ export async function main(
       // The search card rewrite and the vector pass stop at once, so they hold no connection
       // through the drain. A pass that hasn't started yet then reads nothing.
       const rewriteClosed = searchCards.close();
-      const vectorsClosed = vectors?.close();
+      const vectorsClosed = vectors.close();
       try {
         try {
           await started.close();
@@ -635,6 +634,8 @@ export async function main(
       reconciled: deps.reconciliation?.reconciled ?? Promise.resolve(),
       /** Settles once the search card rewrite at start has ended: for tests. */
       searchCardsRewritten,
+      /** Settles once the vector pass at start has ended: for tests. */
+      searchVectorsWritten,
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
       close: () => (closing ??= closeOnce()),
