@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { monthEnd, monthStart, utcInstant } from "../src/spend/period.js";
+import { monthEnd, monthStart, utcInstant } from "../src/period.js";
 
 describe("the quota month", () => {
   it("starts on the 1st at 00:00:00.000 UTC, and the last millisecond is still the month's", () => {

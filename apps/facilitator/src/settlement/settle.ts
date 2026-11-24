@@ -7,6 +7,7 @@ import {
   type Operation,
   type rpc,
 } from "@stellar/stellar-sdk";
+import { monthEnd, utcInstant } from "@stellar-x402/api-keys";
 import type { StellarNetwork } from "@stellar-x402/config";
 import {
   FeeLimitError,
@@ -30,7 +31,6 @@ import type { PaymentPayload, PaymentRequirements, SettleResponse } from "@x402/
 import { getNetworkPassphrase } from "@x402/stellar";
 import type { Logger } from "../logger.js";
 import type { LabelsOf, NetworkMetrics } from "../metrics.js";
-import { monthEnd, utcInstant } from "../spend/period.js";
 import {
   LeaseFencedError,
   type ClaimResult,

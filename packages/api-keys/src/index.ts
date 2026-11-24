@@ -1,4 +1,5 @@
 export { apiKeyHash, isApiKey, newApiKey } from "./key.js";
+export { monthEnd, monthStart, utcInstant } from "./period.js";
 export {
   DEFAULT_ACCOUNT_PLANS,
   FREE_PLAN,
