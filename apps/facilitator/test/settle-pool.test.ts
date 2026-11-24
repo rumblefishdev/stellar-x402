@@ -517,7 +517,13 @@ describe("main()'s composition (compose)", () => {
    */
   async function composed(
     env: Record<string, string> = {},
-    opts: { lease?: boolean; metrics?: ProcessMetrics; network?: Config["network"] } = {},
+    opts: {
+      lease?: boolean;
+      metrics?: ProcessMetrics;
+      network?: Config["network"];
+      /** Upstream's verify; accepts every payment by default. */
+      upstreamVerify?: () => Promise<{ isValid: boolean; invalidReason?: string; payer?: string }>;
+    } = {},
   ) {
     const parsed = parseConfig({
       ...signerEnv(facilitator.publicKey(), openbao.socketPath),
@@ -538,7 +544,11 @@ describe("main()'s composition (compose)", () => {
       logger: jsonLogger("error", () => {}),
       stores: db.stores(),
       rpc: fake,
-      seams: { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
+      seams: {
+        makeScheme: () => ({
+          verify: opts.upstreamVerify ?? (async () => ({ isValid: true, payer })),
+        }),
+      },
       sleep: async () => {},
       ...(opts.metrics && { metrics: opts.metrics }),
     });
@@ -980,6 +990,28 @@ describe("main()'s composition (compose)", () => {
     } finally {
       await app.close();
     }
+  });
+
+  // 0157, from the review of #210: dropping `verifyWithRefusals` from `main.ts` passed the suite.
+  it("records a refusal of the checks, and answers a repeat of the payment from it (0086)", async () => {
+    const invalidReason = "invalid_exact_stellar_payload_simulation_failed";
+    const upstreamVerify = vi.fn(async () => ({ isValid: false, invalidReason, payer }));
+    const { deps, fake } = await composed({}, { upstreamVerify });
+    const p = payload(fake.ledger + 30);
+
+    expect(await deps.verify(p, requirements)).toMatchObject({ isValid: false, invalidReason });
+    expect(await deps.stores.settlements.get(keyOf(p, "stellar:testnet")!)).toMatchObject({
+      state: "refused",
+      errorReason: invalidReason,
+    });
+    // The repeat gets the stored refusal without the checks, and so does `/settle`.
+    expect(await deps.verify(p, requirements)).toMatchObject({ isValid: false, invalidReason });
+    expect((await deps.settle(p, requirements)).response).toMatchObject({
+      success: false,
+      errorReason: invalidReason,
+    });
+    expect(upstreamVerify).toHaveBeenCalledTimes(1);
+    expect(fake.sent).toHaveLength(0);
   });
 
   it("reads the fee-stats bid once for /verify, /settle and the pool (AD-10)", async () => {
