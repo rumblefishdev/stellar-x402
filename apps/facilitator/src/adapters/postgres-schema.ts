@@ -316,6 +316,38 @@ ALTER TABLE catalog ALTER COLUMN ledger DROP NOT NULL;
 ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
 `,
   },
+  {
+    // 0107: the plan the operator gives an account (a key's owner) by hand; one without a row is
+    // on `free`, and the plans themselves are config. `account_usage` is the account's payments as
+    // `reserve` counts them: each `account:<owner>` scope row, which `release` deletes. It finds
+    // the account's scope in `spend_scopes`, whose row `reserve` writes with the scope rows, so
+    // the window index serves one owner's read: over the scope rows alone the owner is an
+    // expression no index serves, and the read scanned them all (about 90 ms at 3,000,000 rows,
+    // under 1 ms this way). `pruneScopes` keeps the row while the scope has a reservation in the
+    // pruner's horizon, which the quota's own count needs to cover the month. One race is left:
+    // a `pruneScopes` statement that began before the next `reserve` of an account idle for the
+    // whole horizon committed still deletes the account's row, and the view then misses its
+    // payments until a later `reserve` writes the row again; the store's count, which enforces
+    // the quota, reads the scope rows and is unaffected. The portal reads the two with `SELECT`
+    // on them alone: the view reads its tables as the view's owner. A new table and a view, so
+    // the release before keeps working: it reads neither. The view takes ACCESS SHARE on the two
+    // spend tables, which no write waits for and which waits for none. A later migration that
+    // changes a column it reads must drop the view and make it again.
+    name: "0017_account_plans",
+    sql: `
+CREATE TABLE account_plans (
+  owner text PRIMARY KEY,
+  plan text NOT NULL,
+  set_at bigint NOT NULL,
+  set_by text NOT NULL,
+  note text
+);
+CREATE VIEW account_usage AS
+  SELECT substr(s.scope, length('account:') + 1) AS owner, rs.at
+  FROM spend_scopes s JOIN spend_reservation_scopes rs ON rs.scope = s.scope
+  WHERE s.scope LIKE 'account:%';
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

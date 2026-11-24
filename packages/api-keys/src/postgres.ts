@@ -1,5 +1,6 @@
 import type pg from "pg";
-import { assertApiKey, assertSealedKey } from "./rules.js";
+import type { AccountPlanRecord, AccountPlanStore, AccountUsageReader } from "./plans.js";
+import { assertApiKey, assertApiKeyOwner, assertSealedKey } from "./rules.js";
 import type { ApiKeyRecord, ApiKeyStore, OwnerKeys, SealedKeyStore } from "./store.js";
 
 /** What a store runs its statements on: a pool, or one client inside a transaction. */
@@ -81,6 +82,80 @@ export class PostgresApiKeyStore implements ApiKeyStore {
       createdAt: Number(row.created_at),
       ...(row.revoked_at !== null && { revokedAt: Number(row.revoked_at) }),
     }));
+  }
+}
+
+/**
+ * Account plans on PostgreSQL, in the table the facilitator's migration `0017_account_plans`
+ * makes. `planOf` reads that table alone, so the portal's role needs only `SELECT` on it.
+ */
+export class PostgresAccountPlanStore implements AccountPlanStore {
+  constructor(private readonly pool: Queryable) {}
+
+  async planOf(owner: string): Promise<string | undefined> {
+    const { rows } = await this.pool.query<{ plan: string }>(
+      "SELECT plan FROM account_plans WHERE owner = $1",
+      [owner],
+    );
+    return rows[0]?.plan;
+  }
+
+  async setPlan({
+    owner,
+    plan,
+    now,
+    setBy,
+    note,
+  }: {
+    owner: string;
+    plan: string;
+    now: number;
+    setBy: string;
+    note?: string;
+  }): Promise<void> {
+    assertApiKeyOwner(owner);
+    await this.pool.query(
+      `INSERT INTO account_plans (owner, plan, set_at, set_by, note) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (owner) DO UPDATE SET plan = excluded.plan, set_at = excluded.set_at,
+         set_by = excluded.set_by, note = excluded.note`,
+      [owner, plan, now, setBy, note ?? null],
+    );
+  }
+
+  async listPlans(): Promise<AccountPlanRecord[]> {
+    // Byte order, as the in-memory store's: the database's collation would order `:` and `_`
+    // by other rules.
+    const { rows } = await this.pool.query<{
+      owner: string;
+      plan: string;
+      set_at: string;
+      set_by: string;
+      note: string | null;
+    }>('SELECT owner, plan, set_at, set_by, note FROM account_plans ORDER BY owner COLLATE "C"');
+    return rows.map((row) => ({
+      owner: row.owner,
+      plan: row.plan,
+      setAt: Number(row.set_at),
+      setBy: row.set_by,
+      ...(row.note !== null && { note: row.note }),
+    }));
+  }
+}
+
+/**
+ * Accounts' payments on PostgreSQL, through the view `account_usage` the facilitator's migration
+ * `0017_account_plans` makes over the spend store's scope rows. It reads the view alone, so the
+ * portal's role needs only `SELECT` on it.
+ */
+export class PostgresAccountUsageReader implements AccountUsageReader {
+  constructor(private readonly pool: Queryable) {}
+
+  async paymentsSince(owner: string, since: number): Promise<number> {
+    const { rows } = await this.pool.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM account_usage WHERE owner = $1 AND at >= $2",
+      [owner, since],
+    );
+    return Number(rows[0]!.count);
   }
 }
 

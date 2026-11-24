@@ -1,5 +1,14 @@
-import { PostgresSealedKeyStore } from "@stellar-x402/api-keys";
-import { apiKeyStoreContract, sealedKeyStoreContract } from "@stellar-x402/api-keys/testing";
+import {
+  PostgresAccountPlanStore,
+  PostgresAccountUsageReader,
+  PostgresSealedKeyStore,
+} from "@stellar-x402/api-keys";
+import {
+  accountPlanStoreContract,
+  accountUsageReaderContract,
+  apiKeyStoreContract,
+  sealedKeyStoreContract,
+} from "@stellar-x402/api-keys/testing";
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
@@ -206,6 +215,93 @@ describe("PostgreSQL stores", () => {
     registry: (await stores()).apiKeys,
     sealed: new PostgresSealedKeyStore(pool),
   }));
+  accountPlanStoreContract(async () => {
+    await db.empty();
+    return new PostgresAccountPlanStore(pool);
+  });
+  accountUsageReaderContract(async () => {
+    const { spend } = await stores();
+    let reservations = 0;
+    return {
+      reader: new PostgresAccountUsageReader(pool),
+      // Through the spend store, so the view reads the rows its count limit counts.
+      pay: async (owner, at) => {
+        const limits = [{ scope: `account:${owner}` as const, maxCount: 1_000, since: 0 }];
+        const id = `r${reservations++}`;
+        expect(await spend.reserve({ id, amount: 1n, limits, now: at })).toMatchObject({
+          reserved: true,
+        });
+      },
+    };
+  });
+
+  describe("an account's payments through the view (0107)", () => {
+    const OWNER = "discord:412345678901234567";
+    const SINCE = Date.UTC(2026, 10, 1);
+    const limits = [
+      { scope: `account:${OWNER}` as const, maxCount: 1_000, since: 0 },
+      { scope: "free" as const, maxStroops: 1_000_000n, windowMs: 86_400_000 },
+      { scope: "global" as const, maxStroops: 1_000_000n, windowMs: 86_400_000 },
+    ];
+
+    it("counts what the store's count limit counts: reserved and committed, never released", async () => {
+      const { spend } = await stores();
+      for (const id of ["reserved", "committed", "released"])
+        await spend.reserve({ id, amount: 100n, limits, now: SINCE + 1 });
+      await spend.commit("committed", 40n);
+      await spend.release("released", SINCE + 2);
+      // A reservation of the account alone, without the shared scopes, counts too.
+      await spend.reserve({ id: "alone", amount: 100n, limits: limits.slice(0, 1), now: SINCE });
+      // Other scopes' rows, and an account whose owner starts like this one's, count nothing.
+      await spend.reserve({
+        id: "other",
+        amount: 100n,
+        limits: [{ scope: `account:${OWNER}0`, maxCount: 1_000, since: 0 }, limits[2]!],
+        now: SINCE,
+      });
+      const lastMonth = { scope: "account:discord:1" as const, maxCount: 1_000, since: 0 };
+      await spend.reserve({ id: "last month", amount: 100n, limits: [lastMonth], now: SINCE - 1 });
+      const reader = new PostgresAccountUsageReader(pool);
+      expect(await reader.paymentsSince(OWNER, SINCE)).toBe(3);
+      // The view finds an account's scope rows through its `spend_scopes` row, which the pruner
+      // keeps while the scope has a reservation after its cutoff: a horizon that covers the month
+      // leaves the month's count whole, and takes only the scopes it emptied.
+      expect(await spend.prune(SINCE, 1_000)).toBe(1);
+      expect(await spend.pruneScopes(SINCE, 1_000)).toBe(1);
+      expect(await reader.paymentsSince(OWNER, SINCE)).toBe(3);
+      expect(await reader.paymentsSince("discord:1", 0)).toBe(0);
+      // The store refuses the next one at a limit of 3, so the two agree.
+      expect(
+        await spend.reserve({
+          id: "fourth",
+          amount: 1n,
+          limits: [{ scope: `account:${OWNER}`, maxCount: 3, since: SINCE }],
+          now: SINCE + 3,
+        }),
+      ).toEqual({ reserved: false, scope: `account:${OWNER}`, limit: "count" });
+    });
+
+    it("needs no more than SELECT on account_plans and account_usage, the portal's grants", async () => {
+      const { spend } = await stores();
+      const plans = new PostgresAccountPlanStore(pool);
+      await plans.setPlan({ owner: OWNER, plan: "basic", now: 1, setBy: "operator:a" });
+      await spend.reserve({ id: "a", amount: 100n, limits, now: SINCE });
+      const role = `${schema}_portal`;
+      await holding(async (client) => {
+        // In the transaction `holding` rolls back, so the role never outlives the test.
+        await client.query(`CREATE ROLE ${role} NOLOGIN`);
+        await client.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role}`);
+        await client.query(`GRANT SELECT ON account_plans, account_usage TO ${role}`);
+        await client.query(`SET LOCAL ROLE ${role}`);
+        expect(await new PostgresAccountPlanStore(client).planOf(OWNER)).toBe("basic");
+        expect(await new PostgresAccountUsageReader(client).paymentsSince(OWNER, SINCE)).toBe(1);
+        // And the role really is that narrow: the view's tables are out of its reach.
+        await expect(client.query("SELECT 1 FROM spend_reservation_scopes")).rejects.toThrow(
+          /permission denied/,
+        );
+      });
+    });
+  });
 
   describe("the sealed store's revoke beside an issue for the same owner (0106)", () => {
     const OWNER = "discord:412345678901234567";
@@ -1107,6 +1203,7 @@ describe("PostgreSQL stores", () => {
           "0014_api_key_copies",
           "0015_settlement_refused",
           "0016_catalog_seed",
+          "0017_account_plans",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1142,6 +1239,7 @@ describe("PostgreSQL stores", () => {
         "0014_api_key_copies",
         "0015_settlement_refused",
         "0016_catalog_seed",
+        "0017_account_plans",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

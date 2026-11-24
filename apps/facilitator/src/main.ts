@@ -1,6 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
-import { apiKeyHash, isApiKeyOwner, newApiKey } from "@stellar-x402/api-keys";
+import {
+  DEFAULT_ACCOUNT_PLANS,
+  PostgresAccountPlanStore,
+  apiKeyHash,
+  isApiKeyOwner,
+  newApiKey,
+  parseAccountPlans,
+  type AccountPlan,
+  type AccountPlanRecord,
+} from "@stellar-x402/api-keys";
 import {
   FallbackRpc,
   SettlementSubmitter,
@@ -655,22 +664,43 @@ export class KeysError extends Error {
   override name = "KeysError";
 }
 
-const KEYS_USAGE = `usage: keys issue <name> | keys revoke <name | owner> | keys list
+/** The key script's usage, naming the plans `plan` takes. */
+const keysUsage = (plans: ReadonlyMap<string, AccountPlan>) =>
+  `usage: keys issue <name> | keys revoke <name | owner> | keys list | keys plan <owner> <plan> [note…] | keys plans
   issue <name>     a new key for operator:<name>, printed once; <name> is a-z, 0-9, "_" and "-"
   revoke <owner>   revokes the owner's active key at once; a bare <name> means operator:<name>
-  list             every key: owner, state, times and the start of its hash`;
+  list             every key: owner, state, times and the start of its hash
+  plan <owner> <plan> [note…]
+                   sets the owner's plan, one of ${[...plans.keys()].join(", ")}; the rest of the line is why
+  plans            every plan set: owner, plan, when, by whom and why`;
 
 /** A name the operator gives a key's holder: what follows `operator:` in the owner. */
 const OPERATOR_NAME = /^[a-z0-9][a-z0-9_-]*$/;
 
 type KeysCommand =
-  { command: "issue"; owner: string } | { command: "revoke"; owner: string } | { command: "list" };
+  | { command: "issue"; owner: string }
+  | { command: "revoke"; owner: string }
+  | { command: "list" }
+  | { command: "plan"; owner: string; plan: string; note?: string }
+  | { command: "plans" };
 
 /** The command line of the key script; anything it doesn't take is a {@link KeysError}. */
-function parseKeysCommand(argv: readonly string[]): KeysCommand {
+function parseKeysCommand(
+  argv: readonly string[],
+  plans: ReadonlyMap<string, AccountPlan>,
+): KeysCommand {
   const [command, target, ...rest] = argv;
-  const usage = () => new KeysError(KEYS_USAGE);
-  if (command === "list" && target === undefined) return { command };
+  const usage = () => new KeysError(keysUsage(plans));
+  if ((command === "list" || command === "plans") && target === undefined) return { command };
+  if (command === "plan") {
+    // The whole owner: an account the portal made has no bare name.
+    const [plan, ...words] = rest;
+    if (target === undefined || !isApiKeyOwner(target) || plan === undefined || !plans.has(plan))
+      throw usage();
+    // On one line, so a quoted tab or line break can't split the row `plans` prints.
+    const note = words.join(" ").replace(/\s+/g, " ").trim();
+    return { command, owner: target, plan, ...(note.length > 0 && { note }) };
+  }
   if ((command !== "issue" && command !== "revoke") || target === undefined || rest.length > 0)
     throw usage();
   // Only the portal issues an owner of another kind (0106), so `issue` takes a name alone; a
@@ -681,20 +711,43 @@ function parseKeysCommand(argv: readonly string[]): KeysCommand {
   return { command, owner };
 }
 
+/** A plan row as `plan` and `plans` print it, one tab-separated line. */
+function planLine(row: AccountPlanRecord): string {
+  return [
+    row.owner,
+    row.plan,
+    `set ${new Date(row.setAt).toISOString()}`,
+    `by ${row.setBy}`,
+    row.note ?? "-",
+  ].join("\t");
+}
+
+/**
+ * Who sets a plan, as its row records it: `operator:$USER`, or `operator:unknown` when the login
+ * isn't a name an owner can carry. The row only records it, so no login fails the command.
+ */
+function planSetter(env: Record<string, string | undefined>): string {
+  const setter = `operator:${env.USER ?? ""}`;
+  return isApiKeyOwner(setter) ? setter : "operator:unknown";
+}
+
 /**
  * `pnpm keys`: the operator's hand on the API key registry (0105), the same one the portal
- * writes (0106). It needs only `DATABASE_URL`, of the network whose callers the key is for.
+ * writes (0106), and on each account's plan (0107). It needs only `DATABASE_URL`, of the network
+ * whose callers the key or the plan is for.
  *
  * `issue` prints the new key once, through `write` (stdout) and never through the logger: only
  * its SHA-256 is stored, so a lost key is replaced, not read back. `revoke` holds from the
- * caller's next request, on every instance. A mistake rejects with a {@link KeysError}.
+ * caller's next request, on every instance. `plan` takes only a plan the config names. A mistake
+ * rejects with a {@link KeysError}.
  */
 export async function keysMain(
   argv: readonly string[],
   env: Record<string, string | undefined> = process.env,
   write: (line: string) => void = (line) => void process.stdout.write(`${line}\n`),
 ): Promise<void> {
-  const parsed = parseKeysCommand(argv);
+  // The default plans, until the config carries them.
+  const parsed = parseKeysCommand(argv, parseAccountPlans(DEFAULT_ACCOUNT_PLANS));
   const { databaseUrl } = parseMigrateConfig(env);
   // Stdout is the operator's, so a lost connection is logged to stderr.
   const logger = jsonLogger("info", (line) => process.stderr.write(line));
@@ -718,6 +771,21 @@ export async function keysMain(
             `sha256 ${key.hash.slice(0, 12)}`,
           ].join("\t"),
         );
+      return;
+    }
+    const accountPlans = new PostgresAccountPlanStore(pool);
+    if (parsed.command === "plans") {
+      const rows = await accountPlans.listPlans();
+      if (rows.length === 0) write("no plans");
+      for (const row of rows) write(planLine(row));
+      return;
+    }
+    if (parsed.command === "plan") {
+      const { owner, plan, note } = parsed;
+      const now = Date.now();
+      const setBy = planSetter(env);
+      await accountPlans.setPlan({ owner, plan, now, setBy, note });
+      write(planLine({ owner, plan, setAt: now, setBy, note }));
       return;
     }
     const { owner } = parsed;

@@ -1,3 +1,4 @@
+import type { AccountPlan } from "@stellar-x402/api-keys";
 import type { SpendLimit, SpendScope } from "../ports/index.js";
 import { SETTLE_REASONS } from "../settlement/reasons.js";
 import type { AssetTier } from "./asset-kinds.js";
@@ -15,13 +16,6 @@ export interface SpendBudgets {
   perOtherAssetStroops: bigint;
   /** All other tokens together, so junk tokens can't spend `global` that USDC sellers need. */
   tierOtherStroops: bigint;
-}
-
-/** What an account's plan allows; replaced by the plan type of the plan catalog later. */
-interface AccountPlan {
-  name: string;
-  payments: number;
-  dailyFeeStroops: bigint;
 }
 
 /** The key's owner, as the account's quota and budget scopes need it. */
