@@ -4,7 +4,7 @@
 #     test rules event-restart-and-pool-health.test.yml
 # The two "control" tests passed at 36e1d5bb; the two "point" tests failed there and pass since
 # the Event rule's fix. Point 4 carries the liveness series a real restart writes, which the fix
-# reads.
+# reads. The last three check that an alert ends or stays quiet (Oskar's review of #228).
 rule_files: [x402-production.yml]
 evaluation_interval: 1m
 
@@ -69,3 +69,50 @@ tests:
         exp_alerts:
           - exp_labels: *pool_health
             exp_annotations: *pool_health_text
+
+  # Quiet and resolved, so a rule that fires too long or too early fails too (Oskar's review of
+  # #228): without them, dropping the restart term's start-time window or lowering pool-health's
+  # threshold would pass.
+
+  # Point 4's restart, the new process running on: its window ends 15 minutes after its start
+  # (1530 s + 900 s = 40m30s), and with the counter flat increase() sees nothing, so it resolves.
+  - name: "point 4: the restart's alert ends once its window has passed"
+    interval: 15s
+    input_series:
+      - series: 'settlement_history_gone_total{project="x402",network="stellar:testnet"}'
+        values: '0x4 1x16 stale _x80 1x200'
+      - series: 'facilitator_started_timestamp_seconds{project="x402"}'
+        values: '0x20 stale _x80 1530x200'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: x402-event
+        exp_alerts:
+          - exp_labels: *history_gone
+            exp_annotations: *history_gone_text
+      - eval_time: 45m
+        alertname: x402-event
+        exp_alerts: []
+
+  # One process since 0 s, counting one record at 1m and holding 1: once the window has passed,
+  # a count above 0 alone fires nothing.
+  - name: "quiet: a long-running process's old count doesn't fire"
+    interval: 15s
+    input_series:
+      - series: 'settlement_history_gone_total{project="x402",network="stellar:testnet"}'
+        values: '0x4 1x200'
+      - series: 'facilitator_started_timestamp_seconds{project="x402"}'
+        values: '0x204'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: x402-event
+        exp_alerts: []
+
+  - name: "quiet: 4 sequence resyncs within 2 minutes don't fire pool-health"
+    interval: 15s
+    input_series:
+      - series: 'pool_events_total{project="x402",network="stellar:testnet",type="sequence-resync"}'
+        values: '0x40 1x1 2x1 3x1 4x60'
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: x402-event
+        exp_alerts: []
