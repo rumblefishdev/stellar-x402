@@ -54,8 +54,9 @@ The measurements are in
   The catalog's write stores the listing and its card in one statement, so search finds what the
   catalog holds from the moment it holds it. Each release, as it starts, rewrites every card once
   in the background with its own rules, so a change to the rules, the listings stored before cards
-  existed and a rolled-back release all leave the cards matching their listings. The catalog table
-  is never rewritten for search.
+  existed and a rolled-back release all leave the cards matching their listings, unless the
+  rewrite fails to read the catalog: then it stops, logs an error and the cards past that point
+  wait for the next start. The catalog table is never rewritten for search.
 
 - **Matches.** A listing matches a query when its meaning is close enough: cosine similarity
   0.60 or more (below). Words never add a listing; they only order the listings that match. On
