@@ -762,7 +762,7 @@ listings that sellers write. Its first part ranks by words alone; the part by me
   Once the meaning part lands, the words weigh a fifth of a listing's score and count only by
   their rank among matches (ADR 0014), which bounds what repetition buys.
 - **Residual risk:** When the model is down, search falls back to words alone and repetition wins
-  again. The quality score (task 0154) is the place to discount it.
+  again. It stays a named risk with no limit of its own (ADR 0014).
 
 #### Costly queries
 
