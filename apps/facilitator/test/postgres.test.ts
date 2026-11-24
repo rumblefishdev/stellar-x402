@@ -998,6 +998,10 @@ describe("PostgreSQL stores", () => {
     );
     const words = await pool.query("SELECT words::text FROM catalog_search WHERE seq = $1", [seq]);
     expect(words.rows[0].words).toBe("'citi':4 'ocean':2B 'tide':1A 'weather':3C");
+    const index = await pool.query(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'catalog_search_words'",
+    );
+    expect(index.rows[0].indexdef).toContain("USING gin (words)");
     // A card for a listing the catalog doesn't hold is refused.
     await expect(
       pool.query(
