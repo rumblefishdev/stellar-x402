@@ -1,6 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import {
+  createServer as createNetServer,
+  type AddressInfo,
+  type Server as NetServer,
+} from "node:net";
 import { networkInterfaces } from "node:os";
 import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
@@ -46,14 +50,21 @@ beforeAll(async () => {
 
 afterAll(() => facilitator.close());
 
-/** A port free on `host`; the proxy listens on `localhost`, which may be IPv6 only. */
-async function freePort(host = "localhost") {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, host, resolve));
-  const { port } = server.address() as AddressInfo;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
+/**
+ * A facilitator that accepts each connection and drops it at once, so every call to it fails the
+ * way an unreachable one does. It holds its port for the whole run: a port probed free and closed
+ * could be taken by another test's server in between, which would then answer.
+ */
+let dropping: NetServer;
+let droppingUrl: string;
+
+beforeAll(async () => {
+  dropping = createNetServer((socket) => socket.destroy());
+  await new Promise<void>((resolve) => dropping.listen(0, "127.0.0.1", resolve));
+  droppingUrl = `http://127.0.0.1:${(dropping.address() as AddressInfo).port}`;
+});
+
+afterAll(() => dropping.close());
 
 const started: ChildProcess[] = [];
 
@@ -63,21 +74,25 @@ afterEach(() => {
   answer = valid;
 });
 
-/** Starts the proxy and resolves once it printed the line the suite waits for. */
+/**
+ * Starts the proxy on a port the system picks and resolves, with that port, once it printed the
+ * line the suite waits for.
+ */
 async function startProxy(target = facilitatorUrl) {
-  const port = await freePort();
   const child = spawn("bash", ["run.sh"], {
     cwd: folder,
-    env: { ...process.env, PORT: String(port), GATE_FACILITATOR_URL: target },
+    env: { ...process.env, PORT: "0", GATE_FACILITATOR_URL: target },
   });
   started.push(child);
   let stdout = "";
   let stderr = "";
   child.stderr!.on("data", (chunk) => (stderr += chunk));
-  await new Promise<void>((resolve, reject) => {
+  const port = await new Promise<string>((resolve, reject) => {
     child.stdout!.on("data", (chunk) => {
       stdout += chunk;
-      if (stdout.includes("Facilitator listening")) resolve();
+      // The comma after the number: stdout can arrive cut mid-number.
+      const listening = /Facilitator listening on port (\d+),/.exec(stdout);
+      if (listening) resolve(listening[1]!);
     });
     child.on("exit", (code) => reject(new Error(`proxy exited with ${code}: ${stderr}`)));
   });
@@ -205,7 +220,7 @@ describe("external proxy", () => {
   });
 
   it("answers 502 when the facilitator cannot be reached", async () => {
-    const proxy = await startProxy(`http://127.0.0.1:${await freePort("127.0.0.1")}`);
+    const proxy = await startProxy(droppingUrl);
     const res = await fetch(`${proxy.url}/supported`);
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: "facilitator_unreachable" });
@@ -227,11 +242,17 @@ describe("external proxy", () => {
     await expect(fetch(`${proxy.url}/health`)).rejects.toThrow();
   });
 
-  it("refuses to start without a target", async () => {
-    const child = spawn("bash", ["run.sh"], {
-      cwd: folder,
-      env: { ...process.env, PORT: String(await freePort()), GATE_FACILITATOR_URL: "" },
-    });
+  // The proxy exits before it listens, so the port is never bound.
+  it.each([
+    ["without a target", { PORT: "0", GATE_FACILITATOR_URL: "" }],
+    ["without a port", { PORT: "", GATE_FACILITATOR_URL: "http://127.0.0.1:1" }],
+    [
+      "with a port that is not a number",
+      { PORT: "abc", GATE_FACILITATOR_URL: "http://127.0.0.1:1" },
+    ],
+    ["with a port past 65535", { PORT: "70000", GATE_FACILITATOR_URL: "http://127.0.0.1:1" }],
+  ])("refuses to start %s", async (_, env) => {
+    const child = spawn("bash", ["run.sh"], { cwd: folder, env: { ...process.env, ...env } });
     started.push(child);
     expect(await exited(child)).toEqual({ code: 1, signal: null });
   });
