@@ -37,6 +37,9 @@ last days of the milestone go to checking it, not to writing it.
 - Tranche #2 has six line items in the Panel Review response's budget (§1), 9.0 dev-weeks:
   - D1: Bazaar search and ranking engine, with its nDCG@10 evaluation (0120, 0135, 0154, 0070);
   - D2: MCP discovery server, search and paid-call tools (0042, 0068, 0085, 0137);
+    0137's evidence: a search, then a paid call on its result, on testnet (scenario E-25,
+    transaction `a94b6cb6793a15d9dd55d8c1860e53f303fe268f5510f40758401dfa4e19b1c4`), in
+    `apps/mcp-local/e2e/results/testnet-results.json` once PR #245 merges;
   - D3: `scheme_upto_stellar.md` finalized and submitted to the TSC (0034);
   - D4: SDK helpers, TypeScript (0102, 0092);
   - D5: Rust seller crate, part 1 of 2 (0136);
