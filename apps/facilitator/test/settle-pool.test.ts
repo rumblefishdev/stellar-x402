@@ -5,7 +5,7 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { getUsdcAddress } from "@x402/stellar";
 import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { openBaoSigner } from "../src/adapters/openbao-signer.js";
-import { parseConfig, type Env } from "../src/config.js";
+import { parseConfig, type Config, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { buildChecks, buildRpc, buildSettlement, compose } from "../src/main.js";
 import type { BuildIssue } from "../src/adapters/emf.js";
@@ -510,12 +510,16 @@ describe("main()'s /settle wiring, with the real pool", () => {
 });
 
 describe("main()'s composition (compose)", () => {
-  /** The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. */
+  /**
+   * The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. With
+   * `network`, the config is parsed as testnet's and given that network after, past
+   * `parseConfig`'s refusal of pubnet (0048), as `api-key-route.test.ts` does.
+   */
   async function composed(
     env: Record<string, string> = {},
-    opts: { lease?: boolean; metrics?: ProcessMetrics } = {},
+    opts: { lease?: boolean; metrics?: ProcessMetrics; network?: Config["network"] } = {},
   ) {
-    const config = parseConfig({
+    const parsed = parseConfig({
       ...signerEnv(facilitator.publicKey(), openbao.socketPath),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
@@ -523,6 +527,7 @@ describe("main()'s composition (compose)", () => {
       MAX_FEE_STROOPS: String(MAX_FEE),
       ...env,
     });
+    const config = opts.network ? { ...parsed, network: opts.network } : parsed;
     // The fee account holds the float (ADR 0013), well above the floor.
     const fake = new PaymentRpc({ [channel]: 1_000n, [facilitator.publicKey()]: 1n });
     fake.balances.set(facilitator.publicKey(), FLOAT);
@@ -857,6 +862,86 @@ describe("main()'s composition (compose)", () => {
       errorReason: SETTLE_REASONS.spendLimitAsset,
     });
     expect(fake.sent).toHaveLength(0);
+  });
+
+  // 0157, from Oskar's review of #236: every other `compose()` test builds a testnet config, and
+  // reverting any of `plans`, `accountPlans` or `keyed` in `main.ts` passed the whole suite.
+  describe("on a network that requires an API key (0107)", () => {
+    const pubnet = "stellar:pubnet" as const;
+    const OWNER = "discord:412345678901234567";
+    const keyedRequirements = { ...requirements, network: pubnet };
+    /** `ACCOUNT_PLANS` unlike the defaults: one free payment a month, where the default is 1,000. */
+    const PLANS = "free:1:20000000,basic:10:25000000";
+    const keyed = () => composed({ ACCOUNT_PLANS: PLANS }, { network: pubnet });
+    /** A payment sent to `/settle` with a key of `owner`'s, or with no caller at all. */
+    const pay = (
+      { deps, fake }: Awaited<ReturnType<typeof composed>>,
+      owner: string | null = OWNER,
+    ) =>
+      deps.settle(
+        transferPayload(
+          { payer, payTo, requirements: keyedRequirements },
+          fake.ledger + 30,
+          undefined,
+          String(++nonces),
+        ),
+        keyedRequirements,
+        undefined,
+        owner === null ? undefined : { owner },
+      );
+
+    it("counts a keyed settlement in its account, free and global alone (criterion 1)", async () => {
+      const graph = await keyed();
+      expect((await pay(graph)).response).toMatchObject({ success: true, network: pubnet });
+      const counted = [`account:${OWNER}`, "free", "global"];
+      // The budgets of keyless traffic, which another key's payments could fill.
+      const keyless = [
+        `payer:${payer}/${asset}`,
+        `payTo:${payTo}/${asset}`,
+        `asset:${asset}`,
+        "tier:other",
+      ];
+      await vi.waitFor(async () => {
+        expect(await usedIn(graph.deps, counted)).toEqual(counted.map(() => FEE_CHARGED));
+      });
+      expect(await usedIn(graph.deps, keyless)).toEqual(keyless.map(() => 0n));
+    });
+
+    it("holds an account to the quota ACCOUNT_PLANS names, and to the plan of its registry row", async () => {
+      const graph = await keyed();
+      expect((await pay(graph)).response).toMatchObject({ success: true });
+      // The config's `free` allows one payment a month, not the default's 1,000.
+      expect((await pay(graph)).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.quotaExhausted,
+      });
+      expect(graph.fake.sent).toHaveLength(1);
+
+      // The operator's `keys plan`: the row is read from the registry with the next settlement.
+      await graph.deps.stores.accountPlans.setPlan({
+        owner: OWNER,
+        plan: "basic",
+        now: Date.now(),
+        setBy: "operator:test",
+      });
+      expect((await pay(graph)).response).toMatchObject({ success: true });
+      // Another account is still on the config's `free`, with a month of its own.
+      expect((await pay(graph, "discord:2")).response).toMatchObject({ success: true });
+      expect((await pay(graph, "discord:2")).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.quotaExhausted,
+      });
+    });
+
+    it("refuses a settlement without a caller, which would count in no account", async () => {
+      const graph = await keyed();
+      expect((await pay(graph, null)).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.refused,
+      });
+      expect(graph.fake.sent).toHaveLength(0);
+      expect(await usedIn(graph.deps, ["global"])).toEqual([0n]);
+    });
   });
 
   it("refuses a /settle while the fee account is below the floor (0024)", async () => {
