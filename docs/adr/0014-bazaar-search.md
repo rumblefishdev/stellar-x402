@@ -94,9 +94,9 @@ The measurements are in
   - In a container of its own, with its own memory limit, reached by the facilitator over the
     environment's internal network. The model file is in the image, pinned by its revision, so
     nothing is downloaded when it starts.
-  - It holds no database password. The card loop asks it for a card's vector when the card has
-    none, or its model or text hash differs, without holding a lock. A card whose listing changes
-    meanwhile is written again on the next pass.
+  - It holds no database password. The facilitator reads listings whose vector is missing or
+    stale (another model, another text hash), asks the container for each vector without holding
+    a lock, and writes it only `WHERE` the text hash is still the one it embedded.
   - The facilitator sends the container one listing at a time, so a backlog never takes the CPU
     that queries need.
   - A listing the container fails on is tried again on the next pass. Failures are logged with

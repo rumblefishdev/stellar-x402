@@ -319,12 +319,12 @@ ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
   {
     // 0120: each listing's search card (ADR 0014): its four fields, built by `searchFields` in
     // `@stellar-x402/bazaar`, and their weighted words. A table of its own, which the catalog's
-    // write fills along with the listing, so a change to the field rules or the model is a
-    // rewrite of cards by a background loop, never a rewrite of `catalog` under its lock. `rules`
-    // says which rules version built a card; the loop rewrites a card whose rules differ. A new
-    // table, so the release before keeps working: it never reads it. No index on the words: on 35,000 listings the
-    // fallback ranking took 142 ms with a GIN index and 138 ms without (measured locally on 18 with
-    // 35,000 synthetic listings, 2026-11-23).
+    // write fills along with the listing, so a change to the field rules is a rewrite of cards
+    // by a background loop, never a rewrite of `catalog` under its lock. `rules` says which rules
+    // version built a card; the loop rewrites a card whose rules differ. A new table, so the
+    // release before keeps working: it never reads it. No index on the words: on 35,000 listings
+    // the fallback ranking took 142 ms with a GIN index and 138 ms without (measured locally on 18
+    // with 35,000 synthetic listings, 2026-11-23).
     name: "0017_catalog_search",
     sql: `
 CREATE TABLE catalog_search (
