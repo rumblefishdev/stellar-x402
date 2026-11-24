@@ -65,6 +65,15 @@ its own channel pool, signer, RPC endpoints and store, before mainnet joins.
   left: a request with a real key waits behind the flood's reads. Decide whether the edge stops
   it (0038) or a guard on refusals does, with the faults the threat model lists (from Stanisław's
   review of #185, 2026-11-13).
+- From 0107, before pubnet opens (2026-11-24):
+  - add `stellar:pubnet` to infra's `networks` (`infra/envs/production.json`), so pubnet gets its
+    own `signer-failures` and `budget-nearing` alarms, and fire-test `budget-nearing` for `free`;
+  - size the registry's pool (3 connections): every pubnet settlement now reads its account's plan
+    there, inside the settle budget, so a slow read can use up the budget;
+  - point the portal at pubnet's database: until then the hub's usage counts testnet's, where no
+    payment has a key, and shows 0;
+  - run once by hand the runbook's Logs Insights query for `spend_limit_reached` and its
+    `keys plan` Docker command ("Account plans").
 
 ## Open Questions
 

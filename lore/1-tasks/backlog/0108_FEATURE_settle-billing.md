@@ -32,6 +32,11 @@ account's limit by hand.
   settlement's fee (about 14,500 stroops), so above that rate a settlement costs us more than it
   earns. At the fee ceiling (250,000 stroops) that happens above about $0.04 per XLM. A fixed price
   in config, or the fee charged plus a margin with a minimum.
+
+  > **Since (0107, 2026-11-23):** XLM was $0.128, not $0.69, and pubnet's typical USDC settlement
+  > was measured at 12,203 stroops ($0.000156), not about 14,500. So $0.001 is about 0.0078 XLM,
+  > 6.4 times the typical fee, and a settlement at the ceiling ($0.0032) costs more than it earns;
+  > the typical one would only above about $0.82 per XLM. Figures in 0107's `R-fee-numbers` note.
 - **How it is paid.** Prepaid USDC credited to the account, or an invoice. ADR 0007 says the
   facilitator "never holds client or seller funds and never extends credit": prepaid holds
   funds and an invoice extends credit, so either changes that line; check it against the RFP's

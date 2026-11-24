@@ -31,9 +31,14 @@ no copy (one the operator's script issued) and for one whose copy doesn't open.
 made this month (`used`, `remaining`, `limit`, `period_start`, `period_end`, `resets_at`, `as_of`)
 and its `plan` (`name`, `quota_limit`, `quota_period: "month"`), in Prices' shape (0107). The month
 is the calendar month in UTC, and the count is the facilitator's own, read through the view
-`account_usage`; a plan the config doesn't have reads as `free`. It is `null` when the plan or the
-count can't be read (logged as `hub_usage_unavailable`), and the key is answered all the same.
-Until the portal reads pubnet's database (0126) it counts testnet's, where no keyed payment is.
+`account_usage`; a plan the config doesn't have reads as `free`. The view reaches an account's
+payments through its row in `spend_scopes`, and an account idle for the pruner's whole horizon
+can lose that row in a race with its next payment: it then shows fewer payments than the
+facilitator counts, until a later payment of the account writes the row again. What the
+facilitator refuses is unaffected: its count reads the payments themselves. It is `null` when the
+plan or the count can't be read (logged as `hub_usage_unavailable`), and the key is answered all
+the same. Until the portal reads pubnet's database (0126) it counts testnet's, where no keyed
+payment is.
 
 ### Errors
 
@@ -109,7 +114,7 @@ however often `/health` is called.
 | `DATABASE_URL`            | the database whose registry the facilitator reads                                                                                                                                    |
 | `MIN_ACCOUNT_AGE_MINUTES` | default `5`                                                                                                                                                                          |
 | `PORT`                    | default `4022`                                                                                                                                                                       |
-| `ACCOUNT_PLANS`           | the plans as the facilitator reads them, `<name>:<payments a month>:<fee stroops per 24 h>`, comma-separated; default `free:1000:20000000,basic:10000:25000000,pro:100000:100000000` |
+| `ACCOUNT_PLANS`           | the same plans text the facilitator has: `<name>:<payments a month>:<fee stroops per 24 h>`, comma-separated; default `free:1000:20000000,basic:10000:25000000,pro:100000:100000000` |
 | `CLIENT_IP`               | `socket` (default) or `cloudflare`                                                                                                                                                   |
 | `LOG_LEVEL`               | `debug`, `info` (default), `warn` or `error`                                                                                                                                         |
 
