@@ -828,9 +828,11 @@ the network, submitted the payer's entry first, or the payer spent the nonce on 
 facilitators to the same seller would be served twice. No action is needed for one; many of them
 mean someone grieves our fees. The same counter with `window: "verify"` counts a refusal in `/verify` or in `/settle`'s re-check
 before the claim, which records it `refused` (0086): there the other transaction landed before ours was sent,
-so it cost no fee. It counts requests, not payments: each `/verify`, each `/settle` retry and each
-reopen re-check of the same payload adds one, so a burst of retries is not a burst of front-runs.
-`/verify` keeps no record either, so a repeat of a payment we settled ourselves counts too.
+so it cost no fee. It counts runs of the checks, not payments: each `/verify`, `/settle` retry and
+reopen re-check that runs them on the same payload adds one, so a burst of retries is not a burst of
+front-runs. A repeat of a payment the checks refused is answered from its `refused` record without
+them and adds none. A repeat of a payment we settled ourselves finds a `success` record, so the
+checks run and it counts each time.
 
 `settlement_landed_after_expired` (counted in `settlement_landed_after_expired_total` by `state`)
 reports a transaction found on chain after its record ended `expired`, with its hash and ledger. The
