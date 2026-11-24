@@ -629,6 +629,48 @@ describe("cataloger", () => {
     expect(counted("payment", "internal_error", "compare")).toBe(1);
     expect(logger.info).not.toHaveBeenCalledWith("catalog_rejected", expect.anything());
   });
+
+  // 0120 point E: the vector is computed after the catalog's write, and its failure is the
+  // vectors' own (logged and counted there): the listing stands.
+  it("computes the vector of a listing it wrote, and only of one it wrote (0120 E)", async () => {
+    const listed = vi.fn(async (_key: unknown) => {});
+    const { cataloger, list } = setup({ vectors: { listed } } as Partial<CatalogerDeps>);
+    await cataloger.onSuccess(record(valid), "settle");
+    const [entry] = await list();
+    await vi.waitFor(() => expect(listed).toHaveBeenCalledTimes(1));
+    expect(listed).toHaveBeenCalledWith({
+      network: "stellar:testnet",
+      payTo: "GPAYTO",
+      method: "GET",
+      resourceUrl: entry!.resource,
+    });
+    // An unchanged copy writes nothing, so there is no new text to embed.
+    await cataloger.onSuccess(record(valid), "settle");
+    await cataloger.drain();
+    expect(listed).toHaveBeenCalledTimes(1);
+  });
+
+  it("still lists when the vector fails or hangs (0120 E)", async () => {
+    const failing = setup({
+      vectors: { listed: vi.fn().mockRejectedValue(new Error("model down")) },
+    } as Partial<CatalogerDeps>);
+    await expect(failing.cataloger.onSuccess(record(valid), "settle")).resolves.toBeUndefined();
+    expect(await failing.list()).toHaveLength(1);
+    expect(failing.metrics.value("catalog_upsert_failures_total", { origin: "settle" })).toBe(0);
+
+    await db.empty();
+    const hung = setup({
+      vectors: { listed: vi.fn().mockReturnValue(new Promise(() => {})) },
+    } as Partial<CatalogerDeps>);
+    const done = hung.cataloger.onSuccess(record(valid), "settle");
+    await expect(
+      Promise.race([
+        done.then(() => "done"),
+        new Promise((resolve) => setTimeout(() => resolve("hung"), 2_000)),
+      ]),
+    ).resolves.toBe("done");
+    expect(await hung.list()).toHaveLength(1);
+  });
 });
 
 describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {

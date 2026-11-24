@@ -30,6 +30,7 @@ import {
   catalogStoreContract,
   searchCardStoreContract,
   catalogSearchContract,
+  catalogMeaningContract,
   rateLimitStoreContract,
   settlement,
   holdLease,
@@ -37,6 +38,7 @@ import {
   spendStoreContract,
 } from "./port-contracts.js";
 import { hardened, rpcStub } from "./rpc-stub.js";
+import { meaningText, readCards, setVector, sha256, unitVector, vectorLiteral } from "./vectors.js";
 import { signerEnv } from "./fake-openbao.js";
 
 // `main()`'s EMF lines off stdout: `LOG_LEVEL` quiets the logger only.
@@ -206,6 +208,10 @@ describe("PostgreSQL stores", () => {
   catalogStoreContract(async () => (await stores()).catalog);
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
   catalogSearchContract(async () => (await stores()).catalog);
+  catalogMeaningContract(async () => ({
+    catalog: (await stores()).catalog,
+    setVector: (key, model, vector) => setVector(pool, key, model, vector),
+  }));
   searchCardStoreContract(async () => {
     const all = await stores();
     return { catalog: all.catalog, cards: all.searchCards };
@@ -1120,6 +1126,62 @@ describe("PostgreSQL stores", () => {
     } finally {
       writer.release();
     }
+  });
+
+  // 0120 point A. Needs the `vector` extension (pgvector) in the test database.
+  it("gives each search card a model, a text hash and a 384-number vector, one per listing (0120 A)", async () => {
+    await db.empty();
+    const { rows: columns } = await pool.query(
+      `SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute
+        WHERE attrelid = 'catalog_search'::regclass AND attname IN ('model', 'text_hash', 'embedding')
+        ORDER BY attname`,
+    );
+    expect(columns).toEqual([
+      { attname: "embedding", type: "vector(384)" },
+      { attname: "model", type: "text" },
+      { attname: "text_hash", type: "text" },
+    ]);
+    const { catalog } = db.stores();
+    await catalog.upsert(catalogEntry());
+    // A new listing's card has no vector yet.
+    expect(
+      (await readCards(pool)).map((card) => [card.model, card.text_hash, card.embedding]),
+    ).toEqual([[null, null, null]]);
+    const key = catalogEntry().key;
+    await setVector(pool, key, "m", unitVector(0.8));
+    await setVector(pool, key, "m", unitVector(0.6));
+    const cards = await readCards(pool);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.text_hash).toBe(sha256(meaningText(cards[0]!)));
+    // A vector of another size is refused.
+    await expect(
+      pool.query("UPDATE catalog_search SET embedding = $1::public.vector", [
+        vectorLiteral([1, 0, 0]),
+      ]),
+    ).rejects.toThrow(/dimensions/);
+  });
+
+  it("keeps a card's vector through a catalog write that changes the listing (0120 A, ADR 0014)", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert({ ...entry, resource: { ...entry.resource, description: "Tides" } });
+    await setVector(pool, entry.key, "m", unitVector(0.8));
+    const before = (await readCards(pool))[0]!;
+    await catalog.upsert({
+      ...entry,
+      checkedAt: 2,
+      resource: { ...entry.resource, description: "Waves" },
+    });
+    const after = (await readCards(pool))[0]!;
+    expect(after.description).not.toBe(before.description);
+    // The old vector stays, now stale: its hash is the old text's (0120 B).
+    expect([after.model, after.text_hash, after.embedding]).toEqual([
+      before.model,
+      before.text_hash,
+      before.embedding,
+    ]);
+    expect(after.text_hash).not.toBe(sha256(meaningText(after)));
   });
 
   it("applies the migrations once when two runs race", async () => {
