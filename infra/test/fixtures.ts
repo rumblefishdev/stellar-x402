@@ -67,5 +67,14 @@ export function synth(config: EnvironmentConfig) {
   const uptime = json(x.uptime);
   const telemetry = json(x.telemetry);
   const watch = json(x.watch);
-  return { x, alarms, uptime, telemetry, watch, all: [alarms, uptime, telemetry, watch] };
+  const heartbeat = json(x.heartbeat);
+  return {
+    x,
+    alarms,
+    uptime,
+    telemetry,
+    watch,
+    heartbeat,
+    all: [alarms, uptime, telemetry, watch, heartbeat],
+  };
 }

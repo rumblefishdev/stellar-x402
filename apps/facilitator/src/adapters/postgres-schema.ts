@@ -317,9 +317,37 @@ ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
 `,
   },
   {
+    // 0120: each listing's search card (ADR 0014): its four fields, built by `searchFields` in
+    // `@stellar-x402/bazaar`, and their weighted words. A table of its own, which the catalog's
+    // write fills along with the listing, and which each release rewrites once as it starts, so a
+    // change to the field rules never rewrites `catalog` under its lock. A new table, so the
+    // release before keeps working: it never reads it. The GIN index lets a query read only the
+    // cards that hold its words: over CDP's 39,579 real listings and 0134's 40 queries it took the
+    // median from 23.8 ms to 10.3 ms, and a query of rare words from about 10 ms to under 2 ms
+    // (measured locally on 18, 2026-11-24).
+    name: "0017_catalog_search",
+    sql: `
+CREATE TABLE catalog_search (
+  seq bigint PRIMARY KEY REFERENCES catalog (seq) ON DELETE CASCADE,
+  name text NOT NULL,
+  tags text NOT NULL,
+  description text NOT NULL,
+  parameters text NOT NULL,
+  -- Weights A to D; search ranks them 1.0, 0.67, 0.5, 0.33.
+  words tsvector GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', name), 'A')
+      || setweight(to_tsvector('english', tags), 'B')
+      || setweight(to_tsvector('english', description), 'C')
+      || setweight(to_tsvector('english', parameters), 'D')
+  ) STORED
+);
+CREATE INDEX catalog_search_words ON catalog_search USING gin (words);
+`,
+  },
+  {
     // 0154: one row per settled payment for a listing, which the search's quality score counts
     // (ADR 0014). A new, empty table: the release before never reads it.
-    name: "0017_catalog_payments",
+    name: "0018_catalog_payments",
     sql: `
 CREATE TABLE catalog_payments (
   settlement_key text PRIMARY KEY,

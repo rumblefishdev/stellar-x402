@@ -76,20 +76,21 @@ Built in `infra/` and defined in the alarm list, but their group is off in
 `infra/envs/production.json` until what they read exists. Each gets its section here, and is fired
 once, by the task that turns it on.
 
-| Alarm                | Group           | Turned on by                                                                           |
-| -------------------- | --------------- | -------------------------------------------------------------------------------------- |
-| `account-effects`    | `watchSecurity` | 0127, the theft section                                                                |
-| `account-state`      | `watchSecurity` | 0127, the theft section                                                                |
-| `backup-age`         | `backups`       | 0026, once the first pgBackRest backup is made                                         |
-| `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
-| `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
-| `hub-uptime`         | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
-| `portal-uptime`      | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
-| `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
-| `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
-| `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
-| `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
-| `wal-stale`          | `backups`       | 0026, as above                                                                         |
+| Alarm                  | Group           | Turned on by                                                                                     |
+| ---------------------- | --------------- | ------------------------------------------------------------------------------------------------ |
+| `account-effects`      | `watchSecurity` | 0127, the theft section                                                                          |
+| `account-state`        | `watchSecurity` | 0127, the theft section                                                                          |
+| `backup-age`           | `backups`       | 0026, once the first pgBackRest backup is made                                                   |
+| `backup-secret-read`   | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                               |
+| `channel-held`         | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred)           |
+| `hub-uptime`           | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1             |
+| `monitoring-heartbeat` | `heartbeat`     | 0139, once Alertmanager's Watchdog publishes to its topic (soroban-infrastructure `monitoring/`) |
+| `portal-uptime`        | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published                        |
+| `snapshot-age`         | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                                      |
+| `upstream-changed`     | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run                    |
+| `upstream-silent`      | `upstream`      | 0026, as above                                                                                   |
+| `wal-failing`          | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                                   |
+| `wal-stale`            | `backups`       | 0026, as above                                                                                   |
 
 **The logs.** The facilitator, the tunnel, Postgres, OpenBao and the deploy write their output to
 files under `/var/log/x402/` on the server, and the CloudWatch agent ships them ([runbook, The CloudWatch agent](runbook.md#the-cloudwatch-agent)):
@@ -709,6 +710,46 @@ fails. When it expires, no log or metric line reaches CloudWatch.
    a new key and CSR on the server, signed by the ClickHouse project's CA holder, committed by pull
    request to `deploy/production`.
 
+## The monitoring VM
+
+### monitoring-heartbeat
+
+Alertmanager's always-firing `Watchdog` stopped reaching the topic
+`x402-production-monitoring-heartbeat`, which it publishes to every minute (ADR 0011,
+"Heartbeat"): Prometheus, Alertmanager or the VM `monitoring-hel1-01` is down, or the VM's AWS
+credential is broken. Meanwhile the Prometheus rules page no one. Its own stack, `X402-production-Heartbeat`.
+
+1. Did the Watchdog reach SNS? Two hours, one-minute periods:
+
+   ```sh
+   S=$(date -u -d '-2 hour' +%FT%TZ 2>/dev/null || date -u -v-2H +%FT%TZ); E=$(date -u +%FT%TZ); aws cloudwatch get-metric-statistics --profile stellar --region eu-central-1 --namespace AWS/SNS --metric-name NumberOfMessagesPublished --dimensions Name=TopicName,Value=x402-production-monitoring-heartbeat --statistics Sum --period 60 --start-time $S --end-time $E --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Sum]' --output text
+   ```
+
+   No points since it fired: nothing reached the topic, go to 2. Points every minute and the
+   alarm still in ALARM: the alarm's own settings (`aws cloudwatch describe-alarms --profile stellar --region eu-central-1 --alarm-names x402-production-monitoring-heartbeat`).
+
+2. Is the VM up, and does Alertmanager send?
+
+   ```sh
+   ssh monitoring 'uptime; sudo docker ps --format "{{.Names}} {{.Status}}"'
+   ssh monitoring 'sudo docker logs --since 30m monitoring-alertmanager-1 2>&1 | grep -i -E "sns|error" | tail'
+   ```
+
+   No SSH: the VM or Hetzner, in the Hetzner Cloud console. No `Watchdog` firing in Alertmanager:
+   Prometheus doesn't evaluate or doesn't reach Alertmanager. `Watchdog` firing: Alertmanager
+   doesn't publish; its log names an SNS or credential error (the VM's certificate, its signing
+   helper, or the role's IP condition after the VM's IP changed). A new IP takes the parameter
+   and a deploy of the stack: CloudFormation reads the parameter only at deploy, so until then the
+   role keeps the old IP and denies every publish, the heartbeat's and the alarm topic's.
+
+   ```sh
+   aws ssm put-parameter --profile stellar --region eu-central-1 --type String --overwrite --name /x402/production/monitoring-vm-ip --value <IPv4>
+   cd infra && make deploy-production-heartbeat
+   ```
+
+3. Meanwhile, the server's agent keeps a few hours of samples in its write-ahead log, so the
+   metrics come back with the VM; the CloudWatch alarms and the logs still cover the facilitator.
+
 ## Log volume
 
 ### log-volume
@@ -772,7 +813,15 @@ threshold and this page's section. Until the switch nothing on the VM loads it.
 
 - `network` is a label, not part of the name: pubnet adds alert instances, not rules.
 - Every Event alarm is one branch of the single rule `x402-event`; its `check` label is the
-  alarm's name.
+  alarm's name. A branch fires on any increase in its window, or for a threshold above 1, on that
+  many in one period at any 15-second step. A branch with a threshold of 1 on one of the
+  facilitator's own counters also fires on a count above 0 in a process started within the
+  window: the process reports again at its start what the last one counted, as `history-gone`
+  does, and `increase()` sees no step when the value is the same. `pool-health` (5 in one period)
+  doesn't take this, nor do `facilitator-failed` and `watchdog-restart`, the host probe's
+  counters, which keep their totals across restarts.
+  `deploy/metrics/rules/event-restart-and-pool-health.test.yml` shows when a branch fires, ends
+  and stays quiet, in `promtool`.
 - Every alert has `severity`: `critical` for what would page on mainnet (`pending`, the
   `breaker-opened-*` alarms, `budget-nearing`, `sweeps-stopped`, `landed-after-expired`,
   `commit-unmatched`, `facilitator-silent`, `gauge-stale`), `warning` for the rest (lore 0139,
@@ -847,6 +896,7 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `settlement_nonce_reuse_total`              | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
 | `lease_changes_total`                       | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
 | `store_prune_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `search_card_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_internal_errors_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_attempts_total`                    | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_upsert_failures_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |

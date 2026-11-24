@@ -1,3 +1,4 @@
+import { searchFields } from "@stellar-x402/bazaar";
 import { PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type pg from "pg";
@@ -40,7 +41,9 @@ export class PostgresCatalogStore implements CatalogStore {
   /**
    * Inserts, or replaces the stored entry unless a check that started later wrote it. A
    * concurrent insert of the key makes the insert wait for its commit, and the update re-reads
-   * the row it then finds, so of concurrent writes the latest `checkedAt` stays.
+   * the row it then finds, so of concurrent writes the latest `checkedAt` stays. The same
+   * statement writes the listing's search card (ADR 0014), so search finds what the catalog holds
+   * from the moment it holds it.
    */
   async upsert(entry: CatalogEntry): Promise<UpsertOutcome> {
     if (entry.ledger !== null) assertCount(entry.ledger, "ledger");
@@ -48,6 +51,7 @@ export class PostgresCatalogStore implements CatalogStore {
     // The one function that writes the catalog: no offer outside the upstream schema is stored.
     for (const offer of entry.resource.accepts) PaymentRequirementsV2Schema.parse(offer);
     const { network, payTo, method, resourceUrl } = entry.key;
+    const card = searchFields(entry.resource);
     const values = [
       network,
       payTo,
@@ -57,21 +61,34 @@ export class PostgresCatalogStore implements CatalogStore {
       entry.ledger,
       entry.checkedAt,
       ...resourceColumns(entry.resource),
+      card.name,
+      card.tags,
+      card.description,
+      card.parameters,
     ];
     const inserted = await this.pool.query(
-      `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
-         resource, type, extension_keys)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       ON CONFLICT (network, pay_to, method, resource_url) DO NOTHING`,
+      `WITH listing AS (
+         INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+           resource, type, extension_keys)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (network, pay_to, method, resource_url) DO NOTHING
+         RETURNING seq)
+       INSERT INTO catalog_search (seq, name, tags, description, parameters)
+       SELECT seq, $11, $12, $13, $14 FROM listing`,
       values,
     );
     if (inserted.rowCount === 1) return "inserted";
     // `seq` is untouched, so the entry keeps its place in the listing. A seed's check (no ledger)
     // keeps the ledger a settlement wrote (0155).
     const updated = await this.pool.query(
-      `UPDATE catalog SET key_version = $5, ledger = coalesce($6, ledger), checked_at = $7, resource = $8, type = $9,
-         extension_keys = $10
-       WHERE ${CATALOG_KEY_WHERE} AND coalesce(checked_at, 0) <= $7`,
+      `WITH listing AS (
+         UPDATE catalog SET key_version = $5, ledger = coalesce($6, ledger), checked_at = $7, resource = $8, type = $9,
+           extension_keys = $10
+         WHERE ${CATALOG_KEY_WHERE} AND coalesce(checked_at, 0) <= $7
+         RETURNING seq)
+       INSERT INTO catalog_search (seq, name, tags, description, parameters)
+       SELECT seq, $11, $12, $13, $14 FROM listing
+       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14`,
       values,
     );
     return updated.rowCount === 1 ? "updated" : "stale";

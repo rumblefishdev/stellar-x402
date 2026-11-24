@@ -14,6 +14,8 @@ import {
   type CatalogStore,
   type NewSettlement,
   type RateLimitStore,
+  type CardListing,
+  type SearchCardStore,
   type SettlementKey,
   type SettlementStore,
   type SpendLimit,
@@ -1983,6 +1985,58 @@ export function catalogAttemptStoreContract(make: Make<CatalogAttemptStore>) {
       expect(await attempts.prune(5, 2)).toBe(2);
       expect(await attempts.prune(5, 2)).toBe(1);
       expect(await attempts.prune(5, 2)).toBe(0);
+    });
+  });
+}
+
+export function searchCardStoreContract(
+  make: Make<{ catalog: CatalogStore; cards: SearchCardStore }>,
+) {
+  describe("SearchCardStore contract (0120)", () => {
+    let catalog: CatalogStore;
+    let cards: SearchCardStore;
+    beforeEach(async () => {
+      ({ catalog, cards } = await make());
+    });
+
+    const list = (url: string, checkedAt: number, description = "") =>
+      catalog.upsert({
+        keyVersion: CATALOG_KEY_VERSION,
+        ledger: null,
+        checkedAt,
+        key: { network: "stellar:testnet", payTo: PAY_TO, method: "GET", resourceUrl: url },
+        resource: {
+          resource: url,
+          type: "http",
+          x402Version: 2,
+          accepts: [requirements()],
+          lastUpdated: "2026-11-24T00:00:00.000Z",
+          description,
+        },
+      });
+    const urls = (page: CardListing[]) => page.map((listing) => listing.resource.resource);
+
+    it("pages through every listing in catalog order", async () => {
+      for (const host of ["a", "b", "c"]) await list(`https://${host}.example`, 1);
+      const first = await cards.listings("0", 2);
+      expect(urls(first)).toEqual(["https://a.example", "https://b.example"]);
+      const second = await cards.listings(first[1]!.seq, 2);
+      expect(urls(second)).toEqual(["https://c.example"]);
+      expect(await cards.listings(second[0]!.seq, 2)).toEqual([]);
+    });
+
+    it("writes no card over one that already holds its text", async () => {
+      await list("https://a.example", 1);
+      const [listing] = await cards.listings("0", 10);
+      // The catalog's write has already written this listing's card.
+      expect(await cards.write(listing!)).toBe(false);
+    });
+
+    it("writes no card for a listing written again since it was read", async () => {
+      await list("https://a.example", 1, "Weather");
+      const [listing] = await cards.listings("0", 10);
+      await list("https://a.example", 2, "Tides");
+      expect(await cards.write(listing!)).toBe(false);
     });
   });
 }
