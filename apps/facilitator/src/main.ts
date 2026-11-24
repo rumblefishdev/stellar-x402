@@ -1,12 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
 import {
-  DEFAULT_ACCOUNT_PLANS,
   PostgresAccountPlanStore,
   apiKeyHash,
   isApiKeyOwner,
   newApiKey,
-  parseAccountPlans,
   type AccountPlan,
   type AccountPlanRecord,
 } from "@stellar-x402/api-keys";
@@ -25,7 +23,7 @@ import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-sche
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
-import { parseConfig, parseMigrateConfig } from "./config.js";
+import { parseAccountPlansConfig, parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import type { AppDeps } from "./http/app.js";
 import { requiresApiKey } from "./http/api-key.js";
@@ -78,14 +76,6 @@ export const FAILBACK_MAX_LAG_LEDGERS = 2;
 
 /** The statement timeout of the public listings' pool, against the other pools' 10 s. */
 export const DISCOVERY_STATEMENT_TIMEOUT_MS = 2_000;
-
-/**
- * The plans an API key holder's account can be on, and the fee budget per 24 h the accounts on
- * the free plan share (0107, S-design §10), until the config carries them. Nothing settles with a
- * key before then: `config.ts` refuses pubnet.
- */
-const ACCOUNT_PLANS = parseAccountPlans(DEFAULT_ACCOUNT_PLANS);
-const FREE_STROOPS = 250_000_000n;
 
 /**
  * The one RPC client over `RPC_URLS` (AD-3): the pool, the AD-22 ledger read and the fee-stats bid
@@ -433,7 +423,7 @@ export function compose(
     budgets: {
       windowMs: config.spend.windowMs,
       globalStroops: config.spend.globalStroops,
-      freeStroops: FREE_STROOPS,
+      freeStroops: config.spend.freeStroops,
       perPayerStroops: config.spend.perPayerStroops,
       perPayToStroops: config.spend.perPayToStroops,
       perKnownAssetStroops: config.spend.perAssetStroops,
@@ -443,7 +433,7 @@ export function compose(
     // On a network that requires an API key, each settlement counts in its caller's account,
     // by the plan the registry names (0107).
     plans: stores.accountPlans,
-    accountPlans: ACCOUNT_PLANS,
+    accountPlans: config.spend.accountPlans,
     keyed: requiresApiKey(config.network),
     logger,
     metrics,
@@ -753,7 +743,7 @@ function planSetter(env: Record<string, string | undefined>): string {
 /**
  * `pnpm keys`: the operator's hand on the API key registry (0105), the same one the portal
  * writes (0106), and on each account's plan (0107). It needs only `DATABASE_URL`, of the network
- * whose callers the key or the plan is for.
+ * whose callers the key or the plan is for, and `ACCOUNT_PLANS` where the service has it set.
  *
  * `issue` prints the new key once, through `write` (stdout) and never through the logger: only
  * its SHA-256 is stored, so a lost key is replaced, not read back. `revoke` holds from the
@@ -765,8 +755,9 @@ export async function keysMain(
   env: Record<string, string | undefined> = process.env,
   write: (line: string) => void = (line) => void process.stdout.write(`${line}\n`),
 ): Promise<void> {
-  // The default plans, until the config carries them.
-  const parsed = parseKeysCommand(argv, parseAccountPlans(DEFAULT_ACCOUNT_PLANS));
+  // Before the command: its usage names the plans. Run in the service's container, `ACCOUNT_PLANS`
+  // is the service's own.
+  const parsed = parseKeysCommand(argv, parseAccountPlansConfig(env));
   const { databaseUrl } = parseMigrateConfig(env);
   // Stdout is the operator's, so a lost connection is logged to stderr.
   const logger = jsonLogger("info", (line) => process.stderr.write(line));

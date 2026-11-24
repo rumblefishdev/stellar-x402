@@ -466,14 +466,16 @@ export const CATALOG = [
     emit: "eager-first",
   },
   // `payer` and `pay_to` write no metric: one buyer or seller near its budget is the budget
-  // working (G-alarm-list). `budget` matches the set but is never a dimension.
+  // working (G-alarm-list), as is an account near its own (0107, which logs no nearing for it
+  // either). `free`, the free plan's accounts together, does: filled, it refuses every one of them.
+  // `budget` matches the set but is never a dimension.
   {
     namespace: FAC,
     name: "spend_budget_nearing_total",
     kind: "counter",
     unit: "Count",
     scope: "network",
-    sets: [{ dims: [], when: { budget: ["asset", "other", "global"] } }],
+    sets: [{ dims: [], when: { budget: ["asset", "other", "free", "global"] } }],
     emit: "eager-first",
   },
   {

@@ -94,11 +94,15 @@ describe("emf builder", () => {
     const near = parsed("spend_budget_nearing_total", 1, { network: NET, budget: "asset" }).o;
     expect(directive(near).Dimensions).toEqual([["network"]]);
     expect(near.budget).toBe("asset");
+    // The free plan's shared budget writes the same series (0107).
+    const free = parsed("spend_budget_nearing_total", 1, { network: NET, budget: "free" }).o;
+    expect(directive(free).Dimensions).toEqual([["network"]]);
   });
 
   it("no set's when matches -> no line and no issue (a designed-silent path)", () => {
     const silent: [string, Labels][] = [
       ["spend_budget_nearing_total", { network: NET, budget: "payer" }],
+      ["spend_budget_nearing_total", { network: NET, budget: "account" }],
       ["settlement_refused_after_verify_total", { network: NET, stage: "check" }],
       ["spend_failure_attributed_total", { network: NET, fault: "payer" }],
     ];

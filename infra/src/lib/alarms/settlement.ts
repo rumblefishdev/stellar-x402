@@ -130,7 +130,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
       periodMinutes: 5,
       periods: 4,
       description: {
-        what: `A fee budget on ${network} (asset, other or global) passed its nearing level: at its limit, settlement for that scope stops until the window rolls (0024). The 4 five-minute periods match its 15-minute repeat.`,
+        what: `A fee budget on ${network} (asset, other, free or global) passed its nearing level: at its limit, settlement for that scope stops until the window rolls (0024; free, every account on the free plan, 0107). The 4 five-minute periods match its 15-minute repeat.`,
         next: "Read spend_budget_nearing in the app logs for the scope, the used and max stroops; raise the budget only if the traffic is real.",
         noData: SILENT_EVENT,
       },
