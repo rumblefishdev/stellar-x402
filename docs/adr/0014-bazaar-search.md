@@ -52,8 +52,8 @@ The measurements are in
   card: a row of its own table, `catalog_search`, one per catalog listing, which the words part,
   the meaning part and the text's hash all read, so they can't disagree about what a listing says.
   One background loop in the facilitator is the card's only writer: it writes the card of a
-  listing that has none, that was checked again since, or whose card an older version of the rules
-  built. A listing enters search once its card exists. A change to the rules is a version bump the
+  listing that has none, that was checked again since, or whose card another version of the rules
+  built, so a rolled-back release rewrites the cards to its own rules. A listing enters search once its card exists. A change to the rules is a version bump the
   loop carries to every card, and the catalog table is never rewritten for search.
 
 - **Matches.** A listing matches a query when its meaning is close enough: cosine similarity
@@ -74,11 +74,9 @@ The measurements are in
     Apache-2.0, CLS pooling, no query prefix, inputs cut at 512 tokens. Listings and queries are
     embedded the same way and the vectors normalized. The meaning part reads the fields joined,
     cut at 2,000 characters.
-  - Vectors, from `pgvector`, are kept per listing and model, with the hash of the text each was
-    made from, so a new model's vectors can fill beside the current one's and a model of another
-    size needs no migration; search reads only vectors of the current model. Task 0120's meaning
-    part decides their table: one vector column per card could not serve the current model while
-    the next one fills, and would mix dimensions.
+  - Vectors, from `pgvector`, each with the model that made it and the hash of the text it was
+    made from; search reads only vectors of the current model. Where they are stored is task
+    0120's meaning part to decide.
   - Search compares the query's vector with every listing's that passes the filters (an exact
     scan, no index).
   - A listing whose cosine similarity to the query is below 0.60 is not a match, so a query

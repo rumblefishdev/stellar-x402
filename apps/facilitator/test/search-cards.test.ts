@@ -27,7 +27,6 @@ function memoryStore(listings: StaleListing[], fail?: { write?: Error; seq?: str
     write: async (card) => {
       if (fail?.write && (fail.seq === undefined || fail.seq === card.seq)) throw fail.write;
       written.push(card);
-      return true;
     },
   };
   return { store, written };
@@ -108,7 +107,7 @@ describe("search card writer", () => {
       stale: async () => {
         throw new Error("database down");
       },
-      write: async () => true,
+      write: async () => {},
     };
     const lines: string[] = [];
     const metrics = memoryMetrics();
@@ -121,19 +120,5 @@ describe("search card writer", () => {
     expect(lines.map((line) => JSON.parse(line))).toContainEqual(
       expect.objectContaining({ event: "search_cards_read_failed" }),
     );
-  });
-
-  it("counts only the cards it wrote", async () => {
-    const store: SearchCardStore = {
-      stale: async () => [stale("1", "Weather")],
-      write: async () => false,
-    };
-    const lines: string[] = [];
-    await createSearchCardWriter({
-      store,
-      logger: jsonLogger("debug", (line) => lines.push(line)),
-      metrics: memoryMetrics(),
-    }).runOnce();
-    expect(lines).toEqual([]);
   });
 });

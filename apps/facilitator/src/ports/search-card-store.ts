@@ -21,14 +21,11 @@ export interface SearchCard {
 /** The search cards, one per catalog listing (ADR 0014). */
 export interface SearchCardStore {
   /**
-   * Up to `limit` listings whose card is missing, built by older rules, or built by these rules
-   * from another check; those without a card first, so a new listing waits behind no rewrite of
-   * old cards. A card newer rules built is left to the release that runs them.
+   * Up to `limit` listings whose card is missing, built by other rules, or built from another
+   * check; those without a card first, so a new listing waits behind no rewrite of old cards. One
+   * release runs at a time (ADR 0011), so after a rollback its rules rewrite the cards again.
    */
   stale(rules: number, limit: number): Promise<StaleListing[]>;
-  /**
-   * Writes the card, replacing the listing's card unless newer rules built it: a release rolled
-   * back to older rules leaves the newer cards as they are. Resolves whether it wrote.
-   */
-  write(card: SearchCard): Promise<boolean>;
+  /** Writes the card, replacing the listing's card if it has one. */
+  write(card: SearchCard): Promise<void>;
 }
