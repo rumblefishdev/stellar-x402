@@ -32,6 +32,7 @@ the alarms that read them. The [uptime figure](#the-uptime-figure) is under Upti
 | `facilitator-silent`      | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:49, OK 13:47:49 UTC                                                        |
 | `gauges-silent`           | `facilitator` | 2026-11-09 12:19 UTC | Not fired: it needs gauges missing while sweeps run ([Drills](#drills))                                                                 |
 | `http-500`                | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:00, OK 14:09:00 UTC                                                           |
+| `search-words-only`       | `facilitator` | next Alarms deploy   | Not yet: once, after that deploy                                                                                                        |
 | `rpc-stalled`             | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:33:26, OK 13:47:26 UTC                                         |
 | `rpc-on-fallback`         | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:43:00, OK 13:48:00 UTC                                         |
 | `balance-stale`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:38, OK 13:47:38 UTC                                         |
@@ -406,6 +407,32 @@ are refused. A burst sends one message.
    (`horizon.stellar.org` or `horizon-testnet.stellar.org`). Upstream's verify reads it on every
    payment, with no timeout of its own, so a hung Horizon times out every RPC URL.
 3. Otherwise fix the endpoint, or reorder `RPC_URLS` ([runbook, Credentials](runbook.md#credentials)).
+
+### search-words-only
+
+`/discovery/search` answered by words alone ([ADR 0014](adr/0014-bazaar-search.md)): the search
+model did not give the query's vector within 2 s, answered an error, or is down. Such an answer
+ranks worse, misses typos and lets a seller's repeated words rank first, and its
+`partialResults` is `true`. Every fallback fires it; a burst sends one message.
+
+A model container that restarts answers nothing until it has loaded the model, a few seconds. A
+search in those seconds falls back and fires this once, as a deploy that restarts the container
+can. That is expected; a fallback outside a restart is not.
+
+1. On the server, the model container's state and its own log lines: `x402@`'s log file holds the
+   facilitator's lines only.
+
+   ```sh
+   sudo /usr/local/libexec/x402/x402-compose production ps search-model
+   sudo /usr/local/libexec/x402/x402-compose production logs --since 30m search-model
+   ```
+
+2. In Logs Insights on `/x402/production/app`, the `search_words_only` lines around that time:
+   their `error` is the cause, a timeout or the model's answer.
+3. A container that is down stays down until `x402@production` starts again: no restart policy
+   brings it back. Restart that unit, which drains, so plan it like a deploy. The facilitator
+   starts only once the model is healthy, so read the model's log first: a model that can't
+   start keeps `/settle` down too.
 
 ### rpc-stalled
 
@@ -897,6 +924,8 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `lease_changes_total`                       | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
 | `store_prune_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `search_card_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `search_vector_failures_total`              | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `search_words_only_total`                   | `x402-facilitator` | counter, Count | none                                                     | [search-words-only](#search-words-only)                                                                       |
 | `catalog_internal_errors_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_attempts_total`                    | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_upsert_failures_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |

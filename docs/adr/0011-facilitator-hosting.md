@@ -20,7 +20,9 @@
   2026-11-18 (task 0106: an API key crosses Cloudflare in plain text, in a pubnet request and
   in the portal backend's answer to `reveal`) and 2026-11-19 (task 0134: a search-model
   container, 512 MiB, joins the totals) and 2026-11-20 (task 0106: the log files also rotate
-  daily and none is kept past 30 days, the hub's privacy policy)
+  daily and none is kept past 30 days, the hub's privacy policy) and 2026-11-24 (task 0120: the
+  search-model container runs from the facilitator's image, limited to 768 MiB, and the totals
+  rise by 256 MiB)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -72,8 +74,8 @@ The company already runs a Hetzner dedicated server for its production ClickHous
 - Docker Compose, and Caddy already terminates HTTPS for ClickHouse's mutual-TLS endpoint, in the
   same compose project as ClickHouse.
 
-Our containers are limited to 2.375 GiB of RAM with OpenBao and the search model while production
-serves testnet, and 3.375 GiB once mainnet's database joins; on testnet they need about 2 GB of disk, WAL included.
+Our containers are limited to 2.625 GiB of RAM with OpenBao and the search model while production
+serves testnet, and 3.625 GiB once mainnet's database joins; on testnet they need about 2 GB of disk, WAL included.
 The company bought `sorobanscan.com` for sorobanscan and the Stellar Prices API and moves it, as
 a whole zone, to Cloudflare on the Free plan.
 
@@ -111,10 +113,12 @@ a whole zone, to Cloudflare on the Free plan.
     The facilitator mounts the socket of every network it serves, as external volumes from
     OpenBao's project, so one process can sign for both networks. ADR 0013 weighs what that
     costs.
-- **A search-model container** (ADR 0014), memory limit 512 MiB: the embedding model used by
-  `/discovery/search`, measured at 371 MB peak.
-- **The limits add up to 2.125 GiB for production with testnet's database and the search model,**
-  2.375 GiB with OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less. On
+- **A search-model container** (ADR 0014), memory limit 768 MiB and one CPU: the embedding model
+  used by `/discovery/search`, run from the facilitator's image with a command of its own. Its
+  peak was measured at 456–484 MiB on macOS arm64; Linux is not measured yet. The facilitator
+  starts only once it is healthy.
+- **The limits add up to 2.375 GiB for production with testnet's database and the search model,**
+  2.625 GiB with OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less. On
   2026-11-19 the server had 125 GiB of RAM, every container's limit together came to about
   110 GiB, and ours used 181 MiB.
 - **Testnet and mainnet share the facilitator process and OpenBao,** never a database, a key or a
@@ -123,7 +127,7 @@ a whole zone, to Cloudflare on the Free plan.
   of its own, both part of its compose project:
   - `x402-<environment>-edge`: `cloudflared` and the facilitator only. Both reach the internet
     through it: `cloudflared` to Cloudflare, the facilitator to its RPC URLs;
-  - `x402-<environment>-db`: `internal: true`, the facilitator, the Postgres containers and the
+  - `x402-<environment>-db`: `internal: true`, the facilitator, the search model, Postgres and the
     migration services only, with no route out. Only the facilitator and a network's migration
     service hold that network's database password. Once mainnet joins, every migration service
     reaches every Postgres, and only the password keeps `migrate-mainnet` out of testnet's
@@ -730,7 +734,7 @@ One request or one stop must never outlast the layer in front of it:
 ## Rationale
 
 - **The capacity is already paid for.** The server has a lot of free RAM and disk, and our
-  containers are limited to 2.375 GiB today and 3.375 GiB with mainnet's database. Running there
+  containers are limited to 2.625 GiB today and 3.625 GiB with mainnet's database. Running there
   costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
   Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no

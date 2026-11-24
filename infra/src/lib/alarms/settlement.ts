@@ -38,6 +38,18 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     },
   });
 
+  // From the first fallback: search by words alone ranks worse and lets repeated words win
+  // (ADR 0014), and nothing else shows that the model can't be used.
+  f.event("search-words-only", {
+    group: "facilitator",
+    signal: { catalog: "search_words_only_total" },
+    description: {
+      what: "A Bazaar search was answered by words alone: the search model did not give the query's vector within the timeout, failed, or is down. A model container that restarts fires it for the searches of those seconds. A burst sends one message.",
+      next: `Check the search-model container's health and logs on the server (x402-compose ${c.envName} ps search-model, then logs search-model), then search_words_only in /x402/${c.envName}/app with Logs Insights for its cause.`,
+      noData: SILENT_EVENT,
+    },
+  });
+
   for (const network of c.networks) {
     const on = { network };
 

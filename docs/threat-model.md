@@ -748,7 +748,8 @@ and the two Lambdas off the server, the uptime probe and the check that watches 
 ## Bazaar search
 
 `GET /discovery/search` (task 0120, [ADR 0014](adr/0014-bazaar-search.md)) is public and ranks
-listings that sellers write. Its first part ranks by words alone; the part by meaning follows.
+listings that sellers write. It ranks by meaning and words fused, and by words alone while the
+search model can't be used.
 
 ### Threats
 
@@ -758,9 +759,8 @@ listings that sellers write. Its first part ranks by words alone; the part by me
   every occurrence: a description of "weather" 62 times, inside its 500-character limit, ranks 31
   for `weather` against 1 for a listing named "Weather"; a URL path of the word 250 times, inside
   the 2,048-character URL limit, ranks 250. A listing costs one small settlement, or a seed entry.
-- **Mitigation:** None while search ranks by words alone, so that part is not deployed by itself.
-  Once the meaning part lands, the words weigh a fifth of a listing's score and count only by
-  their rank among matches (ADR 0014), which bounds what repetition buys.
+- **Mitigation:** The words weigh a fifth of a listing's score and count only by their rank among
+  matches (ADR 0014), which bounds what repetition buys.
 - **Residual risk:** When the model is down, search falls back to words alone and repetition wins
   again. It stays a named risk with no limit of its own (ADR 0014).
 
@@ -777,4 +777,5 @@ listings that sellers write. Its first part ranks by words alone; the part by me
   `/discovery/resources` wait too, since it reads through the same pool. The cap bounds the words,
   not the listings they match: on 39,578 real listings (CDP's Bazaar) the 32 most common words
   matched 39,170 of them and took 1.8–2.2 s, the pool's statement timeout, so such a query may
-  answer 500 at that size.
+  answer 500 at that size. It keeps no limit of its own: once the catalog passes about 10,000
+  listings, a pool of its own for search is the next step.

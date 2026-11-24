@@ -3,7 +3,8 @@
 - Status: accepted
 - Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks), 2026-11-23
   (task 0154: the quality score) and 2026-11-24 (task 0120: each listing's search card in a table
-  of its own)
+  of its own; the vector on the card, the model's own server in the facilitator's image, when
+  vectors are written, the timeout, and no words-only window for a model change)
 
 ## Context
 
@@ -29,7 +30,7 @@ What this has to fit:
   (task 0155), and which database holds it is still open (task 0126). The M1 evidence already told SCF that Tranche #2's search is planned on PostgreSQL.
 - The server is shared: our containers were limited to 1.875 GiB together while production serves
   testnet, and the facilitator to 512 MiB and one CPU ([ADR 0011](0011-facilitator-hosting.md)).
-  The server itself has 125 GiB, so ADR 0011 now adds 512 MiB for the model.
+  The server itself has 125 GiB, so ADR 0011 now adds 768 MiB for the model.
 - The catalog is small. Testnet holds one listing; the largest public catalog, CDP's, held 34,782
   on 2026-11-18, 1,637 of them on Stellar pubnet from 21 hosts, all with English descriptions.
 
@@ -78,9 +79,9 @@ The measurements are in
     Apache-2.0, CLS pooling, no query prefix, inputs cut at 512 tokens. Listings and queries are
     embedded the same way and the vectors normalized. The meaning part reads the fields joined,
     cut at 2,000 characters.
-  - Vectors, from `pgvector`, each with the model that made it and the hash of the text it was
-    made from; search reads only vectors of the current model. Where they are stored is task
-    0120's meaning part to decide.
+  - Vectors, from `pgvector`, on the listing's search card: `embedding`, one vector per listing,
+    with `model`, the model that made it, and `text_hash`, the hash of the text it was made from.
+    Search reads only vectors of the current model.
   - Search compares the query's vector with every listing's that passes the filters (an exact
     scan, no index).
   - A listing whose cosine similarity to the query is below 0.60 is not a match, so a query
@@ -95,17 +96,22 @@ The measurements are in
   `public` schema, so the tests' per-file schemas all see the type.
 - **Where the model runs.**
   - In a container of its own, with its own memory limit, reached by the facilitator over the
-    environment's internal network. The model file is in the image, pinned by its revision, so
-    nothing is downloaded when it starts.
-  - It holds no database password. The facilitator reads listings whose vector is missing or
-    stale (another model, another text hash), asks the container for each vector without holding
-    a lock, and writes it only `WHERE` the text hash is still the one it embedded.
+    environment's internal network. It runs from the facilitator's image with a command of its
+    own, as the migrations do, so one digest deploys both. The image's build fetches the model's
+    files at the pinned revision, so nothing is downloaded when it starts.
+  - The facilitator starts only once the model's container is healthy.
+  - The server is our own Node process on `onnxruntime-node` 1.31.1, with the model's own
+    tokenizer read by `@huggingface/tokenizers`: no LGPL dependency
+    (`docs/scf/milestone-1-license-audit.md`).
+  - It holds no database password. The facilitator computes a listing's vector right after the
+    catalog writes the listing, and once at each start for every card whose vector is missing or
+    stale (another model, another text hash), with no retry loop in between. It asks the
+    container for each vector without holding a lock, and writes it only `WHERE` the text hash is
+    still the one it embedded.
   - The facilitator sends the container one listing at a time, so a backlog never takes the CPU
     that queries need.
-  - A listing the container fails on is tried again on the next pass. Failures are logged with
+  - A listing the container fails on is tried again at the next start. Failures are logged with
     their cause and counted in a metric, so monitoring can alert on a listing that keeps failing.
-  - The runtime is ONNX Runtime; 0120 picks the library, with no LGPL dependency
-    (`docs/scf/milestone-1-license-audit.md`).
 - **Fusion.** Weighted RRF over every match, k = 20: a listing scores
   4 / (20 + its rank by meaning) + 1 / (20 + its rank by words), with no words term for a match
   that holds no query word. Ties go by the listing's key. Nothing is cut: on the 0134 set,
@@ -118,10 +124,12 @@ The measurements are in
   so a search never mixes listings that were scored two ways. `/discovery/resources` lists it at
   once. A listing whose text changes keeps its old vector until the new one is written.
 - **When the model can't be used.** The facilitator ranks by words alone, in the same response
-  shape, when the container doesn't answer within a timeout (0120 sets it from a measurement on
-  the server) and while a new model's vectors are being written for the network. Every listing is
-  then scored one way, so the answer includes listings with no current vector. Each fallback is
-  logged with its cause and counted in a metric that monitoring can alert on.
+  shape, when the container doesn't answer within 2,000 ms or answers an error. The timeout stays
+  until a measurement on the server sets it. Every listing is then scored one way, so the answer
+  includes listings with no current vector. Each fallback is logged with its cause and counted in
+  a metric that monitoring can alert on.
+- **When the model changes.** No words-only window: the procedure is decided when a change comes,
+  and until then search reads only the current model's vectors.
 - **Quality score.** A listing's score is its fused score times a quality factor q (task 0154), in
   the fused ranking and in words alone:
   - q = (1 + 0.2 × p / (p + 2)) × 0.9 on a tunnel host × 0.9 with an empty description, where p is
@@ -197,7 +205,8 @@ The measurements are in
   inside PostgreSQL is not measured yet; 0120 measures it on the server, with the vector stored in
   line (`SET STORAGE PLAIN`), as pgvector's README suggests for scans.
 - **A container of its own** keeps the model's memory out of the facilitator's 512 MiB and its
-  CPU off the `/settle` path, and lets search fall back to words when it is down.
+  CPU off the `/settle` path, and lets search fall back to words when it is down. Run from the
+  facilitator's image, it needs no image, build or deploy step of its own.
 - **A listing joins search whole.** A listing ranked by words only, among listings ranked by both,
   would sit too low; holding it back until its vector exists keeps one scoring for all.
 - **Quality is a small correction, not a second ranking.** Adding CDP's payer counts to the fused
@@ -252,6 +261,8 @@ The measurements are in
   (its floor keeping 98% of relevant listings is 0.443), 0.702 nDCG@10 against granite's 0.725.
   Memory no longer decides: the server has room for its 710 MB. Rejected on quality.
 - **An embedding API.** Puts an outside service on the request path, which §4 rules out. Rejected.
+- **transformers.js for the model's server.** It runs the same ONNX model, but its dependency
+  `sharp` ships libvips under LGPL-3.0, which the licence commitment rules out. Rejected.
 - **The model inside the facilitator.** Its 512 MiB and one CPU serve `/settle`. Rejected.
 - **BM25 or TF-IDF over a token table of our own, as §4 describes.** It may rank words better than
   `ts_rank_cd`, but adds a table and its upkeep; not measured here.
@@ -286,7 +297,9 @@ The measurements are in
 ## Consequences
 
 - Production, CI and local compose switch to the pgvector image pinned as above, and one
-  more container, limited to 512 MiB, which ADR 0011's totals now count.
+  more container, limited to 768 MiB, which ADR 0011's totals now count.
+- The facilitator starts only once the model's container is healthy, so a model that never
+  starts keeps the facilitator, and `/settle`, from starting too.
 - The cards are a table of their own, added with a `CREATE TABLE` that touches no catalog row. A
   catalog column computed by PostgreSQL was the first shape: adding it rewrote the catalog under
   its lock (285–576 ms for 2,500 listings, 5.5 s for 35,000), and so would every later change to
@@ -305,7 +318,7 @@ The measurements are in
 - Paging reaches every match. On the 0134 set a query has a median of 158 matches, 76 among the
   Stellar listings alone, and at most 744.
 - Changing the model means embedding every listing again: about 5 minutes for 34,782 listings at
-  granite's speed on an M4, while search answers by words alone.
+  granite's speed on an M4. How search answers meanwhile is decided when a change comes.
 - The cursor carries the score with q in it. A payment between two pages can move a listing, as a
   new listing can.
 - Changing how a payment's listing key is derived leaves old rows under the old key; the rows can

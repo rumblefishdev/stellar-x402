@@ -76,8 +76,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 91 with two networks", () => {
-    expect(alarms).toHaveLength(91);
+  test("has every alarm of the list once per network, 92 with two networks", () => {
+    expect(alarms).toHaveLength(92);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -338,6 +338,7 @@ test("production as committed makes only the groups that are on", () => {
     "x402-production-refused-after-verify-testnet",
     "x402-production-rpc-on-fallback-testnet",
     "x402-production-rpc-stalled-testnet",
+    "x402-production-search-words-only",
     "x402-production-settlement-expired-testnet",
     "x402-production-signer-failures-testnet",
     "x402-production-store-outage-testnet",

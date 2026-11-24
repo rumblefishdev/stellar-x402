@@ -1,8 +1,9 @@
 # The production environment (ADR 0011, 0077): one facilitator for every network it serves (today
-# testnet), a database and a migration service per network, and the tunnel connector. Each service
-# has a systemd unit of its own (`deploy/systemd`), so none has a restart policy, and none
-# publishes a port. Each drops every capability and sets no-new-privileges, and runs as a user
-# other than root. On the server this is /srv/x402/production/compose.yaml.
+# testnet), the search model it starts with, a database and a migration service per network, and
+# the tunnel connector. Each service but the search model has a systemd unit of its own
+# (`deploy/systemd`), so none has a restart policy, and none publishes a port. Each drops every
+# capability and sets no-new-privileges, and runs as a user other than root. On the server this
+# is /srv/x402/production/compose.yaml.
 #
 #   FACILITATOR_IMAGE  the facilitator's image; `x402-compose` sets it from `digest`
 #   SECRETS_DIR        the decrypted credentials, /run/x402/production unless set (local runs)
@@ -36,6 +37,12 @@ services:
       OPENBAO_KEY_VERSION: "1"
       OPENBAO_ROLE_ID_FILE: /run/secrets/approle-role-id.testnet
       OPENBAO_SECRET_ID_FILE: /run/secrets/approle-secret-id.testnet
+      SEARCH_MODEL_URL: http://search-model:8080
+    # Starts once the model answers (ADR 0014), so a model that never starts keeps the facilitator
+    # from starting too.
+    depends_on:
+      search-model:
+        condition: service_healthy
     secrets:
       - database-url.testnet
       - rpc-urls.testnet
@@ -54,6 +61,33 @@ services:
         - node
         - -e
         - fetch('http://127.0.0.1:4021/health',{signal:AbortSignal.timeout(5000)}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # The search model (ADR 0014), from the facilitator's image: it turns a listing's or a query's
+  # text into its vector. It holds no secret and reaches nothing; the facilitator calls it over
+  # `db`.
+  search-model:
+    image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}
+    command: [node, /search-model/dist/main.js]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      PORT: "8080"
+    networks:
+      - db
+    # 200 only once the model is loaded, which the facilitator waits for.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8080/health',{signal:AbortSignal.timeout(5000)}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))
       interval: 10s
       timeout: 5s
       start_period: 30s
@@ -82,7 +116,8 @@ services:
       disable: true
 
   postgres-testnet:
-    image: postgres:18@sha256:979bccfde35445db618c65107d27d08c6c21339d8dc3ad4c830c6633947be0e4
+    # PostgreSQL 18 with pgvector (ADR 0014), the image's index digest.
+    image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa
     # Started as `postgres` (999), the entrypoint skips its root step (the chown and gosu) and
     # reads the password secret, 0400 and owned by 999 (x402-creds), as its owner, so it needs no
     # capability. A new volume gets /var/lib/postgresql from the image, already 999's. Run as root
@@ -127,7 +162,7 @@ networks:
     ipam:
       config:
         - subnet: 172.31.200.0/28
-  # No route out: the facilitator, the databases and the migration services only.
+  # No route out: the facilitator, the search model, the databases and the migration services only.
   db:
     name: x402-production-db
     internal: true

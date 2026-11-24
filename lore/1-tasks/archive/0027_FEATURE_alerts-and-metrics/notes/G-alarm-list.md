@@ -53,6 +53,10 @@ history:
     status: developing
     who: claude
     note: "Task 0106, decision 21: portal-uptime and hub-uptime, the uptime probe on the portal's backend and the API hub's, in groups of their own."
+  - date: "2026-11-24"
+    status: developing
+    who: karolkow
+    note: "Task 0120: search-words-only, an Event on every search answered by words alone, in the facilitator group."
 ---
 
 # The alarms 0027 builds
@@ -179,6 +183,7 @@ in a PR once acted on, so each re-arms for the next version on its own. In the `
 | `sweeps-stopped` | `settlement_sweeps_total{outcome:"listed"}`, per network | Level, `Sum` below 1, 5 of 5 one-minute periods | No sweep listed the records for 5 minutes. A live process with failing or hung sweeps writes 0 | Ignore: as above |
 | `http-500` | `http_requests_total`, the `[status]` set at `500`: no `route`, no `network` | Event | 1 or more: `onError` takes an error it doesn't know as ours, so the first one is worth a look; a burst sends one message. A 503 isn't counted: `verify-rpc-unavailable` covers `/verify`'s, and a lease or drain 503 on `/settle` is routine | Not breaching: as above |
 | `verify-rpc-unavailable` | `http_requests_total`, the `[route, status]` set at `/verify` and `503`: no `network` | Event | 1 or more: `/verify` answered 503 `rpc_unavailable`, so sellers can't check payments; a burst sends one message | Not breaching: as above |
+| `search-words-only` | `search_words_only_total`: no `network`, since one search can rank both | Event | 1 or more: a search answered by words alone because the model couldn't be used (ADR 0014). Every fallback alarms, a burst in one message; a restart of the model container fires it for the searches of those seconds | Not breaching: as above |
 | `settlement-expired` | `settlement_reconciled_total` for `state="expired"` | Event | 1 or more: a payment that never landed by its bound. Neither `failure-ours` (needs a fee) nor `pending` (needs a record past 750 s) sees it | Not breaching: as above |
 | `submit-failed` | `settlement_submit_failures_total` | Event | 1 or more: an `unexpected_settle_error` with nothing sent, answered with status 200, so `http-500` doesn't see it | Not breaching: as above |
 | `hook-failures` | `settlement_hook_failures_total` | Event | 1 or more: a hook that threw, so the fee count or a breaker may have missed a settlement | Not breaching: as above |

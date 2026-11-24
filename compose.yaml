@@ -1,10 +1,10 @@
 # PostgreSQL for local runs and tests: `docker compose up -d`. The facilitator's tests use it
 # unless TEST_DATABASE_URL is set. Port 15432: not a PostgreSQL of your own on 5432, and below the
-# ports the system hands out at random, which a test server on port 0 could get. Same major
-# version as CI.
+# ports the system hands out at random, which a test server on port 0 could get. The image
+# production and CI pin: PostgreSQL 18 with pgvector (ADR 0014).
 services:
   postgres:
-    image: postgres:18
+    image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa
     environment:
       POSTGRES_PASSWORD: postgres
     ports:
