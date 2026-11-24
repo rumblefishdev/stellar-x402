@@ -67,8 +67,9 @@ The measurements are in
   ranked, so a filtered query ranks among the listings that pass.
 - **Words.** PostgreSQL's own full-text search, the `english` configuration:
   - a weighted `tsvector` from the card's fields, which PostgreSQL computes on each card write.
-    Weights start at name 1.0, tags 0.67, description 0.5, parameters 0.33. No index: on 35,000
-    listings ranking by words alone took 142 ms with a GIN index and 138 ms without;
+    Weights start at name 1.0, tags 0.67, description 0.5, parameters 0.33. A GIN index on the
+    words: over CDP's 39,579 listings and the 0134 queries it halves the median query time
+    (23.8 ms to 10.3 ms), most for queries of rare words;
   - the query's words are OR-ed, so a long sentence still matches, and ranked by `ts_rank_cd`.
 - **Meaning.**
   - The model is `ibm-granite/granite-embedding-30m-english`: 30M parameters, 384 dimensions,
