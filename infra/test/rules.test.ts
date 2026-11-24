@@ -57,6 +57,19 @@ test("every Event row is a branch of one rule, and the rule sets no check of its
   expect(events[0]!.annotations.description).toContain('eq $labels.check "http-500"');
 });
 
+test("an Event also fires on a facilitator counter above 0 in a process started in its window", () => {
+  // Karol's point 4 on #211; event-restart-and-pool-health.test.yml shows when.
+  const expr = checksOf().rules.find((r) => r.alert === "x402-event")!.expr;
+  const branch = (check: string) =>
+    expr.split("label_replace(label_replace(").find((b) => b.includes(`"check", "${check}"`))!;
+  for (const check of ["history-gone", "signer-failures", "http-500"])
+    expect(branch(check), check).toContain("facilitator_started_timestamp_seconds");
+  // The host probe's counters keep their totals across restarts, and a count since the start
+  // isn't pool-health's 5 in one period.
+  for (const check of ["watchdog-restart", "facilitator-failed", "pool-health"])
+    expect(branch(check), check).not.toContain("facilitator_started_timestamp_seconds");
+});
+
 test("no rule says CloudWatch's no-data behaviour or names its silences", () => {
   // A rule resolves once its series goes stale (Karol's point 2 on #211), and probe-silent and
   // telemetry-silent are textfile-stale and server-silent here.
