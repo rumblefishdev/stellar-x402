@@ -235,12 +235,16 @@ ADR 0013's first upgrade (Not here yet).
   ```
 
   A server set up before the key's name and version moved here (2026-11-24, task 0048) has only
-  the last two lines: add the first two before the deploy that carries this change, or `x402@`
-  stops at interpolation.
+  the last two lines: add the first two before the playbook run that copies this `compose.yaml`.
+  From that copy on, any start of `x402@` stops at interpolation without them, so the playbook
+  refuses to copy the compose files while an existing `.env` lacks any of the four names. The
+  command adds the lines once, after a newline if the file doesn't end with one:
 
   ```sh
-  printf 'OPENBAO_KEY_TESTNET=stellar-testnet\nOPENBAO_KEY_VERSION_TESTNET=1\n' |
-    ssh SERVER 'sudo tee -a /srv/x402/production/.env >/dev/null'
+  ssh SERVER 'sudo sh -euc '\''f=/srv/x402/production/.env
+    grep -q "^OPENBAO_KEY_TESTNET=" "$f" && exit 0
+    [ -z "$(tail -c1 "$f")" ] || echo >> "$f"
+    printf "OPENBAO_KEY_TESTNET=stellar-testnet\nOPENBAO_KEY_VERSION_TESTNET=1\n" >> "$f"'\'''
   ```
 
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server

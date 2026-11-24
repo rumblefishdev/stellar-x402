@@ -123,6 +123,8 @@ no longer apply):
       checked, the result recorded (Implementation Notes, 2026-11-24)
 - [ ] `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` are read from the server's `.env`, not
       `deploy/production/compose.yaml`, so a new key needs no PR
+      Closes once the production server's `.env` holds both names and a deploy of this change has
+      run with `signer: ok`.
 - [ ] `docs/runbook.md` has a "lost access" section: new key, fee account, channels, `.env`,
       restart, alarms, and when the same server may stay
 - [ ] A testnet drill moves the facilitator to a new key, fee account and channels with that
@@ -181,18 +183,28 @@ contract that named a channel as an authority would hand a thief that power fore
    - **Why:** after a theft OpenBao usually survives with the old key in it, so the new key gets a
      new name or version 2. With the name in `compose.yaml`, the rebuild waits for an approved pull
      request and a playbook run, which can take hours at night, while ADR 0015 counts on about an
-     hour. In `.env`, a rebuild is: write four values, restart.
+     hour. In `.env`, a rebuild under a new version of the same key (`transit/keys/stellar-testnet/
+     rotate`) is: write four values, restart. A new name also needs a new policy in OpenBao, since
+     the AppRole's policy names the key (`transit/sign/stellar-testnet`, `docs/runbook.md`, OpenBao
+     step 4); that is still no pull request, so the "lost access" runbook keeps the name and bumps
+     the version.
    - **No new risk:** only someone with access to the server can edit `.env`, and that person can
      already change `FACILITATOR_ADDRESS` and `CHANNELS` the same way, and reach OpenBao. A wrong
-     key name stops the facilitator at startup, since the signer check against
-     `FACILITATOR_ADDRESS` and each channel fails (`apps/facilitator/src/main.ts:548`). What goes is
-     the review of a change to the name, which gave no protection the server access doesn't
-     already bypass.
+     key name doesn't stop the facilitator at startup: `checkChannels` compares only
+     `FACILITATOR_ADDRESS` with each channel (`apps/facilitator/src/main.ts:548`), and the OpenBao
+     check isn't awaited (`:563`). After `x402-deploy`, its probe requires `/health`'s `signer` to
+     be `ok` and goes back to `digest.good` otherwise (`deploy/libexec/x402-deploy:63`). After a
+     plain restart, the facilitator runs with `signer: failed` and every settle fails until the
+     value is fixed, which `signer_failed` in the log shows. What goes is the review of a change
+     to the name, which gave no protection the server access doesn't already bypass.
    - **Also:** the four values that describe the key and its accounts always change together, so
      they now live in one place instead of split between the repo and the server.
    - **Rollout:** a server set up before this has only the address and the channels in `.env`. Add
-     the two new lines before the deploy that carries the change, or `x402@` stops at
-     interpolation (`docs/runbook.md`, "Before the first deploy").
+     the two new lines before the playbook run that copies this `compose.yaml`: from that copy on,
+     any start of `x402@` (a deploy, a crash, a reboot) stops at interpolation without them
+     (`docs/runbook.md`, "Before the first deploy"). The playbook checks it: on a server whose
+     `.env` exists, it stops before copying the compose files unless all four names are there
+     (code review, D1).
 
 ## Open Gaps
 
@@ -207,10 +219,9 @@ today's setup"). Each one holds whichever option the re-check picks.
   accounts (it adds the new key and merges the old fee account). When a thief has removed our
   key, nothing covers it: a new key, fee account and channels, the config switch, the alarms, and
   the rule that the same server stays only if the leak didn't come from it. Needs its own steps
-  and a testnet drill. stkrolikiewicz's steps in the research note are most of it. The key's name
-  and version are hardcoded in `deploy/production/compose.yaml:35-36`, so a new key after a theft
-  (a Transit rotate or a new name) needs an approved PR and a playbook run; moving
-  `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` into the server's `.env` would remove that step.
+  and a testnet drill. stkrolikiewicz's steps in the research note are most of it. ~~The key's
+  name and version are hardcoded in `compose.yaml`, so a new key needs an approved PR.~~ Moved to
+  the server's `.env` on 2026-11-24 (decision 5).
 - ~~**`upto` is missing from the threat model.**~~ Added 2026-11-24 ("Facilitator key", "A stolen key charges open `upto` authorizations"). A stolen key is `receiver_authorizer` on every open
   `upto` payment and can settle each at its full `max_amount` until its `deadline`. The money goes
   to the seller, but the payer pays more. Record it before `upto` reaches mainnet.

@@ -65,7 +65,7 @@ The options, compared in
 
 - **What a recovery needs is in place before mainnet** (task 0048):
   - a "lost access" section in `docs/runbook.md`: a new Transit key, a new fee account at its
-    address, new channels with `create-channels.ts`, the new `FACILITATOR_ADDRESS` and `CHANNELS`
+    address, new channels with `create-channels.ts`, the Transit key's name and version, the new `FACILITATOR_ADDRESS` and `CHANNELS`
     in the server's `.env`, a restart, the alarms on the new addresses, and when the same server may
     stay (only if the leak didn't come from it);
   - `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` read from the server's `.env` instead of
