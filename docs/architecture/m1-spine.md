@@ -217,6 +217,7 @@ graph TD
   - **Key.** Each network has one facilitator key. It signs for the channels and pays fee bumps, and it reaches the pool only as a `TransactionSigner`, the OpenBao Transit signer ([ADR 0013](../adr/0013-facilitator-key-custody.md), task 0036).
   - **Config.** The Transit key, its version and the fee account's address (ADR 0013), plus `CHANNELS` (addresses, never secrets).
   - **Startup check.** The service refuses to start unless every channel has its master key weight at 0 and the facilitator key as its only signer (`checkChannel`).
+  - **Power.** Thresholds stay at 0, so the key can do anything on the fee account and the channels, signer changes included. Accepted until the float and reserves pass 500 XLM or `upto` nears mainnet ([ADR 0015](../adr/0015-hot-key-full-power.md)).
   - **Separation.** Testnet and mainnet never share a key or a channel. They share the facilitator process and OpenBao, but each network has its own key, Transit policy, OpenBao socket, channels, RPC endpoints and database ([ADR 0011](../adr/0011-facilitator-hosting.md), [ADR 0013](../adr/0013-facilitator-key-custody.md), task 0077).
 
 ### AD-13: Wire protocol is x402 v2 only [ADOPTED]

@@ -5,7 +5,7 @@ type: FEATURE
 status: active
 owner: okarcz
 milestone: 2
-related_adr: ["0003", "0005", "0011"]
+related_adr: ["0003", "0005", "0011", "0013", "0015"]
 related_tasks: ["0047", "0007", "0016", "0020", "0026", "0027"]
 tags: [signer-pool, keys, security, mainnet, priority-high, effort-medium, payments]
 links:
@@ -104,7 +104,7 @@ The re-check comes first: a cold recovery key, another way to keep the hot key b
 the hot key's full power accepted, with the reason recorded in an ADR. The criteria below apply
 only to the cold-key option.
 
-- [ ] Before mainnet, one of the three options is chosen and recorded
+- [x] Before mainnet, one of the three options is chosen and recorded (full power kept, ADR 0015)
 - [ ] Given a new channel, when setup runs, then its thresholds are low 1 / medium 1 / high 2 and the facilitator key (weight 1) can't change its signers or merge it, while a settlement still lands
 - [ ] Given the facilitator's own account, when it is hardened, then the hot key can sign fee bumps but not a Payment or a signer change
 - [ ] Given the cold recovery key, when the hot key is lost or rotated, then one batched, cold-signed transaction moves many channels to a new hot key, tested on testnet
@@ -114,10 +114,10 @@ only to the cold-key option.
 **Criteria for the chosen option** (accept full power, 2026-11-24; the cold-key criteria above
 no longer apply):
 
-- [ ] ADR 0015 records that the hot key keeps its full power, why (about 130 XLM at stake,
+- [x] ADR 0015 records that the hot key keeps its full power, why (about 130 XLM at stake,
       rebuilt in about an hour), and the trigger: float + reserves above 500 XLM, or before `upto`
       goes to mainnet, whichever comes first; ADR 0013 and AD-12 link to it
-- [ ] The threat model lists the `upto` risk: a stolen key settles open payments at their full
+- [x] The threat model lists the `upto` risk: a stolen key settles open payments at their full
       `max_amount`
 - [x] No contract gives a channel address any power: `upto-proxy` and every other contract
       checked, the result recorded (Implementation Notes, 2026-11-24)
@@ -190,7 +190,7 @@ today's setup"). Each one holds whichever option the re-check picks.
   and version are hardcoded in `deploy/production/compose.yaml:35-36`, so a new key after a theft
   (a Transit rotate or a new name) needs an approved PR and a playbook run; moving
   `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` into the server's `.env` would remove that step.
-- **`upto` is missing from the threat model.** A stolen key is `receiver_authorizer` on every open
+- ~~**`upto` is missing from the threat model.**~~ Added 2026-11-24 ("Facilitator key", "A stolen key charges open `upto` authorizations"). A stolen key is `receiver_authorizer` on every open
   `upto` payment and can settle each at its full `max_amount` until its `deadline`. The money goes
   to the seller, but the payer pays more. Record it before `upto` reaches mainnet.
 - ~~**Confirm nothing trusts a channel address.**~~ Checked 2026-11-24: nothing does
