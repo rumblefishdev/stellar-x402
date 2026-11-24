@@ -286,13 +286,30 @@ describe("cataloger", () => {
     },
   );
 
+  it("records a seller's redirect as the attempt's reason, not followed (0085)", async () => {
+    const { cataloger, attempts, list } = setup();
+    seller.reply = async () => ({ status: 302 });
+    await cataloger.onSuccess(record(valid), "settle");
+    expect(await attempts()).toEqual([
+      { stage: "seller", outcome: "not_askable", reason: "redirect" },
+    ]);
+    expect(seller.requests).toHaveLength(1);
+    expect(await list()).toEqual([]);
+  });
+
   it("does not ask a private address, an mcp listing, or a seller past the timeout (row 6)", async () => {
     const { cataloger, list, counted } = setup({ sellerTimeoutMs: 100 });
+    await cataloger.onSuccess(
+      record({ info: valid.info }, {}, { url: "https://10.255.255.1/x" }),
+      "settle",
+    );
+    expect(counted("seller", "not_askable", "not_public")).toBe(1);
+    // Over http the scheme is refused first, before the address is looked at.
     await cataloger.onSuccess(
       record({ info: valid.info }, {}, { url: "http://10.255.255.1/x" }),
       "settle",
     );
-    expect(counted("seller", "not_askable", "unsafe_url")).toBe(1);
+    expect(counted("seller", "not_askable", "not_https")).toBe(1);
 
     // Upstream's default resource URL names the tool, not the server that has it.
     const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };
@@ -301,7 +318,7 @@ describe("cataloger", () => {
 
     seller.reply = () => new Promise(() => {});
     await cataloger.onSuccess(record(valid), "settle");
-    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(counted("seller", "not_askable", "timeout")).toBe(1);
     expect(await list()).toEqual([]);
   });
 
@@ -679,7 +696,7 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     mcp.server.close();
     clock.now += MINUTE;
     await cataloger.onSuccess(paid(), "settle");
-    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(counted("seller", "not_askable", "network")).toBe(1);
     expect(await list()).toEqual([]);
   });
 
@@ -738,7 +755,7 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
     const started = performance.now();
     await cataloger.onSuccess(paid(), "settle");
     expect(performance.now() - started).toBeLessThan(5_000);
-    expect(counted("seller", "not_askable", "upstream_error")).toBe(1);
+    expect(counted("seller", "not_askable", "timeout")).toBe(1);
     expect(await list()).toEqual([]);
   });
 

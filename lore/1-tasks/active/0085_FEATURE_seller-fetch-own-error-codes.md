@@ -66,8 +66,61 @@ refused listing's reason is exact. As a buyer's agent, I want the same tool erro
 
 ## Acceptance Criteria
 
-- [ ] Given each guard refusal, when the MCP returns it, then the agent sees the same tool error
+- [x] Given each guard refusal, when the MCP returns it, then the agent sees the same tool error
       code and message as before (existing MCP tests unchanged)
-- [ ] Given a seller URL that redirects, when the facilitator checks it, then the attempt's reason
+- [x] Given a seller URL that redirects, when the facilitator checks it, then the attempt's reason
       is `redirect`, not `unsafe_url`
-- [ ] `packages/seller-fetch` contains no MCP or agent wording
+- [x] `packages/seller-fetch` contains no MCP or agent wording
+
+## Design Decisions
+
+### From Plan
+
+1. **Six cause codes**: `not_https`, `not_public` (an IP in the URL or a name resolving to one),
+   `redirect`, `response_too_large` (headers or body; see 5), `timeout`, `network`, exported as
+   `SellerFetchCode`. Messages stay as they were: they are already plain facts, so the MCP shows
+   the agent the same text.
+2. **`asToolError` maps them back**: `not_*` and `redirect` to `unsafe_url`,
+   `response_too_large` to itself, `timeout` and `network` to `upstream_error`, in one exhaustive
+   table.
+
+### Emerged
+
+3. **"Not a URL" is a code of its own, `not_a_url`**: the task left it open (its own code or
+   `not_https`). A string that does not parse has no scheme, so `not_https` would misname it, and
+   the operator's reason is meant to be exact. It cannot reach the facilitator in practice
+   (`bazaar.normalize` checks the URL first); the MCP shows it as `unsafe_url` as before.
+4. **A request or body cut off is `timeout` only when the deadline has passed**: both throw
+   sites (`guard.ts` request and body) check `deadline.aborted`; anything else is `network`. So
+   a request ended by its own signal (the caller gave up, e.g. an MCP client closing its stream)
+   is `network`, not `timeout`.
+5. **`response_too_large`, not the task's `too_large`** (renamed in review, PR #220): in
+   `catalog_attempts` `too_large` already means a listing over the entry limits twice (the
+   payment's `rejected` reason from `bazaar`, and the seller stage's outcome), so a third meaning
+   would mix causes in one query. `response_too_large` is the reason it was before 0085, with the
+   same meaning, so rows before and after agree, and it is the MCP's code for the same cause.
+6. **The MCP log keeps the exact cause**: `asToolError` puts the seller-fetch code at the head of
+   the tool error's `detail` (logs only), so a `payment_unknown` after a redirect still logs
+   `redirect` while the agent sees the same code and message as before.
+7. **An MCP seller that answers nothing by the deadline is `timeout`** (was `upstream_error`
+   written by hand in `seller-check.ts`).
+
+## Issues Encountered
+
+- **Modified tests** (intentional, the codes changed by design):
+  `packages/seller-fetch/test/guard.test.ts` asserts the new codes, and its caller-abort test
+  now expects `network`. `apps/facilitator/test/cataloger.test.ts`: a seller or MCP tool that
+  never answers is `timeout`, an MCP server shut down is `network`, and the private-address case
+  now uses https (`not_public`) as well as http (`not_https`): over http the scheme was refused
+  before the address, so the address check was never reached there.
+- **New tests**: guard `not_a_url`, `timeout` (stalled body), `redirect` (301/302/307),
+  `network` (a server dropping the connection); facilitator: the attempt row's reason is
+  `redirect`; `apps/mcp-local/test/results.test.ts`: every code's mapping.
+- **Testnet run kept apart from M1's evidence**: `catalog-smoke.ts` gained step 5 (the seller
+  answers the check with a 302; the attempt's reason is `redirect`), run on 2026-11-20 on commit
+  `8bf406e9`: `test/live/results/catalog-smoke-redirect-testnet.json`. It first overwrote
+  `catalog-smoke-testnet.json`, which `docs/scf/milestone-1-evidence.md` cites (the run of
+  2026-11-09 on `2bc55cc2`, task 0128), so that file is back as it was. The two runs' steps 1–4
+  differ: on 2026-11-09 the public testnet RPC answered in 7–9 s against the 10 s budget, so the
+  repeat payment and the new price got `402`, two settles have no transaction and the listing
+  stayed at `10000`; on 2026-11-20 every step settled, and the new price was listed (`20000`).
