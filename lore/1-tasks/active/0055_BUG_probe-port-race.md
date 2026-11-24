@@ -54,5 +54,40 @@ reading the port back. No other probe-and-close helper is left in the repo (chec
 
 ## Acceptance Criteria
 
-- [ ] No test helper in the repo probes and closes a port to pass it on
-- [ ] The affected tests pass; typecheck, lint and format clean
+- [x] No test helper in the repo probes and closes a port to pass it on (`git grep freePort` finds
+      none outside lore)
+- [x] The affected tests pass; typecheck, lint and format clean (`examples/http-api` 13 tests,
+      `conformance/test/proxy.test.ts` 17 tests; `apps/mcp-local/e2e` typechecks, its testnet run
+      is by hand)
+
+## Implementation Notes
+
+- `examples/http-api`: `PORT` takes 0–65535; `src/index.ts` logs `server.address().port`. Config
+  test for 0 flipped from refused to accepted; README's `PORT` row says what 0 does.
+- `conformance/external-proxy/proxy.mjs`: `PORT` must be digits up to 65535 (0 allowed, unset or
+  empty still refused); the "Facilitator listening on port N" line names the bound port, so ADR
+  0009's contract with the suite is unchanged.
+- `conformance/test/proxy.test.ts` and `apps/mcp-local/e2e/src/seller.ts` start their server on 0
+  and read the port back from the start line; both `freePort()` helpers are gone.
+
+## Design Decisions
+
+### From Plan
+
+1. **Servers listen on 0 and report the bound port** in the line the harness already waits for, as
+   0052 did for the facilitator.
+
+### Emerged
+
+2. **The 502 test uses a facilitator that drops each connection**, a `net` server on 127.0.0.1:0
+   held for the whole file whose handler destroys the socket. The proxy's `fetch` fails the same
+   way as for a refused connection, and the port stays bound by the test, so nothing else can take
+   it and answer. A refused port can't be had without a probe-and-close (a TCP port can't be bound
+   without listening), and a `.invalid` host depends on the resolver answering quickly.
+3. **The refusal test uses `PORT=0`, not a fixed port**: the proxy exits before it listens, and 0
+   can't collide with anything even if it didn't. It became a table that also covers an unset, a
+   non-numeric and an out-of-range `PORT`, since the proxy's check changed from `!port`.
+4. **The port is read only once the character after it has arrived** (`,` in the proxy's line,
+   `/` in the seller's): stdout can come in chunks cut mid-number, and a bare `(\d+)` would
+   take `543` of `54321`. 0052's `listeningPort` guards the same way by parsing whole lines only.
+
