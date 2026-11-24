@@ -242,7 +242,8 @@ describe("external proxy", () => {
     await expect(fetch(`${proxy.url}/health`)).rejects.toThrow();
   });
 
-  // The proxy exits before it listens, so the port is never bound.
+  // The proxy exits before it listens, so the port is never bound. The message pins the proxy's own
+  // check: an uncaught error exits 1 too, as `listen(70000)` would with ERR_SOCKET_BAD_PORT.
   it.each([
     ["without a target", { PORT: "0", GATE_FACILITATOR_URL: "" }],
     ["without a port", { PORT: "", GATE_FACILITATOR_URL: "http://127.0.0.1:1" }],
@@ -254,6 +255,9 @@ describe("external proxy", () => {
   ])("refuses to start %s", async (_, env) => {
     const child = spawn("bash", ["run.sh"], { cwd: folder, env: { ...process.env, ...env } });
     started.push(child);
+    // Read to its end: the exit can come before the last of stderr.
+    const stderr = text(child.stderr!);
     expect(await exited(child)).toEqual({ code: 1, signal: null });
+    expect(await stderr).toContain("GATE_FACILITATOR_URL and PORT (0-65535) must be set");
   });
 });
