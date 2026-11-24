@@ -1,6 +1,6 @@
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { describe, expect, it } from "vitest";
-import { SEARCH_FIELDS_VERSION, searchFields } from "../src/index.js";
+import { searchFields } from "../src/index.js";
 
 const listing = (fields: Partial<DiscoveryResource>): DiscoveryResource => ({
   resource: "https://seller.example/x",
@@ -154,9 +154,7 @@ describe("searchFields", () => {
     });
   });
 
-  // Cards built by another version are rewritten only when the version changes, so an output
-  // pinned here changes together with the version beside it.
-  it("pins its output to the rules version", () => {
+  it("reads a whole HTTP listing: service name, path words, tags, description, parameters", () => {
     const sample = listing({
       resource: "https://a.example/v1/forecast?city=x",
       serviceName: "Forecast",
@@ -177,14 +175,11 @@ describe("searchFields", () => {
         },
       },
     });
-    expect({ version: SEARCH_FIELDS_VERSION, fields: searchFields(sample) }).toEqual({
-      version: 1,
-      fields: {
-        name: "Forecast v1 forecast",
-        tags: "weather",
-        description: "Daily forecast",
-        parameters: "city City name",
-      },
+    expect(searchFields(sample)).toEqual({
+      name: "Forecast v1 forecast",
+      tags: "weather",
+      description: "Daily forecast",
+      parameters: "city City name",
     });
   });
 });

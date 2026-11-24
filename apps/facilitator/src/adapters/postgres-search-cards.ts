@@ -1,32 +1,41 @@
-import type { DiscoveryResource } from "@x402/extensions/bazaar";
+import type { SearchFields } from "@stellar-x402/bazaar";
 import type pg from "pg";
-import type { SearchCard, SearchCardStore, StaleListing } from "../ports/index.js";
+import type { CardListing, SearchCardStore } from "../ports/index.js";
 
 export class PostgresSearchCardStore implements SearchCardStore {
   constructor(private readonly pool: pg.Pool) {}
 
-  async stale(rules: number, limit: number): Promise<StaleListing[]> {
-    const { rows } = await this.pool.query<{ seq: string; resource: DiscoveryResource }>(
-      `SELECT c.seq, c.resource
-         FROM catalog c
-         LEFT JOIN catalog_search s USING (seq)
-        WHERE s.seq IS NULL OR s.rules <> $1
-        ORDER BY c.seq
+  async listings(after: string | null, limit: number): Promise<CardListing[]> {
+    const { rows } = await this.pool.query<CardListing>(
+      `SELECT seq, resource FROM catalog
+        WHERE $1::bigint IS NULL OR seq > $1::bigint
+        ORDER BY seq
         LIMIT $2`,
-      [rules, limit],
+      [after, limit],
     );
     return rows;
   }
 
-  async write(card: SearchCard): Promise<boolean> {
-    const { name, tags, description, parameters } = card.fields;
+  /**
+   * `FOR SHARE` waits for a catalog write of the listing under way and then re-reads the row, so
+   * a listing changed meanwhile writes no card; one this write holds waits for it, and then writes
+   * its own card over this one.
+   */
+  async write(listing: CardListing, fields: SearchFields): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      `INSERT INTO catalog_search (seq, rules, name, tags, description, parameters)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (seq) DO UPDATE SET rules = $2, name = $3, tags = $4, description = $5,
-         parameters = $6
-       WHERE catalog_search.rules <> $2`,
-      [card.seq, card.rules, name, tags, description, parameters],
+      `WITH listing AS (
+         SELECT seq FROM catalog WHERE seq = $1 AND resource = $2::jsonb FOR SHARE)
+       INSERT INTO catalog_search (seq, name, tags, description, parameters)
+       SELECT seq, $3, $4, $5, $6 FROM listing
+       ON CONFLICT (seq) DO UPDATE SET name = $3, tags = $4, description = $5, parameters = $6`,
+      [
+        listing.seq,
+        JSON.stringify(listing.resource),
+        fields.name,
+        fields.tags,
+        fields.description,
+        fields.parameters,
+      ],
     );
     return rowCount === 1;
   }
