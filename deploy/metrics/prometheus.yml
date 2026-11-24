@@ -1,7 +1,7 @@
-# The metrics agent's config (ADR 0011): what it scrapes every 15 s and where it sends it. The
-# facilitator's /metrics joins at the switch (0139 step 7). Not ClickHouse's endpoint yet: it is on,
-# but listens on 127.0.0.1 inside its container (the explorer's config.d/prometheus.xml), so only
-# `docker exec` or a scraper in its network namespace reaches it; 0139 decides which.
+# The metrics agent's config (ADR 0011): what it scrapes every 15 s and where it sends it. Not
+# ClickHouse's endpoint yet: it is on, but listens on 127.0.0.1 inside its container (the
+# explorer's config.d/prometheus.xml), so only `docker exec` or a scraper in its network namespace
+# reaches it; 0139 decides which.
 global:
   scrape_interval: 15s
   # `project` tells x402's host series from another project's on the VM (`backup_age_seconds`,
@@ -15,6 +15,11 @@ scrape_configs:
   - job_name: node
     static_configs:
       - targets: [node-exporter:9100]
+  # The facilitator's /metrics (METRICS_PORT in deploy/production/compose.yaml), over the
+  # `metrics` network it joins. Its series carry `network` themselves.
+  - job_name: facilitator
+    static_configs:
+      - targets: [facilitator:9464]
   # The agent's own: its remote_write backlog and failures, for the VM's rules.
   - job_name: agent
     static_configs:

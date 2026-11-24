@@ -7,7 +7,9 @@ PartOf=docker.service
 # Wants, not Requires: stopping or restarting a database never stops the facilitator, and at a
 # reboot it drains while the databases and the tunnel are still up.
 Wants=x402-db-testnet@%i.service x402-openbao.service
-After=docker.service x402-tunnel@%i.service x402-db-testnet@%i.service x402-openbao.service
+# After the metrics agent too, whose project makes the `x402-metrics` network the facilitator
+# joins (0139). Order only: a stopped agent never stops the facilitator, and the network stays.
+After=docker.service x402-tunnel@%i.service x402-db-testnet@%i.service x402-openbao.service x402-metrics.service
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
