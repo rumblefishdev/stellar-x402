@@ -2,7 +2,7 @@
 id: "0085"
 title: "Give seller-fetch its own error codes, translated by the MCP"
 type: FEATURE
-status: active
+status: completed
 owner: bstruzyk
 milestone: 2
 related_adr: ["0008"]
@@ -22,6 +22,13 @@ history:
     note: >
       Started: seller-fetch names each refusal's cause, asToolError maps the new codes to today's
       MCP codes, and the facilitator's attempt reasons take them.
+  - date: "2026-11-24"
+    status: completed
+    who: bstruzyk
+    note: >
+      PR #220 merged. All three criteria met: the MCP shows the same tool errors, a redirecting
+      seller is recorded as `redirect`, and seller-fetch has no MCP wording. ADR 0008 lists the
+      seven codes. No follow-up work.
 ---
 
 # Give seller-fetch its own error codes, translated by the MCP
