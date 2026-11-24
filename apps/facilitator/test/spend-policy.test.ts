@@ -6,6 +6,7 @@ import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { SettlementRecord, SpendScope, SpendStore } from "../src/ports/index.js";
 import type { BeforeSubmitContext } from "../src/settlement/hooks.js";
+import { NONCE_CONSUMED_SETTLE_REASON } from "../src/settlement/nonce-used.js";
 import { SETTLE_REASONS } from "../src/settlement/reasons.js";
 import type { AssetKind, AssetKinds } from "../src/spend/asset-kinds.js";
 import { budgetKind, spendLimits, type SpendBudgets } from "../src/spend/limits.js";
@@ -759,6 +760,63 @@ describe("createSpendPolicy onFinal", () => {
     expect(await used(store, `payer:${wallet}`)).toBe(3n * 14_278n);
     expect(await used(store, `payTo:${payTo}`)).toBe(4n * 14_278n);
     expect(metrics.value("spend_failure_attributed_total", { fault: "payer" })).toBe(0);
+  });
+
+  it("feeds no breaker for a nonce used elsewhere, also without an error event", async () => {
+    const spy = spyingStore(db.stores().spend);
+    const { policy, store, metrics } = setup({ store: spy.store });
+    const payer = account();
+    const payTo = account();
+    // An RPC that sends no diagnostic events: the failure names no error.
+    const silent: FailureCause = { opCode: "invokeHostFunctionTrapped" };
+    for (let i = 0; i < BREAKERS.payer.failures + 1; i++) {
+      const ctx = context({ payer, payTo });
+      await policy.onFinal(
+        finalRecord(ctx, "failed", {
+          failure: silent,
+          errorReason: NONCE_CONSUMED_SETTLE_REASON,
+        }),
+        "settle",
+      );
+    }
+
+    expect(spy.writes).toEqual([]);
+    expect(await store.breakerOpenUntil(`payer:${payer}`, 1_000_000)).toBeUndefined();
+    expect(await store.breakerOpenUntil(`payTo:${payTo}`, 1_000_000)).toBeUndefined();
+    expect(metrics.value("spend_failure_attributed_total", { fault: "payer" })).toBe(0);
+  });
+
+  it("still commits the fee of a nonce used elsewhere", async () => {
+    const { policy, store } = setup();
+    const ctx = context();
+    expect(await policy.beforeSubmit(ctx)).toEqual({ allow: true });
+    await policy.onFinal(
+      finalRecord(ctx, "failed", {
+        failure: { opCode: "invokeHostFunctionTrapped" },
+        errorReason: NONCE_CONSUMED_SETTLE_REASON,
+      }),
+      "settle",
+    );
+
+    expect(await used(store, `payer:${ctx.payer}`)).toBe(14_278n);
+    expect(await used(store, `payTo:${ctx.payTo}`)).toBe(14_278n);
+    expect(await used(store, "global")).toBe(14_278n);
+  });
+
+  it("blames the payer for another reason without an error event", async () => {
+    const spy = spyingStore(db.stores().spend);
+    const { policy, metrics } = setup({ store: spy.store });
+    const ctx = context();
+    await policy.onFinal(
+      finalRecord(ctx, "failed", {
+        failure: { opCode: "invokeHostFunctionTrapped" },
+        errorReason: SETTLE_REASONS.failed,
+      }),
+      "settle",
+    );
+
+    expect(spy.writes).toContain(`failure payer:${ctx.payer}`);
+    expect(metrics.value("spend_failure_attributed_total", { fault: "payer" })).toBe(1);
   });
 
   it("blames a C-account payer for a SAC resource overrun, at the usual count", async () => {

@@ -116,7 +116,7 @@ function instance(sac: boolean, metadata = true) {
   };
 }
 
-function setup(simulation: unknown, entries: unknown = instance(true), timeoutMs?: number) {
+function setup(simulation: unknown, entries: unknown = instance(true)) {
   const simulateTransaction = vi.fn(async () => simulation);
   // Like an RPC, it finds nothing under any other key.
   const getLedgerEntries = vi.fn(async (key: xdr.LedgerKey) =>
@@ -127,7 +127,6 @@ function setup(simulation: unknown, entries: unknown = instance(true), timeoutMs
     { simulateTransaction, getLedgerEntries } as never,
     "stellar:testnet",
     { warn },
-    timeoutMs,
   );
   return { find, simulateTransaction, getLedgerEntries, warn };
 }
@@ -271,22 +270,18 @@ describe("createTrustlineLookup", () => {
     expect(unreadable.warn).toHaveBeenCalledOnce();
   });
 
-  it("stops at its limit and gives no answer", async () => {
-    const hung = setup(failed(), undefined, 10);
-    hung.simulateTransaction.mockReturnValue(new Promise(() => {}));
-    await expect(hung.find(payment)).resolves.toBeUndefined();
-    expect(hung.warn).toHaveBeenCalledOnce();
-  });
-
-  it("gives up after 3 s by default", async () => {
+  it("waits past 3 s for a slow RPC and still names the trustline", async () => {
     vi.useFakeTimers();
-    const hung = setup(failed());
-    hung.simulateTransaction.mockReturnValue(new Promise(() => {}));
+    const slow = setup(failed());
+    slow.simulateTransaction.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve(failed(errorEvent(payTo))), 5_000)),
+    );
     const answered = vi.fn();
-    void hung.find(payment).then(answered);
-    await vi.advanceTimersByTimeAsync(2_999);
-    expect(answered).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(answered).toHaveBeenCalledWith(undefined);
+    void slow.find(payment).then(answered);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(answered).toHaveBeenCalledWith(
+      expect.objectContaining({ invalidReason: PAYTO_TRUSTLINE_REASON }),
+    );
+    expect(slow.warn).not.toHaveBeenCalled();
   });
 });
