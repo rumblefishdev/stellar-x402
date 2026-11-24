@@ -2,7 +2,8 @@
 id: "0055"
 title: "Let mcp-local e2e and conformance servers pick their own port"
 type: BUG
-status: backlog
+status: active
+owner: bstruzyk
 milestone: 2
 related_adr: []
 related_tasks: ["0052"]
@@ -13,6 +14,10 @@ history:
     status: backlog
     who: karolkow
     note: "Spawned from 0052 future work."
+  - date: "2026-11-24"
+    status: active
+    who: bstruzyk
+    note: "Started."
 ---
 
 # Let mcp-local e2e and conformance servers pick their own port
