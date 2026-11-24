@@ -69,3 +69,28 @@ This changes when a settlement gives up, so the options go to the owner before t
    calls adds per-channel state and repeats a deadline's wait on a missing channel until retired;
    a lower `timeoutSeconds` also moves the transaction's time bound and the prepared-ahead expiry
    check.
+
+### Emerged
+
+From stkrolikiewicz's review of PR #218 (okarcz, 2026-11-24):
+
+2. **The read checks its window again after each wait**: before, a wait that ended on its
+   deadline was always followed by one more read, so with a slow RPC (each read up to N URLs ×
+   10 s through FallbackRpc) a +30 s deadline ended at +60 s. Now it gives up with the last read's
+   error right after the wait, and still retires the channel if that read answered "no entry".
+   **Limit kept:** the wait's own ledger poll (`LedgerClock.following`) has no time limit, so the
+   read can still end one RPC call past the deadline; bounding it means changing `LedgerClock`.
+   With the extra read gone, the read can now answer `…_rpc_unavailable` before the facilitator's
+   budget answers `…_timeout`, which before happened only when the auth expiry cut the deadline
+   (adamkoot's review note).
+3. **signer-pool doesn't refuse a send after the deadline**: a read that succeeds at or after the
+   deadline still prepares, signs and sends; in the facilitator the `budgetOver` guard in
+   `onSigned` refuses it. The doc comment now says the caller refuses the send, instead of
+   claiming the call won't send. Rejected for this PR: a deadline check before `prepare`, a
+   behavior change that needs its own refusal reason.
+4. **A non-finite `deadline` is ignored**: a `NaN` deadline never passed, so failed reads retried
+   forever; now it falls back to `timeoutSeconds`. Unreachable from the facilitator.
+5. **Two tests made to fail without the change**: the deadline test now fails ledger polls too, as
+   in a real outage, so its wait ends on the deadline (it passed with `following(giveUpAt)`
+   before); a new test pins the sticky "no entry" flag (one "no entry", then failures past the
+   deadline still read to `timeoutSeconds`; `noEntry = missing` used to pass the suite).
