@@ -1,4 +1,3 @@
-import { searchFields } from "@stellar-x402/bazaar";
 import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
 import type { SearchCardStore } from "../ports/index.js";
@@ -19,8 +18,6 @@ export interface SearchCardRewriteDeps {
 export interface SearchCardRewrite {
   /** Starts the rewrite in the background, the process serving meanwhile; settles when it ends. */
   start(): Promise<void>;
-  /** Rewrites every listing's card, page by page, and resolves when done. */
-  run(): Promise<void>;
   /** Stops between cards and waits for the card under way, so the pools can end after it. */
   close(): Promise<void>;
 }
@@ -39,7 +36,7 @@ export function createSearchCardRewrite(deps: SearchCardRewriteDeps): SearchCard
 
   const run = async () => {
     let written = 0;
-    let after: string | null = null;
+    let after = "0";
     while (!closed) {
       let page;
       try {
@@ -56,7 +53,7 @@ export function createSearchCardRewrite(deps: SearchCardRewriteDeps): SearchCard
         // A shutdown waits for the rewrite, so it stops between cards.
         if (closed) break;
         try {
-          if (await store.write(listing, searchFields(listing.resource))) written++;
+          if (await store.write(listing)) written++;
         } catch (error) {
           logger.warn("search_card_failed", { seq: listing.seq, error });
           metrics.increment("search_card_failures_total");
@@ -64,7 +61,8 @@ export function createSearchCardRewrite(deps: SearchCardRewriteDeps): SearchCard
       }
       after = page[page.length - 1]!.seq;
     }
-    if (written > 0) logger.info("search_cards_written", { written });
+    // One line at the end, so a release's log shows whether every card has its rules.
+    logger.info("search_cards_written", { written, stopped: closed });
   };
 
   return {
@@ -72,7 +70,6 @@ export function createSearchCardRewrite(deps: SearchCardRewriteDeps): SearchCard
       running = run();
       return running;
     },
-    run,
     async close() {
       closed = true;
       await running;

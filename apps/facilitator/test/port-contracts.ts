@@ -2014,12 +2014,11 @@ export function searchCardStoreContract(
           description,
         },
       });
-    const fields = { name: "n", tags: "", description: "", parameters: "" };
     const urls = (page: CardListing[]) => page.map((listing) => listing.resource.resource);
 
     it("pages through every listing in catalog order", async () => {
       for (const host of ["a", "b", "c"]) await list(`https://${host}.example`, 1);
-      const first = await cards.listings(null, 2);
+      const first = await cards.listings("0", 2);
       expect(urls(first)).toEqual(["https://a.example", "https://b.example"]);
       const second = await cards.listings(first[1]!.seq, 2);
       expect(urls(second)).toEqual(["https://c.example"]);
@@ -2028,15 +2027,15 @@ export function searchCardStoreContract(
 
     it("writes the card of the listing it read", async () => {
       await list("https://a.example", 1);
-      const [listing] = await cards.listings(null, 10);
-      expect(await cards.write(listing!, fields)).toBe(true);
+      const [listing] = await cards.listings("0", 10);
+      expect(await cards.write(listing!)).toBe(true);
     });
 
     it("writes no card for a listing written again since it was read", async () => {
       await list("https://a.example", 1, "Weather");
-      const [listing] = await cards.listings(null, 10);
+      const [listing] = await cards.listings("0", 10);
       await list("https://a.example", 2, "Tides");
-      expect(await cards.write(listing!, fields)).toBe(false);
+      expect(await cards.write(listing!)).toBe(false);
     });
   });
 }

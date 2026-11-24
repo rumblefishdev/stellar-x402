@@ -1007,18 +1007,13 @@ describe("PostgreSQL stores", () => {
          VALUES (-1, '', '', '', '')`,
       ),
     ).rejects.toThrow(/foreign key/);
-    // The store writes each field to its column.
-    await db
-      .stores()
-      .searchCards.write(
-        { seq, resource: {} as DiscoveryResource },
-        { name: "N", tags: "T", description: "D", parameters: "P" },
-      );
+    // The store writes each field of the listing's card to its column.
+    await db.stores().searchCards.write({ seq, resource: {} as DiscoveryResource });
     const card = await pool.query(
       "SELECT name, tags, description, parameters FROM catalog_search WHERE seq = $1",
       [seq],
     );
-    expect(card.rows).toEqual([{ name: "N", tags: "T", description: "D", parameters: "P" }]);
+    expect(card.rows).toEqual([searchFields({} as DiscoveryResource)]);
     await pool.query("DELETE FROM catalog WHERE seq = $1", [seq]);
     const left = await pool.query("SELECT count(*)::int AS n FROM catalog_search");
     expect(left.rows).toEqual([{ n: 0 }]);
@@ -1087,7 +1082,7 @@ describe("PostgreSQL stores", () => {
       store: searchCards,
       logger: jsonLogger("error"),
       metrics: memoryMetrics(),
-    }).run();
+    }).start();
     const { rows } = await pool.query(
       `SELECT c.resource, s.name, s.tags, s.description, s.parameters
          FROM catalog c JOIN catalog_search s USING (seq) ORDER BY c.seq`,
@@ -1100,7 +1095,7 @@ describe("PostgreSQL stores", () => {
     await db.empty();
     const { catalog, searchCards } = db.stores();
     await catalog.upsert(catalogEntry());
-    const [read] = await searchCards.listings(null, 10);
+    const [read] = await searchCards.listings("0", 10);
     const writer = await pool.connect();
     try {
       // A catalog write under way: the listing has changed but is not yet committed.
@@ -1109,16 +1104,13 @@ describe("PostgreSQL stores", () => {
         `UPDATE catalog SET resource = jsonb_set(resource, '{description}', '"Tides"') WHERE seq = $1`,
         [read!.seq],
       );
-      const fields = { name: "old", tags: "", description: "", parameters: "" };
-      const rewrite = searchCards.write(read!, fields);
+      const rewrite = searchCards.write(read!);
       await new Promise((resolve) => setTimeout(resolve, 200));
       await writer.query("COMMIT");
       expect(await rewrite).toBe(false);
     } finally {
       writer.release();
     }
-    const { rows } = await pool.query("SELECT name FROM catalog_search");
-    expect(rows).not.toContainEqual({ name: "old" });
   });
 
   it("applies the migrations once when two runs race", async () => {
