@@ -63,7 +63,7 @@ the alarms that read them. The [uptime figure](#the-uptime-figure) is under Upti
 | `certificate`             | `host`        | 2026-11-09 12:19 UTC | Not fired: every hour holds the real days left ([Drills](#drills))                                                                      |
 | `log-volume`              | `logVolume`   | 2026-11-09 12:19 UTC | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                   |
 | `memory`                  | `memory`      | 2026-11-09 15:11 UTC | Not fired: a `Minimum` alarm can't be faked while the agent writes real samples ([Drills](#drills))                                     |
-| `monitoring-heartbeat`    | `heartbeat`   | 2026-11-24 12:48 UTC | 2026-11-24, Alertmanager stopped ([Drills](#drills)): ALARM 13:11:33, OK 13:13:33 UTC; `make fire-test` at 12:49:12                     |
+| `monitoring-heartbeat`    | `heartbeat`   | 2026-11-24 12:48 UTC | 2026-11-24, Alertmanager stopped ([Drills](#drills)): ALARM 13:11:33, OK 13:13:33 UTC; `make fire-test` at 12:49:29                     |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
 `breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). `log-volume` ends in
@@ -717,7 +717,8 @@ fails. When it expires, no log or metric line reaches CloudWatch.
 Alertmanager's always-firing `Watchdog` stopped reaching the topic
 `x402-production-monitoring-heartbeat`, which it publishes to every minute (ADR 0011,
 "Heartbeat"): Prometheus, Alertmanager or the VM `monitoring-hel1-01` is down, or the VM's AWS
-credential is broken. Meanwhile the Prometheus rules page no one. Its own stack, `X402-production-Heartbeat`.
+credential is broken. It fires about 20 minutes after the Watchdog stops (drill, 2026-11-24): the
+Prometheus rules have paged no one since then. Its own stack, `X402-production-Heartbeat`.
 
 1. Did the Watchdog reach SNS? Two hours, one-minute periods:
 
@@ -937,6 +938,7 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `backup_secret_reads`                       | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |
 | `Errors`                                    | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-errors](#watch-errors)                                                                                 |
 | `Invocations`                               | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-no-invocations](#watch-no-invocations)                                                                 |
+| `NumberOfMessagesPublished`                 | `AWS/SNS`          | AWS's own      | `TopicName` `x402-production-monitoring-heartbeat`       | [monitoring-heartbeat](#monitoring-heartbeat)                                                                 |
 | `EMFParsingErrors`                          | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-parsing](#emf-parsing)                                                                                   |
 | `EMFValidationErrors`                       | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-validation](#emf-validation)                                                                             |
 | `IncomingBytes`                             | `AWS/Logs`         | AWS's own      | `LogGroupName`, each of our log groups                   | [log-volume](#log-volume)                                                                                     |
@@ -1052,7 +1054,7 @@ reset-failed x402@production`, the agent, the credentials timer and the probe ti
 - **How:** `ssh monitoring 'sudo docker stop monitoring-alertmanager-1'` at 12:50:54, and
   `docker start` once the alarm fired. Nothing else on the VM alerts on x402 before the switch,
   so the gap lost no alert.
-- **What happened:** ALARM at 13:11:33, 20 minutes 40 seconds after the stop, not the 10 to 15
+- **What happened:** ALARM at 13:11:33, 20 minutes 39 seconds after the stop, not the 10 to 15
   that two empty 5-minute periods suggest: CloudWatch waits for late data before it reads a
   period as missing. Alertmanager started at 13:11:50; OK at 13:13:33.
 - **What it shows:** the topic's count, the alarm's missing-data rule and its path to Slack. A
