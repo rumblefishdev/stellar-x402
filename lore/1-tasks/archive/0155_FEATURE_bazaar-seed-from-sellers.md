@@ -2,7 +2,7 @@
 id: "0155"
 title: "Seed the Stellar Bazaar once from the sellers' own files, without other catalogs"
 type: FEATURE
-status: active
+status: completed
 owner: karolkow
 milestone: 2
 related_adr: ["0008"]
@@ -23,6 +23,14 @@ history:
     note: >
       Grilling done (decisions 1-15); four PRs: extract the seller check, discovery for both
       networks, the robot's User-Agent, then the seed command.
+  - date: "2026-11-24"
+    status: completed
+    who: karolkow
+    note: >
+      PRs #214, #215, #216 and #217 merged, with robots.txt following in the seed. All seven
+      criteria met; 133 tests of the seed, the seller check and discovery pass on develop.
+      ADR 0008 names the seed as the second trigger. The run on the deployed facilitator is an
+      operator step, not part of this task. No follow-up work.
 ---
 
 # Seed the Stellar Bazaar once from the sellers' own files, without other catalogs
@@ -106,16 +114,20 @@ but the task as first written could not run and was larger than needed.
 
 ## Acceptance Criteria
 
-- [ ] ADR 0008 is amended for seeded listings
-- [ ] Given the host list, when the seed runs, then every listing it adds comes from the seller's
+- [x] ADR 0008 is amended for seeded listings (`docs/adr/0008-bazaar-catalog-integrity.md`)
+- [x] Given the host list, when the seed runs, then every listing it adds comes from the seller's
       own file and its 402, and passes the same gates as a listing from a settlement
-- [ ] No request goes to another x402 catalog during the seed
-- [ ] Every request to a seller carries the `stellar-bazaar` User-Agent
-- [ ] Discovery lists both networks' listings, and `?network=` narrows them to one
-- [ ] Given a host where some resources fail, when the seed runs, then its other resources are
-      still listed and each failure is reported with its reason
-- [ ] The run reports listings added, hosts and `payTo` accounts, and every refused URL with its
-      reason
+      (`apps/facilitator/test/catalog-seed.test.ts`)
+- [x] No request goes to another x402 catalog during the seed: only the listed hosts and URLs on
+      their own host are asked (`apps/facilitator/test/seed.test.ts`)
+- [x] Every request to a seller carries the `stellar-bazaar` User-Agent
+      (`apps/facilitator/test/cataloger.test.ts`)
+- [x] Discovery lists both networks' listings, and `?network=` narrows them to one
+      (`apps/facilitator/test/discovery.test.ts`)
+- [x] Given a host where some resources fail, when the seed runs, then its other resources are
+      still listed and each failure is reported with its reason (`apps/facilitator/test/seed.test.ts`)
+- [x] The run reports listings added, hosts and `payTo` accounts, and every refused URL with its
+      reason (`apps/facilitator/test/seed.test.ts`; a real run on six hosts in PR #217)
 
 ## Out of scope
 
