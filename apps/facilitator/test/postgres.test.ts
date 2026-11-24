@@ -29,6 +29,7 @@ import {
   catalogAttemptStoreContract,
   catalogStoreContract,
   searchCardStoreContract,
+  catalogSearchContract,
   rateLimitStoreContract,
   settlement,
   holdLease,
@@ -204,6 +205,7 @@ describe("PostgreSQL stores", () => {
   rateLimitStoreContract(async () => (await stores()).rateLimits);
   catalogStoreContract(async () => (await stores()).catalog);
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
+  catalogSearchContract(async () => (await stores()).catalog);
   searchCardStoreContract(async () => {
     const all = await stores();
     return { catalog: all.catalog, cards: all.searchCards };
