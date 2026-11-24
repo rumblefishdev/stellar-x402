@@ -1,4 +1,4 @@
-# The AWS side of stellar-x402 (task 0027): four stacks, deployed by hand with SSO (decision 3).
+# The AWS side of stellar-x402 (task 0027): five stacks, deployed by hand with SSO (decision 3).
 # No workflow holds AWS credentials. Every deploy is agreed first: the account is shared.
 #
 #   aws sso login --profile stellar && export AWS_PROFILE=stellar
@@ -16,7 +16,8 @@ CDK := pnpm exec cdk --app "$(PRODUCTION_APP)"
 	diff-production-uptime deploy-production-uptime \
 	diff-production-alarms deploy-production-alarms \
 	diff-production-watch deploy-production-watch \
-	fire-test check-series check-emf-disabled telemetry-arns
+	diff-production-heartbeat deploy-production-heartbeat \
+	fire-test check-series check-emf-disabled telemetry-arns rules
 
 # The catalog and the config package first: turbo builds what infra imports.
 build:
@@ -41,6 +42,8 @@ diff-production: build
 # On a fresh account or a rebuild, deploy Watch first, wait for `make check-series GROUP=watch`,
 # then Alarms: no stack depends on another, so --all may create the alarms before the check runs,
 # and watch-no-invocations treats missing data as breaching (it would page until the first run).
+# Heartbeat likewise goes in with its group off until the VM's Watchdog publishes to its topic:
+# monitoring-heartbeat breaches on missing data too.
 # A deploy of all stacks ships every pending change, a parked one too (the explorer's 0312
 # "stowaway"), so the full diff is printed first, into the same output. --require-approval
 # broadening stops on IAM widening only: read the diff for removals too (the Prices API's 0157).
@@ -81,6 +84,14 @@ deploy-production-watch: build
 	$(CDK) diff --strict $(PREFIX)-Watch
 	$(CDK) deploy $(PREFIX)-Watch --exclusively --require-approval broadening
 
+# The monitoring VM's heartbeat topic and alarm, and its Roles Anywhere role (lore 0139).
+diff-production-heartbeat: build
+	$(CDK) diff --strict $(PREFIX)-Heartbeat
+
+deploy-production-heartbeat: build
+	$(CDK) diff --strict $(PREFIX)-Heartbeat
+	$(CDK) deploy $(PREFIX)-Heartbeat --exclusively --require-approval broadening
+
 # The delivery test, after every deploy of the alarms (ADR 0011, decision 12): done only when a
 # person sees the message in Slack. The default alarm reads a metric written only on a failure,
 # so its next evaluation puts it back to OK, and it sends no OK message. The history then shows
@@ -94,6 +105,11 @@ fire-test:
 	aws cloudwatch describe-alarm-history --region $(REGION) --alarm-name "$(ALARM)" \
 		--history-item-type Action --max-records 3 \
 		--query 'AlarmHistoryItems[].[Timestamp,HistorySummary]' --output table
+
+# The monitoring VM's rule file, from the same rows as the alarms (lore 0139 step 6). A test fails
+# while the committed file differs from what this writes.
+rules: build
+	node dist/bin/rules.js > ../deploy/metrics/rules/x402-production.yml
 
 # Before a group goes on: every series it reads that is written all the time has data
 # (decision 26). GROUP is one of the alarmGroups in envs/production.json.

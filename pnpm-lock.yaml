@@ -149,6 +149,10 @@ importers:
       '@x402/extensions':
         specifier: ~2.31.0
         version: 2.31.0(typescript@6.0.3)
+    devDependencies:
+      '@stellar-x402/facilitator':
+        specifier: workspace:*
+        version: link:../../facilitator
 
   apps/portal:
     dependencies:

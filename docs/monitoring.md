@@ -76,20 +76,21 @@ Built in `infra/` and defined in the alarm list, but their group is off in
 `infra/envs/production.json` until what they read exists. Each gets its section here, and is fired
 once, by the task that turns it on.
 
-| Alarm                | Group           | Turned on by                                                                           |
-| -------------------- | --------------- | -------------------------------------------------------------------------------------- |
-| `account-effects`    | `watchSecurity` | 0127, the theft section                                                                |
-| `account-state`      | `watchSecurity` | 0127, the theft section                                                                |
-| `backup-age`         | `backups`       | 0026, once the first pgBackRest backup is made                                         |
-| `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
-| `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
-| `hub-uptime`         | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
-| `portal-uptime`      | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
-| `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
-| `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
-| `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
-| `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
-| `wal-stale`          | `backups`       | 0026, as above                                                                         |
+| Alarm                  | Group           | Turned on by                                                                                     |
+| ---------------------- | --------------- | ------------------------------------------------------------------------------------------------ |
+| `account-effects`      | `watchSecurity` | 0127, the theft section                                                                          |
+| `account-state`        | `watchSecurity` | 0127, the theft section                                                                          |
+| `backup-age`           | `backups`       | 0026, once the first pgBackRest backup is made                                                   |
+| `backup-secret-read`   | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                               |
+| `channel-held`         | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred)           |
+| `hub-uptime`           | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1             |
+| `monitoring-heartbeat` | `heartbeat`     | 0139, once Alertmanager's Watchdog publishes to its topic (soroban-infrastructure `monitoring/`) |
+| `portal-uptime`        | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published                        |
+| `snapshot-age`         | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                                      |
+| `upstream-changed`     | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run                    |
+| `upstream-silent`      | `upstream`      | 0026, as above                                                                                   |
+| `wal-failing`          | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                                   |
+| `wal-stale`            | `backups`       | 0026, as above                                                                                   |
 
 **The logs.** The facilitator, the tunnel, Postgres, OpenBao and the deploy write their output to
 files under `/var/log/x402/` on the server, and the CloudWatch agent ships them ([runbook, The CloudWatch agent](runbook.md#the-cloudwatch-agent)):
@@ -709,6 +710,46 @@ fails. When it expires, no log or metric line reaches CloudWatch.
    a new key and CSR on the server, signed by the ClickHouse project's CA holder, committed by pull
    request to `deploy/production`.
 
+## The monitoring VM
+
+### monitoring-heartbeat
+
+Alertmanager's always-firing `Watchdog` stopped reaching the topic
+`x402-production-monitoring-heartbeat`, which it publishes to every minute (ADR 0011,
+"Heartbeat"): Prometheus, Alertmanager or the VM `monitoring-hel1-01` is down, or the VM's AWS
+credential is broken. Meanwhile the Prometheus rules page no one. Its own stack, `X402-production-Heartbeat`.
+
+1. Did the Watchdog reach SNS? Two hours, one-minute periods:
+
+   ```sh
+   S=$(date -u -d '-2 hour' +%FT%TZ 2>/dev/null || date -u -v-2H +%FT%TZ); E=$(date -u +%FT%TZ); aws cloudwatch get-metric-statistics --profile stellar --region eu-central-1 --namespace AWS/SNS --metric-name NumberOfMessagesPublished --dimensions Name=TopicName,Value=x402-production-monitoring-heartbeat --statistics Sum --period 60 --start-time $S --end-time $E --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Sum]' --output text
+   ```
+
+   No points since it fired: nothing reached the topic, go to 2. Points every minute and the
+   alarm still in ALARM: the alarm's own settings (`aws cloudwatch describe-alarms --profile stellar --region eu-central-1 --alarm-names x402-production-monitoring-heartbeat`).
+
+2. Is the VM up, and does Alertmanager send?
+
+   ```sh
+   ssh monitoring 'uptime; sudo docker ps --format "{{.Names}} {{.Status}}"'
+   ssh monitoring 'sudo docker logs --since 30m monitoring-alertmanager-1 2>&1 | grep -i -E "sns|error" | tail'
+   ```
+
+   No SSH: the VM or Hetzner, in the Hetzner Cloud console. No `Watchdog` firing in Alertmanager:
+   Prometheus doesn't evaluate or doesn't reach Alertmanager. `Watchdog` firing: Alertmanager
+   doesn't publish; its log names an SNS or credential error (the VM's certificate, its signing
+   helper, or the role's IP condition after the VM's IP changed). A new IP takes the parameter
+   and a deploy of the stack: CloudFormation reads the parameter only at deploy, so until then the
+   role keeps the old IP and denies every publish, the heartbeat's and the alarm topic's.
+
+   ```sh
+   aws ssm put-parameter --profile stellar --region eu-central-1 --type String --overwrite --name /x402/production/monitoring-vm-ip --value <IPv4>
+   cd infra && make deploy-production-heartbeat
+   ```
+
+3. Meanwhile, the server's agent keeps a few hours of samples in its write-ahead log, so the
+   metrics come back with the VM; the CloudWatch alarms and the logs still cover the facilitator.
+
 ## Log volume
 
 ### log-volume
@@ -760,6 +801,60 @@ of them run it. Mainnet was in this state on 2026-11-06 (29, Core supporting 30)
    weeks earlier, before it reaches a network we serve.
 3. Raise `supported` for that network to the new version in a PR and deploy the alarms: this one
    goes back to OK. `protocol-changed` fires on the upgrade itself, with its own `expected`.
+
+## The Prometheus rules
+
+From 0139's switch, the alarms on the server's metrics run as Prometheus rules on the monitoring
+VM (ADR 0011, "Monitoring stack"). The rule file is
+[`deploy/metrics/rules/x402-production.yml`](../deploy/metrics/rules/x402-production.yml),
+written by `make rules` in `infra/` from the same rows as the alarms
+(`infra/src/lib/rules.ts`), so each rule keeps its alarm's name with an `x402-` prefix, its
+threshold and this page's section. Until the switch nothing on the VM loads it.
+
+- `network` is a label, not part of the name: pubnet adds alert instances, not rules.
+- Every Event alarm is one branch of the single rule `x402-event`; its `check` label is the
+  alarm's name.
+- Every alert has `severity`: `critical` for what would page on mainnet (`pending`, the
+  `breaker-opened-*` alarms, `budget-nearing`, `sweeps-stopped`, `landed-after-expired`,
+  `commit-unmatched`, `facilitator-silent`, `gauge-stale`), `warning` for the rest (lore 0139,
+  decision 1). Until the phone route exists, both go to Slack.
+- Without data a rule doesn't keep its state as a CloudWatch alarm does: it resolves once its
+  series goes stale, so a resolved message can mean the series stopped. The silence rules say
+  which: `facilitator-silent`, `gauge-stale`, `textfile-stale` (for `probe-silent`) and
+  `server-silent` (for the agent, `telemetry-silent` in CloudWatch).
+- What stays in CloudWatch: the off-server check's and the uptime probe's alarms, `audit-disk`,
+  `certificate`, `credentials-stale`, `telemetry-silent` and `log-volume-app`. The EMF alarms go
+  with EMF.
+- `facilitator-silent`, `gauges-silent` and `probe-silent` read a series' arrival, which
+  Prometheus reads another way: `x402-facilitator-silent` (the liveness series),
+  `x402-gauge-stale` and `x402-textfile-stale` below.
+
+### gauge-stale
+
+A facilitator gauge has had no successful read for 15 minutes, or none for a network since the
+start, while the process runs: its `_last_read_timestamp_seconds` is over 10 minutes old, or
+missing, for the rule's 5. The `gauge` label names it; find its read error in the app logs
+(`metric_issue`, `read-failed`).
+
+### textfile-stale
+
+A host probe textfile in `/var/lib/x402/textfile` is over 5 minutes old, missing, or unreadable
+(`node_textfile_scrape_error`). Check the `x402-host-probe` timer and its journal.
+
+### server-silent
+
+No sample from ch-prod-01's metrics agent for 5 minutes. Check `x402-metrics` and
+`/var/log/x402/metrics/agent.log` ([runbook](runbook.md#the-metrics-agent)), then the agent's
+certificate.
+
+### target-down
+
+The agent has failed to scrape one of its targets (`job`) for 5 minutes.
+
+### agent-certificate
+
+The metrics agent's client certificate has under 30 days left. Renew it as the
+[runbook](runbook.md#the-metrics-agent) says.
 
 ## Every metric
 

@@ -49,7 +49,10 @@ ranked by fit, so that I can find a paid resource without knowing its seller or 
   natural-language query.
 - [ADR 0014](../../../docs/adr/0014-bazaar-search.md) (task 0134) chose the approach: words and
   meaning in PostgreSQL, fused by rank, the model in its own container. The quality score and
-  curation are 0154's.
+  curation are 0154's: ADR 0014 multiplies the rank by a quality factor q, which 0154's second PR
+  adds to this route's query once it merges, and 0135's run decides when search is offered on
+  pubnet. Ranking by repeated words stays a named risk with no limit of its own (ADR 0014): the
+  threat model's entry names it as residual risk, not as 0154's to discount.
 - 0029 notes that upstream's e2e Bazaar check calls `/discovery/search`.
 
 ## Implementation

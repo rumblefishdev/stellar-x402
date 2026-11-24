@@ -8,6 +8,10 @@
     "serverIpSsmParam": "/x402/production/server-ip",
     "sessionHours": 12
   },
+  "monitoringVm": {
+    "certificateCn": "x402-monitoring-vm-production",
+    "ipSsmParam": "/x402/production/monitoring-vm-ip"
+  },
   "uptime": {
     "url": "https://x402-facilitator.sorobanscan.com/health",
     "portalUrl": "https://x402-portal.sorobanscan.com/health",
@@ -57,7 +61,8 @@
     "watch": true,
     "watchSecurity": false,
     "protocol": true,
-    "upstream": false
+    "upstream": false,
+    "heartbeat": false
   },
   "thresholds": {
     "uptimeFailingMinutes": 7,

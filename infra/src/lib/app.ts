@@ -3,6 +3,7 @@ import * as cdk from "aws-cdk-lib";
 import { type EnvironmentConfig, validateConfig } from "./config.js";
 import { stackPrefix } from "./names.js";
 import { AlarmsStack } from "./stacks/alarms-stack.js";
+import { HeartbeatStack } from "./stacks/heartbeat-stack.js";
 import { TelemetryStack } from "./stacks/telemetry-stack.js";
 import { UptimeStack } from "./stacks/uptime-stack.js";
 import { WatchStack } from "./stacks/watch-stack.js";
@@ -13,17 +14,18 @@ export interface X402App {
   readonly uptime: UptimeStack;
   readonly telemetry: TelemetryStack;
   readonly watch: WatchStack;
+  readonly heartbeat: HeartbeatStack;
 }
 
 export function createApp(config: EnvironmentConfig, app = new cdk.App()): X402App {
   validateConfig(config);
   const prefix = stackPrefix(config.envName);
-  const props = (name: string) => ({
+  const props = (name: string, task = "0027") => ({
     // The region comes from the config, never from `--region`; the account from the credentials.
     env: { account: process.env["CDK_DEFAULT_ACCOUNT"], region: config.awsRegion },
     config,
     tags: { project: "stellar-x402", environment: config.envName },
-    description: `stellar-x402 ${config.envName}: ${name} (task 0027)`,
+    description: `stellar-x402 ${config.envName}: ${name} (task ${task})`,
   });
 
   return {
@@ -32,5 +34,6 @@ export function createApp(config: EnvironmentConfig, app = new cdk.App()): X402A
     uptime: new UptimeStack(app, `${prefix}-Uptime`, props("Uptime")),
     telemetry: new TelemetryStack(app, `${prefix}-Telemetry`, props("Telemetry")),
     watch: new WatchStack(app, `${prefix}-Watch`, props("Watch")),
+    heartbeat: new HeartbeatStack(app, `${prefix}-Heartbeat`, props("Heartbeat", "0139")),
   };
 }
