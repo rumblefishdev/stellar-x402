@@ -12,6 +12,14 @@ history:
     status: mature
     who: okarcz
     note: "Research on option 2 of the re-check: Stellar first, then Ethereum and Solana standards. Primary sources only."
+  - date: "2026-11-24"
+    status: mature
+    who: okarcz
+    note: "Added B0: a 2-of-2 multisig of the OpenBao key and an AWS KMS key in a separate account. To discuss with the team."
+  - date: "2026-11-24"
+    status: mature
+    who: okarcz
+    note: "Added stkrolikiewicz's position: accept full power with a trigger to revisit; rebuild steps and the compose.yaml caveat checked against the repo. Status quo no longer dismissed against A."
 ---
 
 # Limiting one hot key's reach without a cold key
@@ -26,6 +34,7 @@ The OpenZeppelin Relayer and its x402 plugin were not used or read.
 2. Without a second key you can still limit the hot key: set the thresholds it must not reach **above its weight with no other signer**. The protocol allows this; that power is then gone for good (SDF documents the same pattern as "locking" an issuer, and the "key below medium" pattern for anchors).
 3. The real choice is: **burn the dangerous powers** (no second key; accounts become disposable; loss and theft both mean "abandon and recreate") or **split them across 2-of-3 independent online custodians** (in-place rotation and recovery, more infra). Ethereum and Solana have no answer that fits a single classic key: Ethereum limits keys only through smart-account code (ERC-4337/7579), and Solana keypair accounts can't be limited at all; both fall back on small balances, top-ups and alerts.
 4. Recommendation: lock the fee account's hot key below medium (fee bumps only), lock every channel's hot key below high, keep value small, treat accounts as disposable. Move to 2-of-3 online custodians at the next channel generation, if stranded reserves or in-place rotation start to matter.
+5. Added 2026-11-24: **B0, a 2-of-2 multisig** of the OpenBao key and one AWS KMS key in a separate AWS account. It handles theft of either key in place, is at least as good as A in every case, and can grow into B2 without new accounts. Losing either key (with OpenBao's backup, or past KMS's deletion wait) freezes changes, as in A. Open for the team's discussion against A.
 
 ## Stellar findings
 
@@ -114,6 +123,31 @@ What sits under the hot key today: fee float about 100 XLM, channel reserves 1.5
   - Channel creation must stay on the funder wallet. `create-channels.ts` already uses `FUNDER_SECRET`, so the task text's "creating channels needs medium on the fee account" looks out of date; to confirm.
   - Leaked old keys keep medium on abandoned channels forever, so nothing may trust those addresses.
 
+### B0. A 2-of-2 multisig: the OpenBao key and an AWS KMS key in a separate account (added 2026-11-24)
+
+- **How it works:**
+  - K1, the hot key in OpenBao, weight 1: signs every settlement and fee bump, as today.
+  - K2, an AWS KMS Ed25519 key (`ECC_NIST_EDWARDS25519`) in a separate AWS account, weight 1. Only an operator uses it, for rotation and repair, never on the settle path.
+  - Channels: master 0, thresholds low 1 / medium 1 / high 2. Fee account: low 1 / medium 2 / high 2. A signer change, a merge, or a Payment from the fee account needs K1 and K2.
+  - A small CLI on the operator's laptop builds one transaction (for example "add K1′, remove K1" on the fee account and every channel, up to 100 operations), gets K1's signature from OpenBao Transit and K2's from KMS, and submits it. Two signatures cover every account, because all accounts share both signers.
+- **Theft of K1:** the thief gets fee bumps on the fee account and medium on channels, as in A, but no Payment and no signer change. Theft copies a key and doesn't remove it, so we still hold K1. K1 and K2 swap K1 for K1′ on every account in one transaction. Nothing is abandoned and no reserve is stranded.
+- **Theft of access to K2:** a KMS key can't be exported, so the thief can only ask KMS to sign while the access lasts. Weight 1 doesn't reach high. Revoking the access in IAM makes K2 safe again; K1 and K2 can then swap K2 for K2′.
+- **Loss of K1:** restore OpenBao from ADR 0013's backup first. If the backup is gone too, K2 alone (weight 1) can't reach high, so no new key can be added: the accounts are frozen for changes, as in A. K2 still has medium on channels and low on the fee account, so a facilitator that can sign through KMS could keep settling while we move to new accounts on our own schedule.
+- **Loss of K2:** AWS deletes a KMS key only after a 7–30 day wait, and that wait can be cancelled; an alarm on `ScheduleKeyDeletion` catches it. If K2 is lost anyway, K1 keeps settling, but changes are frozen, as in A.
+- **Theft of both:** full takeover, as today, but it takes a break-in at two independent places.
+- **The limit of two keys:** with two keys you protect against theft (2-of-2) or against loss (K2 alone reaches high, which is B1), not both. Both needs three keys (B2). In B0, loss is covered by OpenBao's backup and KMS's deletion wait, not by the signer layout.
+- **Conditions:**
+  1. The server holds no credentials for K2's AWS account. Only an operator signs with K2, from a laptop, with MFA. Otherwise a server break-in gives both keys.
+  2. K2's account is not the account that holds ADR 0013's OpenBao backup, and no shared AWS Organizations management account can reach both (`OrganizationAccountAccessRole`), or that management account is guarded as tightly as the keys.
+  3. KMS Ed25519 signs a Stellar transaction that lands on testnet (a spike; unproven here, per 0047 and 0036).
+  4. ADR 0013 is amended: OpenBao signs rotations (`SetOptions`) too, not only settlements, and an operator reaches Transit from a laptop.
+  5. If one person holds admin on both the server and K2's account, B0 protects against an outside thief, not against that admin. Record it.
+- **Cost and complexity:**
+  - One more signer on every account: +0.5 XLM reserve (a channel starts with 2.0 XLM instead of 1.5, `CHANNEL_STARTING_BALANCE` in `setup.ts`): about 10.5 XLM at 20 channels, 150 XLM at 300.
+  - One KMS key (about $1 per month), a separate AWS account.
+  - The KMS spike, the signing CLI, setup and `checkChannel` changes (K1 ≥ max(low, medium) and < high, K1 + K2 ≥ high, no other signer), a migration of existing channels (one transaction signed by today's K1 while high is still 0: add K2 first, then raise the thresholds), rotation and theft runbooks, a testnet drill, ADR 0013, AD-12 and the threat model.
+- **Against A:** at least as good in every case; theft and planned rotation are handled in place; it can grow into B2 in place (K1 and K2 add K3 and keep high at 2), while A rules that out. It costs more work before mainnet and depends on the KMS spike; if the spike fails, fall back to A, or to a second OpenBao on another host as K2.
+
 ### B2. Split high across 2-of-3 independent online custodians (runner-up)
 
 - **How it works:** every account gets hot key (OpenBao) weight 1 and two more online keys weight 1 each, in separate trust domains and never on the settle path. Examples: AWS KMS Ed25519 in a dedicated account, and GCP KMS or a second OpenBao on another host. Thresholds: channels low 1 / med 1 / high 2; fee account low 1 / med 2 / high 2. This is SEP-30's "no single server controls" shape and the Safe/Squads "admin ≠ hot key" pattern.
@@ -132,7 +166,24 @@ This is 0048's original design with the cold key swapped for an online KMS key. 
 
 ### Status quo + value limits + alarms (accept full power)
 
-Zero work. The thief can Payment the whole float out in one transaction, merge the channels and lock us out. Loss freezes everything, the same as A. It loses to A because A costs about the same and removes the one-shot float drain.
+Zero work. The thief can Payment the whole float out in one transaction, merge the channels and lock us out. Loss freezes everything, the same as A. ~~It loses to A because A costs about the same and removes the one-shot float drain.~~ Revised 2026-11-24 after stkrolikiewicz's input (below): under A the thief still burns the float on fee bumps, only slower, and the reserves are stranded either way, so A saves little money at launch scale, while it gives up in-place planned rotation for good. The status quo is a real candidate when paired with a recorded trigger to revisit.
+
+### Accept full power, with a trigger to revisit (stkrolikiewicz, 2026-11-24)
+
+Stan's position, from the team discussion. The facts were checked against the repo on 2026-11-24.
+
+- **Theft and loss of OpenBao with its backup end the same way:** abandon the old accounts and build new ones.
+  1. A new Transit key in OpenBao.
+  2. A new fee account, funded from the treasury.
+  3. New channels with `packages/signer-pool/scripts/create-channels.ts`: 19 per transaction (`MAX_CHANNELS_PER_TX`, `setup.ts:36`), so 20 channels take 2 transactions. The script prints the address list.
+  4. Swap `FACILITATOR_ADDRESS_TESTNET` and `CHANNELS_TESTNET` in `/srv/x402/production/.env` on the server. The file is not in the repo and the playbook doesn't touch it; the command is in `docs/runbook.md`, "Before the first deploy" (`:225-232`).
+  5. `systemctl restart x402@production`, with no new image and no PR. At startup `checkChannels` checks the signer against each channel (`main.ts:548`), so a mismatch shows at once.
+- **About an hour; about 130 XLM lost at launch** (100 XLM float + 1.5 XLM × 20 channels). This excludes finding and closing the leak, which after a server break-in takes hours to days.
+- **Caveats:**
+  - The key's name and version (`OPENBAO_KEY: stellar-testnet`, `OPENBAO_KEY_VERSION: "1"`) are hardcoded in `deploy/production/compose.yaml:35-36`, which the playbook uploads. A new key from a Transit rotate (version 2) or under a new name needs a PR to `compose.yaml` and a playbook run, and `deploy/production` takes only an approved PR. A key created from scratch under the same name after OpenBao is lost is version 1 again and needs no change. After a theft, OpenBao usually survives with the old key in it, so the PR path is the likely one.
+  - The stolen key keeps medium on abandoned channels forever. Since 0093 the channel is the Soroban caller, so no contract (`upto-proxy` included) may give a channel address any power: open question 1.
+  - The stakes grow: the float has no upper limit, and 300 channels hold 450 XLM of reserves.
+- **Position:** at about 130 XLM, B0 is too much work (KMS spike, signing CLI, runbooks, an ADR 0013 exception). Keep the key's full power, record it in an ADR with a trigger to revisit (for example float + reserves above X XLM, or more than N channels), and check the contracts for trust in channel addresses.
 
 ### Pre-auth merge transactions, hash(x), sponsorship, SEP-30, Soroban contract accounts
 
@@ -148,9 +199,11 @@ All rejected:
 | Option | Second key? | Theft of hot key | Loss of OpenBao | Cost / complexity | Main blocker |
 |---|---|---|---|---|---|
 | **A. Lock below threshold** | No | No takeover; float leaks only through fees; abandon and recreate | Float + reserves stranded (bounded); recreate | Lowest; thresholds + `checkChannel` + runbooks | Irreversible; rotation strands reserves |
+| **B0. 2-of-2 (OpenBao + AWS KMS, separate account)** | Yes, 1 online | No takeover; rotate in place | Backup first; else changes frozen, as A | +0.5 XLM per account, 1 KMS key, a signing tool, drills | Ed25519 KMS untested; K2's account independence |
 | B2. 2-of-3 online custodians | Yes, 2 online | No takeover; rotate in place | Recover in place | +1 XLM per account, 2 KMS keys, a signing tool, drills | Ed25519 KMS untested; independence from AWS backup |
 | B1. Warm KMS key at weight 2 | Yes, 1 online | Rotate in place | Recover in place | +0.5 XLM per account, 1 KMS key | KMS credential alone = takeover |
 | Status quo + limits | No | Full takeover, float drained in one transaction | Everything frozen | None | Fails the threat model's ask |
+| Accept full power + trigger (stkrolikiewicz) | No | Full takeover; rebuild in about an hour, about 130 XLM lost | Same as theft | An ADR, a trigger, the "lost access" runbook | Stakes grow with float and channels; the key name in `compose.yaml` |
 | Pre-auth / hash(x) / sponsor / SEP-30 / contract accounts | n/a | Weak or none | Reserves at most | High or impossible | See above |
 
 ## Recommendation
@@ -164,6 +217,41 @@ All rejected:
 
 Record in the ADR the trigger for B2 at the next channel generation: stranded reserves per rotation above a set XLM figure (for example, about 100 channels or more), or a need for in-place rotation (SLA, auditor). The 2-of-3 custodians must sit in domains independent of the server and of the AWS account that holds the OpenBao backup.
 
+**B0 as the alternative (2026-11-24, to discuss with the team).** B0 is at least as good as A in every case, fixes theft of the hot key in place, and keeps B2 open without new accounts. It suits our scale if its five conditions hold. The trade is more work before mainnet and the KMS spike. The choice between A now and B0 is the team's.
+
+**After stkrolikiewicz's input (2026-11-24).** At launch scale every option loses about the same money on a theft: around 130 XLM, rebuilt in about an hour. A barely changes that and costs in-place planned rotation; B0 saves that hour and those XLM for real work before mainnet. So the decision is "work now" against "a recorded trigger to come back". Accepting the key's full power, with the trigger in the ADR, fits that, provided the gaps that hold in every option are closed: OpenBao's backup (0026), the "lost access" runbook, `upto` in the threat model, and the channel-address check. The choice is still the team's.
+
+## Theft with today's setup: what we lose, what stays, how to rebuild (2026-11-24)
+
+The case where nothing changes: thresholds stay 0, no second key, and the hot key is stolen.
+
+**What we lose:**
+- The fee account's float, about 100 XLM, in one Payment.
+- The channels: the thief adds a signer, removes ours and can merge them, taking 1.5 XLM of reserve each (about 30 XLM at 20 channels). About **130 XLM** in all at launch, as ADR 0013 says. It grows with the float and the channel count (about 450 XLM of reserves at 300 channels).
+- Not counted in XLM: the outage (hours; days after a server break-in), our incident work and sellers' trust.
+- After a break-in on the server: possibly OpenBao itself (the thief can seal it, delete the Transit key or its data) and every other secret on that server, which is shared with another project. That cost can exceed 130 XLM and no threshold or multisig changes it.
+- With `upto` live: open payments name our key as `receiver_authorizer`, so the thief can settle each at its full `max_amount` until its `deadline` (`contracts/upto-proxy/src/lib.rs:123-136`). The money goes to the seller, not the thief, but the payer pays more.
+
+**What stays untouched:**
+- Payers' and sellers' tokens: the key has no power over them (ADR 0013).
+- The contracts: `upto-proxy` is immutable with no admin (`lib.rs:5-8`) and takes the authorizer per payment, and an `exact` auth entry names neither the facilitator nor a channel. Nothing on chain needs a redeploy or a change.
+- The app, its database, settlement records, the Bazaar and the URL. Sellers change nothing; `/supported` shows the new key in `signers` (`apps/facilitator/src/http/supported.ts:13`).
+- OpenBao, when only the facilitator's AppRole token or secret ID leaked: that role can only sign; revoke it. The Transit key is non-exportable (`docs/runbook.md:539`), so a leaked credential is signing access, not a copy of the key.
+- The unseal key's copy in AWS: a thief can't rekey without a quorum of its shares, so we can get OpenBao back.
+
+**How to rebuild:**
+1. Stop the facilitator (`checkChannel` would refuse the foreign signer anyway).
+2. Find and close the leak. This is the hard part, hours to days. After a server break-in: a clean server, OpenBao again (from the unseal key and a snapshot, or from scratch) and every secret from that server rotated. The same Hetzner deployment can stay only if the leak did not come from the server.
+3. A new Transit key in OpenBao.
+4. A new fee account at the new key's address, about 100 XLM from the treasury.
+5. New channels with `create-channels.ts` (the funder wallet), about 30 XLM.
+6. New `FACILITATOR_ADDRESS` and `CHANNELS`, then restart.
+7. The balance and theft alarms on the new addresses.
+
+Steps 3–7 take a few hours with tools we already have.
+
+**What A and B0 change:** under A the thief can't Payment the float or take the channels, only burn the float on fees; the rebuild is the same, with less lost. Under B0, K1 and K2 swap the key on every account in one transaction: no new accounts and no loss. Step 2 stays in every option.
+
 ## Open questions
 
 1. Does anything trust channel addresses in Soroban? Since 0093 the channel is the caller, and a leaked key keeps medium (Soroban `require_auth`) on abandoned channels forever. Check that no contract (upto-proxy included) grants a channel address any authority.
@@ -172,6 +260,8 @@ Record in the ADR the trigger for B2 at the next channel generation: stranded re
 4. The fee account's one-time hardening `SetOptions` must be signed by the OpenBao key, an ADR 0013 exception. Alternatively, create future fee accounts already hardened.
 5. The task text says channel creation needs medium on the fee account, but `packages/signer-pool/scripts/create-channels.ts` signs with a separate `FUNDER_SECRET`. Confirm no flow uses the fee account at medium.
 6. For B2: test Ed25519 signing for Stellar on AWS KMS, and on GCP KMS or the second custodian (0047 lists it as untested).
+7. For B0 and B2: is our AWS backup account in an AWS Organization, and who can reach its management account? This decides whether a separate account for K2 is really independent.
+8. For B0: should the facilitator be able to settle with K2 through KMS when OpenBao and its backup are both lost (keeps the service up while we move to new accounts), or does it stop until then?
 
 ## Sources
 
