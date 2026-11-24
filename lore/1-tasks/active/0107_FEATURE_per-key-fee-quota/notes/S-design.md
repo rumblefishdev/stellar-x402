@@ -10,6 +10,10 @@ history:
     status: developing
     who: akot
     note: "Decisions 1-13 made by akot in the design session; Claude's calls (14-25) wait for his check. Builder check done: its two findings changed decisions 2, 3 and 5."
+  - date: "2026-11-23"
+    status: mature
+    who: akot
+    note: "Approved by akot with Claude's calls 14-25 (the task README's \"Design Decisions\"); the build followed it. The reading in decision 22 and the build's decisions 27-33 are not part of this approval. Entry written on 2026-11-24, after Stanisław's review of #236 found the status without one."
 ---
 
 # 0107 design: a monthly quota and fee budget per account, as in Prices
@@ -137,8 +141,11 @@ narrowest full budget.
 
 ### 5. Reopen (decision 9)
 
-- **The reopening request's caller reserves**, under `<key>#<n+1>`. The earlier claim's reservation
-  was released or never made.
+- **The reopening request's caller reserves**, under `<key>#<n+1>`, and first gives up the earlier
+  claim's reservation `<key>#<n>` (decision 34). This line first read "the earlier claim's
+  reservation was released or never made": its `onFinal` releases it, but `/settle` doesn't wait
+  for that call, and a claim may never get one (0073 decision 26), so the payment counted twice
+  until then (Stanisław's review of #236).
 - **A quota refusal is not in `UNSENT_REASONS`, like every spend limit.** The buyer signs a new
   payment once the account has quota again.
 
@@ -267,7 +274,8 @@ say what stands in for it:
 - **Speed:** a measured reserve with 100,000 rows in one account's month, to confirm A before
   anyone gets Pro.
 - **The balance-missing refusal:** on testnet a fresh C-address balance costs about 120,000
-  stroops, under the ceiling, so the hosted facilitator never refuses it. It is tried on a local
+  stroops (a simulation of 2026-11-05; the run of 2026-11-24 measured 128,027 for XLM), under the
+  ceiling, so the hosted facilitator never refuses it. It is tried on a local
   facilitator against testnet with a lower `MAX_FEE_STROOPS`, and so is its fix (one transfer
   from the seller's own account).
 

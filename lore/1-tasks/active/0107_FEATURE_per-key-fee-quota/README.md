@@ -23,6 +23,10 @@ history:
     status: active
     who: akot
     note: "Built and reviewed on the branch (the workspace's tests pass). Left: the hub's card, a pull request of its own in sorobanscan-api-portal."
+  - date: "2026-11-24"
+    status: active
+    who: akot
+    note: "Review of #236 by Stanisław and Oskar, 14 points, each checked on the branch: the reopen's double count fixed (decision 34), the docs brought in line (35 to 37), the rest in 0157, 0126, 0108 and 0161."
 ---
 
 # Give each API key holder a free quota and a fee budget apart from the shared ones
@@ -62,7 +66,7 @@ Summary and inputs to the design: [S-research](notes/S-research.md). The notes:
   operator raises one account's limit (config or the registry, to decide).
 - Events for 0027: the shared free budget nearing its limit, through the existing `budget-nearing`
   alarm. ~~An account nearing and reaching its quota~~: dropped by decision 11, nothing is
-  reported per account.
+  reported per account but a refusal's log line (decision 35).
 - From 0105: the spend policy's `beforeSubmit` gets the key's owner as `ctx.caller.owner`
   (`operator:<name>` or `discord:<id>`), `undefined` on testnet. The owner is not stored with the
   settlement: `onFinal` gets the record, and a reservation keeps its scopes. The rate limiter
@@ -168,7 +172,7 @@ are in this branch's history.
     - HTTP 200 as for every x402 settle refusal;
     - no quota check at `/verify`.
 11. **One alarm, the existing `budget-nearing`, which gains `free`.** Nothing per account: no alarm,
-    no metric, no event.
+    no metric, no event. (Amended by 35: a refusal's log line names the account.)
 12. **One pull request in stellar-x402,** its commits in risk order, and one in the hub.
 13. **Approach A:** the account and `free` as two more scopes in 0024's spend store. The portal
     reads a view. The fallback, a counter per (account, month), is kept for the account scope if a
@@ -222,6 +226,42 @@ Claude's calls in the design (14 to 25), approved with it. 26 is the plan's.
 33. **The pubnet refusal names 0048 alone.** 0027's signer alarm has landed, but pubnet's own
     instance exists only once infra lists the network (0126).
 
+34 to 37 came from the review of #236 (2026-11-24). akot took them as recommended.
+
+34. **A reopened claim gives up the earlier claim's reservation before it reserves** (Stanisław's
+    review). The design had "the earlier claim's reservation was released or never made", but
+    `/settle` doesn't wait for a claim's `onFinal`, and a claim may never get one (0073 decision
+    26). Until then one payment counted twice: at the month's last payment its reopen was refused
+    `quota_exhausted` for good while the account had room, and after a lost `onFinal` the account
+    was a payment short until the month ended. The earlier claim ended with nothing sent, so its
+    reservation can never be charged, and `release` leaves a committed one alone. A release that
+    fails refuses as a store failure, which reopens. The stroop budgets had the same double count
+    since 0024, for 24 h, and it goes with this. Chosen over counting distinct payments in SQL
+    (the count alone, and the store and the view would read the id), over letting a quota
+    refusal reopen (R-threats §5), over waiting for `onFinal` (one process only), and over a
+    `supersedes` argument to `reserve` (a port change for no gain: nothing is sent between the
+    release and the reserve).
+35. **A refusal is still logged per account; this amends 11** (Oskar's review).
+    `spend_limit_reached` carries the budget's `scope`, an account's as `account:<owner>`, and
+    `account_plan_unknown` carries the owner: the first is what tells the operator whom to offer
+    a higher plan, and the runbook groups by it. "Nothing per account" stands for the rest: no
+    alarm, no metric, no label, and no nearing event (17).
+36. **A reservation nothing releases is an accepted residual; no sweep** (Stanisław's review).
+    One is left when `onFinal`'s release fails (logged, counted, not retried), when the process
+    dies between the final write and the release, or when `beforeSubmit` loses `reserve`'s
+    answer and its own release fails too. A crash that leaves the record open isn't one:
+    reconciliation ends the record and calls `onFinal`. Such a reservation counts 24 h in the fee
+    budgets and until the month ends in its account's payments, so the account is one payment
+    short, for a store failure at that moment. A sweep would have to tell a dead reservation
+    from a settlement in flight, a new mechanism for one payment; 0108 charges for `committed`
+    reservations only, where it would otherwise become a charge.
+37. **The view keeps its form, and its comment says what it costs** (Stanisław's review). The
+    view finds an owner's row by a scan of `spend_scopes`, since `owner` is an expression: 0.5 ms
+    at 72 rows, 1.5 ms at 3,500, 5.5 ms at 50,000 (PostgreSQL 18.6, median of 300 reads), against
+    0.4 ms for a read that names the scope. The table holds a row per account and per breaker
+    scope where a key is required. Chosen over changing the migration and the portal's read
+    before the merge, for a few milliseconds per opening of the hub's card.
+
 ## Implementation Notes
 
 Built on 2026-11-23 and 24: the spend store's count limit; plans, migration `0017_account_plans`
@@ -229,7 +269,9 @@ and `keys plan`; the policy's account scopes and refusals; the balance-missing r
 portal's `details.usage`; the config, the alarm's `free` and the docs. The hub's card is not done.
 
 - **A payment, precisely:** one the network charged a fee for, a failed one too, or one still in
-  flight. One sent and never included stops counting, so the hub's `used` can go down.
+  flight. One sent and never included stops counting, so the hub's `used` can go down. A
+  reopened payment counts once (decision 34). A reservation that nothing released counts as one
+  until the month ends (decision 36).
 - **The count limit's cost** (measured 2026-11-23, PostgreSQL 18.6): with 100,000 rows of one
   account in the month, a reserve took 13.8–16.1 ms at the median and 16.3–26.0 ms at p99 over
   six runs, against 2.3 ms and 3.8 ms without the count. That is under the 50 ms the build plan
@@ -253,9 +295,22 @@ query and `keys plan` through `docker exec`; the `free` alarm's fire-test; the s
   payment too many, and never lets one too many through. Accept it, or bound it by the month's
   end.
 - Decision 33: whether the pubnet refusal names the signer alarm again until infra lists pubnet.
-- Left out, not spawned as tasks: a warning from `keys plan` for an owner that never had a key; a
-  cooldown on `account_plan_unknown`; a log line when the balance read fails;
-  `apps/portal/src/cap.ts` on the shared month helpers.
+- ~~Left out, not spawned as tasks~~: now
+  [0161](../../backlog/0161_FEATURE_account-plan-leftovers.md), with the warning from `keys plan`
+  that Oskar's review asked for.
+
+**From the review of #236, in other tasks.**
+
+- [0157](../../backlog/0157_FEATURE_refusal-test-and-doc-gaps.md): a `compose()` test on a network
+  that requires a key (four reverts of `main.ts`'s keyed wiring pass the suite), before 0126
+  starts, and a route test for `upstreamMessage` in the `verified` and `settled` lines.
+- [0126](../../backlog/0126_FEATURE_serve-both-networks-from-one-process.md): the pruner's horizon
+  per network, `ACCOUNT_PLANS` and the two `SPEND_*` values from the server's `.env` for both
+  services, and the portal's log for a plan its config lacks.
+- [0108](../../backlog/0108_FEATURE_settle-billing.md): charge for `committed` reservations only.
+- Not taken: a line in the runbook's rollback notes for a release before 0107 pruning the month's
+  rows after 7 days. No such release starts on pubnet (`config.ts` refuses it), so the case is
+  0126's, above.
 
 ## Issues Encountered
 
@@ -265,4 +320,8 @@ query and `keys plan` through `docker exec`; the `free` alarm's fire-test; the s
 - `LIKE 'account:%'` can't use the index under `en_US.utf8`, hence the join in decision 29.
 - Existing tests changed on purpose: `spend-policy.test.ts` lost "an owner like any other, until
   0107"; two whole-`usage` assertions gained `windowMs`; `main.test.ts`'s pruner test follows the
-  new window rule.
+  new window rule. With decision 34, "a reopen reserves under the reopening caller" no longer
+  runs the first claim's `onFinal` before the reopen: the reopen itself gives that reservation
+  up.
+- The reopen's double count (decision 34) passed the build's reviews: every reopen test ran the
+  earlier claim's `onFinal` first, as the design assumed.

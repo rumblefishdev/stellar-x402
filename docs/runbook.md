@@ -948,6 +948,7 @@ hand.
    25 XLM alarm (0024's rule, ADR 0007), so one window can't take the fee account to the alarm: a
    `global` of 60 XLM needs a float of at least 85 XLM. Top up (Topping up the fee account), then
    set `SPEND_GLOBAL_STROOPS` and restart the facilitator, which drains, so plan it like a deploy.
+   No compose file passes the variable yet: see "Changing the plans themselves" below.
 3. **Set the plan**, with why, in the facilitator's container of the account's network, so the
    command reads that service's database and its own `ACCOUNT_PLANS`, and refuses a plan the
    service doesn't have. Pass your login: `$USER` is unset under `docker exec`, and the row would
@@ -967,9 +968,15 @@ hand.
 
 **Changing the plans themselves** is `ACCOUNT_PLANS`, in the facilitator's environment and the
 portal's, with the same text in both: the facilitator counts by it and the portal shows the hub
-the quota from it. Each takes it at its start. Before removing a plan, move its accounts to
-another one: a row naming a plan the config lacks counts as `free`, and each of its settlements
-logs `account_plan_unknown`.
+the quota from it. Each takes it at its start. Today neither `deploy/production/compose.yaml` nor
+`portal.compose.yaml` passes it, nor `SPEND_FREE_STROOPS` or `SPEND_GLOBAL_STROOPS`: each lists
+its variables by name, so both services run on the defaults built into their images, which are
+the same. Until 0126 a change is a pull request that adds the variable to both files with the
+same value, deployed together. 0126 takes the three from the server's `.env` through `${…}`, as
+`FACILITATOR_ADDRESS` is today, so both services get one value and a change needs no pull
+request. Before removing a plan, move its accounts to another one: a row naming a plan the config
+lacks counts as `free`, and each of its settlements logs `account_plan_unknown`. The portal logs
+nothing for such a row and shows the hub the `free` quota.
 
 **Which accounts reach a limit.** Each refusal by a budget logs `spend_limit_reached` with the
 budget's `scope`, an account's as `account:<owner>`, and `limit`: `count` for its monthly quota,

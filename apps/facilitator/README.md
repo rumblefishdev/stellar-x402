@@ -274,8 +274,9 @@ amendment of 2026-11-23). Its limits, narrowest first:
   24 h beside `free`: ten `basic` accounts, or two `pro` and two `basic`.
 - **Whoever's request sends the payment pays for it.** A reopened payment (a repeat after a
   "nothing sent" answer) counts in the account of the request that reopens it, under a
-  reservation of its own; the earlier claim's was released or never made. A spend refusal, quota
-  included, doesn't reopen.
+  reservation of its own. That request gives up the earlier claim's reservation before it
+  reserves, without waiting for that claim's `onFinal`, so a payment counts once however often it
+  was reopened. A spend refusal, quota included, doesn't reopen.
 - **The plan is read with each settlement**, from the registry's pool. A read that fails refuses
   as the store does, `settle_exact_stellar_spend_store_unavailable`, and is counted under `op`
   `plan`. A pubnet settlement with no caller is refused with `settle_exact_stellar_refused`,
@@ -628,8 +629,9 @@ contract (`C…`) (task 0107):
 The new balance's rent is what puts the fee over the ceiling, and the facilitator doesn't pay it
 ([ADR 0007](../../docs/adr/0007-fee-abuse-containment.md)'s amendment of 2026-11-23). On pubnet a
 USDC payment to a fresh C-address balance has a fee of about 443,000 stroops and is charged about
-382,000, against the 250,000 ceiling; on testnet its fee was about 128,000, under it, so only a
-lower `MAX_FEE_STROOPS` shows the refusal there. `invalidMessage` names no account or amount: the
+382,000, against the 250,000 ceiling; on testnet the first XLM payment to a fresh contract had a fee of 128,027
+(2026-11-24; USDC wasn't measured there), under it, so only a lower `MAX_FEE_STROOPS` shows the
+refusal there. `invalidMessage` names no account or amount: the
 fee upstream measured is in the `verified` and `settled` lines' `upstreamMessage`, not in
 `message`. An account (`G…`) holds a SAC's token in its trustline, or XLM in itself, so a
 G-address `payTo` never gets this reason, and another token keeps upstream's, since its balance's

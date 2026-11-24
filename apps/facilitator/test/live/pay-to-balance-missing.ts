@@ -2,9 +2,9 @@
  * Testnet run of 0107's balance-missing refusal (decision 6): a payment that would create `payTo`'s
  * balance of a SAC token costs more than the facilitator pays, `/verify` says so with a reason of
  * its own and the fix, and the fix works. A facilitator built by `main()` with
- * `MAX_FEE_STROOPS=100000`, since a new contract balance costs about 120,000 stroops on testnet,
- * under the default ceiling; real `exact` payments in XLM, signed with upstream's client; and a
- * fresh contract as `payTo`.
+ * `MAX_FEE_STROOPS=100000`, since a new contract balance of XLM costs about 128,000 stroops on
+ * testnet (128,027 in the run of 2026-11-24), under the default ceiling; real `exact` payments in
+ * XLM, signed with upstream's client; and a fresh contract as `payTo`.
  *
  * 1. A payment to the contract, which holds no XLM yet: `/verify` refuses it with
  *    `invalid_exact_stellar_pay_to_balance_missing`, and `/settle` answers the same.

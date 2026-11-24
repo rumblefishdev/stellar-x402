@@ -321,9 +321,13 @@ ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
     // on `free`, and the plans themselves are config. `account_usage` is the account's payments as
     // `reserve` counts them: each `account:<owner>` scope row, which `release` deletes. It finds
     // the account's scope in `spend_scopes`, whose row `reserve` writes with the scope rows, so
-    // the window index serves one owner's read: over the scope rows alone the owner is an
-    // expression no index serves, and the read scanned them all (about 90 ms at 3,000,000 rows,
-    // under 1 ms this way). `pruneScopes` keeps the row while the scope has a reservation in the
+    // the window index serves one owner's scope rows: over the scope rows alone the owner is an
+    // expression no index serves, and the read scanned them all (about 90 ms at 3,000,000 rows).
+    // The owner's own row is still found by a scan of `spend_scopes`, for the same reason: 0.5 ms
+    // at 72 rows, 1.5 ms at 3,500 and 5.5 ms at 50,000 (measured in the review of #236), on a
+    // table that holds a row per account and per breaker scope on a network that requires a key.
+    // A view that also gave `scope` would let the read name it and use the primary key (0.4 ms at
+    // any size). `pruneScopes` keeps the row while the scope has a reservation in the
     // pruner's horizon, which the quota's own count needs to cover the month. One race is left:
     // a `pruneScopes` statement that began before the next `reserve` of an account idle for the
     // whole horizon committed still deletes the account's row, and the view then misses its

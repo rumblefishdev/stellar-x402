@@ -2,7 +2,7 @@
 title: "0107 research: what it found and what it means for the design"
 type: synthesis
 status: mature
-spawns: []
+spawns: [notes/S-design.md]
 tags: [facilitator, fees, budgets, api-keys]
 history:
   - date: "2026-11-23"

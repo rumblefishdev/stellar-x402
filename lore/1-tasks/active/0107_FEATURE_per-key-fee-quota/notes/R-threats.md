@@ -160,8 +160,9 @@ own payments are refused.
 ## 5. Who pays for a reopened settlement (decision 7)
 
 - **A reopen happens only after a refusal that sent nothing** (`UNSENT_REASONS`, `reasons.ts:139-155`,
-  such as `…_timeout` or `…_spend_store_unavailable`), and that claim's reservation was released by
-  its `onFinal` or never made. The reopen reserves again under `<key>#<n+1>`, with the reopening
+  such as `…_timeout` or `…_spend_store_unavailable`), and that claim's reservation is released by
+  its `onFinal`, or by the reopen itself before it reserves (decision 34: the `onFinal` may come
+  late or never), or was never made. The reopen reserves again under `<key>#<n+1>`, with the reopening
   request's caller (`hooks.ts:30-34`). So whoever sends the payload again pays for it, and no
   account's quota pays for a settlement it didn't send.
 - **Can someone make another account pay?** Only by sending with that account's key. A third party

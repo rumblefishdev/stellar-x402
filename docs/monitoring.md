@@ -521,10 +521,11 @@ check after start counts each retry, and this sends one message for them.
 
 ### store-outage
 
-A write to Postgres failed: a settlement record, or the spend store. Settle answers may be missing
-from the records, and the spend policy may be blind. A failed read of the spend store counts too:
-a breaker's, and on pubnet an account's plan (`op` `plan`, 0107), which refuses that settlement
-with `settle_exact_stellar_spend_store_unavailable`.
+A read or write to Postgres failed: a settlement record, or the spend store. Settle answers may be
+missing from the records, and the spend policy may be blind. The spend store's reads are a
+breaker's and, on pubnet, an account's plan (`op` `plan`, 0107), in the same database through the
+registry's pool; a failed one refuses that settlement with
+`settle_exact_stellar_spend_store_unavailable`.
 
 1. On the server, the alarm's network's database: `systemctl status x402-db-testnet@production`
    and `/var/log/x402/production/postgres-testnet.log` for testnet.
@@ -533,7 +534,9 @@ with `settle_exact_stellar_spend_store_unavailable`.
 ### hook-failures
 
 A settlement hook threw: the spend policy's fee count, failure count or breaker may have missed a
-final settlement, so budgets and breakers count low.
+final settlement. Breakers then count low and budgets high: a reservation it didn't commit or
+release stays counted at the fee ceiling, for 24 h in the fee budgets and, on pubnet, until the
+month ends in its account's payments (0107).
 
 1. The `settlement_hook_failed` event names the hook and the error.
 2. If the store is the cause, `spend_store_failed` too ([store-outage](#store-outage)).
