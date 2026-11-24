@@ -4,6 +4,7 @@ import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { withBazaar, type SearchDiscoveryResourcesResponse } from "@x402/extensions/bazaar";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createSearchCardWriter } from "../src/catalog/search-cards.js";
 import { parseConfig } from "../src/config.js";
 import { DISCOVERY_LIMIT } from "../src/http/discovery.js";
 import { MAX_QUERY_LENGTH, parseSearchQuery } from "../src/http/search.js";
@@ -195,11 +196,14 @@ describe("GET /discovery/search", () => {
       RATE_LIMIT_DISCOVERY: "1000000",
     };
     const config = { ...parseConfig(env), port: 0 };
+    const logger = jsonLogger("debug", (line) => lines.push(line));
     stores = db.stores();
     await seed(stores);
+    // The listings enter search once their cards are written, as the card writer's pass does.
+    await createSearchCardWriter({ store: stores.searchCards, logger, metrics }).runOnce();
     app = await start({
       config,
-      logger: jsonLogger("debug", (line) => lines.push(line)),
+      logger,
       metrics,
       stores,
       verify: vi.fn<Verify>(),

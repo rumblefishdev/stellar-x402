@@ -114,9 +114,10 @@ export class PostgresCatalogStore implements CatalogStore {
    * matching words. On 2,200 listings 330 common words took 1.1–1.2 s and the first 32 of them
    * 67 ms; on a catalog where every word matches nearly every listing, 32 took 170–620 ms at 2,200
    * and about 2 s, the discovery pool's statement timeout, at 10,000 (measured locally). The
-   * longest of 0134's 40 real queries has 16 words, their median 4. The rank goes out and comes back as
-   * PostgreSQL's text for the `real` it is, so the next page compares the same number. Only the
-   * page's rows read `resource`, as in `list`.
+   * longest of 0134's 40 real queries has 16 words, their median 4. The words are the listing's
+   * search card's (`catalog_search`), so a listing without a card isn't found yet. The rank goes
+   * out and comes back as PostgreSQL's text for the `real` it is, so the next page compares the
+   * same number. Only the page's rows read `resource`, as in `list`.
    */
   async search(query: CatalogSearch): Promise<CatalogSearchHit[]> {
     const { text, type, payTo, network, limit, after } = query;
@@ -131,7 +132,8 @@ export class PostgresCatalogStore implements CatalogStore {
       `SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
          FROM (SELECT seq, network, pay_to, method, resource_url,
                       ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query) AS rank
-                 FROM catalog,
+                 FROM catalog
+                 JOIN catalog_search USING (seq),
                       (SELECT string_agg(term, ' | ' ORDER BY first)::tsquery AS words_query
                          FROM (SELECT term, min(n) AS first
                                  FROM unnest(string_to_array(plainto_tsquery('english', $1)::text,
