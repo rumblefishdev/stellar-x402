@@ -130,6 +130,47 @@ interface Series {
   readonly by: readonly string[];
 }
 
+/**
+ * Where an alarm row goes: a rule under `check`, or, with `why`, no rule, because it stays in
+ * CloudWatch ("stays …") or a server rule replaces it (that rule's name). The one place the split
+ * lives: `RuleSet` and `keptInCloudWatch` both read it (Karol's point 1 on #211).
+ */
+export function route(
+  base: string,
+  spec: { qualifier?: string; signal: unknown },
+  silence = false,
+): { check: string; why?: string } {
+  const check = spec.qualifier ? `${base}-${spec.qualifier}` : base;
+  if (STAYS.has(base)) return { check, why: "stays in CloudWatch (ADR 0011, Alerts)" };
+  if (base === "gauges-silent") return { check, why: REPLACED[base]! };
+  const off = allSignals(spec.signal as Signal | MathSignal).find(
+    (s) => !("catalog" in s) || byName(s.catalog)?.namespace === "x402-watch",
+  );
+  if (off) return { check, why: "stays in CloudWatch: off the server or AWS's own metric" };
+  if (!silence) return { check };
+  const by = REPLACED[base];
+  if (!by) throw new Error(`${check}: a silence row needs a Prometheus replacement`);
+  return { check, why: by };
+}
+
+/** Whether `route` leaves the row a CloudWatch alarm. */
+export const staysInCloudWatch = (why: string | undefined): boolean =>
+  why?.startsWith("stays") ?? false;
+
+/**
+ * CloudWatch's half since the switch (0139 step 7): `alarms` builds only the rows that stay, and
+ * every other row is a Prometheus rule, so no check is both.
+ */
+export function keptInCloudWatch(alarms: Alarms): Alarms {
+  const keeps = (base: string, spec: { qualifier?: string; signal: unknown }, silence = false) =>
+    staysInCloudWatch(route(base, spec, silence).why);
+  return {
+    event: (base, spec) => void (keeps(base, spec) && alarms.event(base, spec)),
+    level: (base, spec) => void (keeps(base, spec) && alarms.level(base, spec)),
+    silence: (base, spec) => void (keeps(base, spec, true) && alarms.silence(base, spec)),
+  };
+}
+
 export class RuleSet implements Alarms {
   readonly rules: Rule[] = [];
   readonly skipped: Skip[] = [];
@@ -199,11 +240,8 @@ export class RuleSet implements Alarms {
   }
 
   silence(base: string, spec: SilenceSpec): void {
-    const check = this.take(base, spec);
-    if (!check) return;
-    const by = REPLACED[base];
-    if (!by) throw new Error(`${check}: a silence row needs a Prometheus replacement`);
-    this.skipped.push({ check, why: by });
+    // A silence row is never a rule: it stays in CloudWatch or a server rule replaces it.
+    this.take(base, spec, true);
   }
 
   /** The single Event rule, every Event row a branch, its text chosen by `check`. */
@@ -225,17 +263,11 @@ export class RuleSet implements Alarms {
   private take(
     base: string,
     spec: { group: AlarmGroup; qualifier?: string; signal: unknown },
+    silence = false,
   ): string | undefined {
     if (!this.groups[spec.group]) return undefined;
-    const check = spec.qualifier ? `${base}-${spec.qualifier}` : base;
-    if (STAYS.has(base)) return this.skip(check, "stays in CloudWatch (ADR 0011, Alerts)");
-    const signals = allSignals(spec.signal as Signal | MathSignal);
-    if (base === "gauges-silent") return this.skip(check, REPLACED[base]!);
-    const off = signals.find(
-      (s) => !("catalog" in s) || byName(s.catalog)?.namespace === "x402-watch",
-    );
-    if (off) return this.skip(check, "stays in CloudWatch: off the server or AWS's own metric");
-    return check;
+    const { check, why } = route(base, spec, silence);
+    return why === undefined ? check : this.skip(check, why);
   }
 
   private skip(check: string, why: string): undefined {

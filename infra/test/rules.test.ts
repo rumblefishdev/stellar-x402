@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import { INFRA_ROOT } from "../src/lib/names.js";
-import { buildRules, ruleFile } from "../src/lib/rules.js";
-import { allOn, production, synth } from "./fixtures.js";
+import { buildRules, ruleFile, staysInCloudWatch } from "../src/lib/rules.js";
+import { allOn, everyRow, production, synth } from "./fixtures.js";
 
 const checksOf = (c = allOn()) => {
   const { rules, skipped } = buildRules(c);
@@ -29,11 +29,23 @@ test("the committed rule file is what `make rules` writes", () => {
 test("every CloudWatch alarm makes a rule or says why not", () => {
   const { made, skipped } = checksOf();
   const why = new Set(skipped.map((s) => s.check));
-  const rows = synth(allOn()).x.alarms.alarms.records.map((r) =>
+  const rows = everyRow(allOn()).stack.alarms.records.map((r) =>
     r.alarmName.replace(/^x402-production-/, "").replace(/-(testnet|pubnet)(?=-|$)/, ""),
   );
   expect(rows.length).toBeGreaterThan(40);
   expect(rows.filter((row) => !made.has(row) && !why.has(row))).toEqual([]);
+});
+
+test("CloudWatch keeps exactly the rows that make no rule and stay, so no check is both (0139)", () => {
+  // Karol's point 1 on #211: the split lives in rules.ts alone, and the switch turns off exactly
+  // what moved.
+  const { made, skipped } = checksOf();
+  const stays = new Set(skipped.filter((s) => staysInCloudWatch(s.why)).map((s) => s.check));
+  const kept = synth(allOn()).x.alarms.alarms.records.map((r) =>
+    r.alarmName.replace(/^x402-production-/, "").replace(/-(testnet|pubnet)(?=-|$)/, ""),
+  );
+  expect(new Set(kept)).toEqual(stays);
+  expect(kept.filter((check) => made.has(check))).toEqual([]);
 });
 
 test("pubnet adds alert instances, not rules", () => {
