@@ -47,6 +47,11 @@ account's limit by hand.
 ## Implementation
 
 - The price in config, never in code.
+- Charge for `committed` reservations only, never for `reserved` ones. 0107's quota counts both:
+  a reservation whose release failed, or whose process died between the final write and the
+  release, stays `reserved` until the month ends, for a settlement that sent nothing (0107
+  decision 36, from the review of #236). Free, that costs an account one payment of its quota;
+  billed, it would be a charge for a payment never made.
 - The account's paid usage and balance on the portal's dashboard (0106).
 - Docs: the facilitator README, ADR 0007.
 
