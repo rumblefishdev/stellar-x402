@@ -1120,6 +1120,7 @@ doesn't start.
    GRANT SELECT, INSERT ON api_keys TO x402_portal;
    GRANT UPDATE (state, revoked_at) ON api_keys TO x402_portal;
    GRANT SELECT, INSERT, DELETE ON api_key_copies TO x402_portal;
+   GRANT SELECT ON account_plans, account_usage TO x402_portal;
    COMMIT;
    SQL
      then
@@ -1135,15 +1136,20 @@ doesn't start.
    ```
 
    On success psql prints `SET`, `SET`, `BEGIN`, `CREATE ROLE` (the first time only),
-   `ALTER ROLE`, three `GRANT`s and `COMMIT`, and the step nothing more. A failed statement prints
+   `ALTER ROLE`, four `GRANT`s and `COMMIT`, and the step nothing more. A failed statement prints
    psql's `ERROR:`, then `stopped: the role was not made or changed; the credential is unchanged`,
    and the subshell exits 1. The subshell keeps `pw` and the `cd` out of your shell. Run again, it
    converges: the role keeps its grants and takes a new password, and the credential follows.
+   The last `GRANT` (0107) is for the account's use the backend shows the hub: run this step again
+   on the existing role once the facilitator has applied `0017_account_plans`, or `account` answers
+   `usage: null` (logged as `hub_usage_unavailable`). It sets a new password, as every run does, so
+   restart `x402-portal@production` after it: the running backend's new connections fail until it
+   has read the new credential.
    That is also how the password changes later; restart the unit after it if the backend runs,
    since it reads the credential when it starts.
    `deploy/scripts/check-production-portal.sh` makes its role from these `GRANT` lines. A
-   migration that replaces either table with a new one must grant again: the grants are the
-   table's, not the name's. The grants don't keep anyone else from the copies: the facilitator
+   migration that replaces one of the four objects (the view `account_usage` included, by
+   `DROP VIEW` and `CREATE VIEW`) must grant again: the grants are the object's, not the name's. The grants don't keep anyone else from the copies: the facilitator
    connects as the database's owner, so only the encryption does (0106 decision 18).
 
 4. **The key encryption key**, on the server. It seals the copies and is kept nowhere else; a
@@ -1559,19 +1565,20 @@ One JSON object per line in `/var/log/x402/production/portal.log`, shipped as `p
 the first 12 hex digits of its SHA-256; never a key, a token, a secret or a Discord id. No alarm
 reads them yet: what watches the backend is the uptime probe on its `/health` (Monitoring, below).
 
-| Event                                                           | Level | Means, and what to do                                                                                                                                                                     |
-| --------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `startup_failed`                                                | error | the process exits: `problems` names each bad setting, never its value, or `error` says the database is out of reach or lacks a table. **Act**                                             |
-| `hub_call_failed`, `pool_error`, `not_ready`                    | error | the database failed (`502 key_unavailable`, or `issue`'s `outcome: failed`), or something else in a call (`500 internal`). **Act** on a run of them                                       |
-| `hub_key_copy_unreadable`                                       | error | a copy exists and doesn't open: the wrong `KEY_ENCRYPTION_KEY`, or a damaged row. **Act**                                                                                                 |
-| `shutdown_failed`                                               | error | a stop didn't end cleanly, and the process exited 1                                                                                                                                       |
-| `hub_call_refused` with `invalid_token`                         | warn  | **expected from strangers**. Only a run of them while the hub's x402 tab fails means the two sides disagree: the secret changed on one side only, or the two clocks more than 5 s apart   |
-| `hub_call_refused` with `action_not_allowed`                    | warn  | the hub doesn't send one: a hub bug, or a captured token replayed. Look                                                                                                                   |
-| `hub_strangers_limited`                                         | warn  | one address (an IPv6 /56) is over 30 calls a minute with tokens that don't verify; once per window. Right after a change of the secret, the hub's own calls (Changing the token's secret) |
-| `hub_key_issued`, `hub_key_revealed`, `hub_key_revoked`         | info  | the key events, with `jti`, `act` and `key_id`                                                                                                                                            |
-| `hub_issue_refused`, `hub_reveal_refused`, `hub_revoke_refused` | info  | what a call came to, its `outcome` (`has_key`, `capped`, `too_young`, `no_key`, …): the account's state, not a fault                                                                      |
-| `hub_account_answered`                                          | info  | the `state` `account` gave                                                                                                                                                                |
-| `listening`                                                     | info  | started, with its port                                                                                                                                                                    |
+| Event                                                           | Level | Means, and what to do                                                                                                                                                                          |
+| --------------------------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `startup_failed`                                                | error | the process exits: `problems` names each bad setting, never its value, or `error` says the database is out of reach or lacks a table. **Act**                                                  |
+| `hub_call_failed`, `pool_error`, `not_ready`                    | error | the database failed (`502 key_unavailable`, or `issue`'s `outcome: failed`), or something else in a call (`500 internal`). **Act** on a run of them                                            |
+| `hub_usage_unavailable`                                         | error | the plan or the count couldn't be read, and `account` answers `usage: null` (the key is still answered): the role lacks the 0107 grant (**run the role's step again**), or the database failed |
+| `hub_key_copy_unreadable`                                       | error | a copy exists and doesn't open: the wrong `KEY_ENCRYPTION_KEY`, or a damaged row. **Act**                                                                                                      |
+| `shutdown_failed`                                               | error | a stop didn't end cleanly, and the process exited 1                                                                                                                                            |
+| `hub_call_refused` with `invalid_token`                         | warn  | **expected from strangers**. Only a run of them while the hub's x402 tab fails means the two sides disagree: the secret changed on one side only, or the two clocks more than 5 s apart        |
+| `hub_call_refused` with `action_not_allowed`                    | warn  | the hub doesn't send one: a hub bug, or a captured token replayed. Look                                                                                                                        |
+| `hub_strangers_limited`                                         | warn  | one address (an IPv6 /56) is over 30 calls a minute with tokens that don't verify; once per window. Right after a change of the secret, the hub's own calls (Changing the token's secret)      |
+| `hub_key_issued`, `hub_key_revealed`, `hub_key_revoked`         | info  | the key events, with `jti`, `act` and `key_id`                                                                                                                                                 |
+| `hub_issue_refused`, `hub_reveal_refused`, `hub_revoke_refused` | info  | what a call came to, its `outcome` (`has_key`, `capped`, `too_young`, `no_key`, …): the account's state, not a fault                                                                           |
+| `hub_account_answered`                                          | info  | the `state` `account` gave                                                                                                                                                                     |
+| `listening`                                                     | info  | started, with its port                                                                                                                                                                         |
 
 A call with no bearer at all is logged at `debug` only, which the backend doesn't write (its
 `LOG_LEVEL` is `info`). `startup_failed` repeats: the unit restarts the process after 5 s, up to 5

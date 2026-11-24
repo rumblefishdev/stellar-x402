@@ -1,6 +1,10 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { PostgresSealedKeyStore } from "@stellar-x402/api-keys";
+import {
+  PostgresAccountPlanStore,
+  PostgresAccountUsageReader,
+  PostgresSealedKeyStore,
+} from "@stellar-x402/api-keys";
 import pg from "pg";
 import { createApp } from "./app.js";
 import { parseConfig } from "./config.js";
@@ -68,6 +72,8 @@ export async function main(
   const app = createApp({
     config,
     keys: new PostgresSealedKeyStore(pool),
+    plans: new PostgresAccountPlanStore(pool),
+    usage: new PostgresAccountUsageReader(pool),
     sealer: sealer(config.keyEncryptionKey),
     logger,
     ready: async () => void (await pool.query("SELECT 1")),
