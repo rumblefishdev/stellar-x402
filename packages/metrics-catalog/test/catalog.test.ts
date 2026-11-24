@@ -268,6 +268,7 @@ describe("CATALOG", () => {
     const facProcCounters = [
       "http_requests_total",
       "store_prune_failures_total",
+      "search_card_failures_total",
       "catalog_internal_errors_total",
       "catalog_attempts_total",
       "catalog_upsert_failures_total",
@@ -357,6 +358,7 @@ describe("scope-split name types", () => {
     expectTypeOf<ProcessCounterName>().toEqualTypeOf<
       | "http_requests_total"
       | "store_prune_failures_total"
+      | "search_card_failures_total"
       | "catalog_internal_errors_total"
       | "catalog_attempts_total"
       | "catalog_upsert_failures_total"

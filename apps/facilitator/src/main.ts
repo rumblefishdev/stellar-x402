@@ -15,6 +15,7 @@ import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js"
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
+import { createSearchCardRewrite } from "./catalog/search-cards.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
@@ -577,18 +578,23 @@ export async function main(
       metrics,
     });
     pruner.start();
-    // Catalog writes and a prune already under way finish before the process exits, and before
-    // the pools end, even if closing the server fails; the pools end even if draining fails.
+    const searchCards = createSearchCardRewrite({ store: stores.searchCards, logger, metrics });
+    const searchCardsRewritten = searchCards.start();
+    // Catalog writes, a prune and the search card rewrite already under way finish before the process
+    // exits, and before the pools end, even if closing the server fails; the pools end even if
+    // draining fails.
     // The metrics' final flush comes last, after every part that counts, and is awaited:
     // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
     const closeOnce = async () => {
       signer.close();
+      // The search card rewrite stops at once, so it holds no connection through the drain.
+      const rewriteClosed = searchCards.close();
       try {
         try {
           await started.close();
         } finally {
           try {
-            await Promise.all([cataloger.drain(), pruner.close()]);
+            await Promise.all([cataloger.drain(), pruner.close(), rewriteClosed]);
           } finally {
             await endPools();
           }
@@ -611,6 +617,8 @@ export async function main(
       logger,
       /** Settles once the first sweep has ended: for tests. */
       reconciled: deps.reconciliation?.reconciled ?? Promise.resolve(),
+      /** Settles once the search card rewrite at start has ended: for tests. */
+      searchCardsRewritten,
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
       close: () => (closing ??= closeOnce()),
