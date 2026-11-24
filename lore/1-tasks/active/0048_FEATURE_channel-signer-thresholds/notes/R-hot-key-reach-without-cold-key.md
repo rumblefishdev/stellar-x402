@@ -254,7 +254,7 @@ Steps 3–7 take a few hours with tools we already have.
 
 ## Open questions
 
-1. Does anything trust channel addresses in Soroban? Since 0093 the channel is the caller, and a leaked key keeps medium (Soroban `require_auth`) on abandoned channels forever. Check that no contract (upto-proxy included) grants a channel address any authority.
+1. **Answered 2026-11-24: no contract does** (task README, Implementation Notes). Does anything trust channel addresses in Soroban? Since 0093 the channel is the caller, and a leaked key keeps medium (Soroban `require_auth`) on abandoned channels forever. Check that no contract (upto-proxy included) grants a channel address any authority.
 2. How fast can a thief burn the float through fee bumps (inclusion bid under surge, the Soroban non-refundable resource fee)? This sizes the float and the burn-rate alarm. Not measured.
 3. Can a thief brick a channel with `BumpSequence` (Low) toward INT64_MAX? Unverified. It is a denial of service only, and A's response (abandon) covers it.
 4. The fee account's one-time hardening `SetOptions` must be signed by the OpenBao key, an ADR 0013 exception. Alternatively, create future fee accounts already hardened.

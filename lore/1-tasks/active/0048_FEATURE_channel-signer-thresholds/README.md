@@ -119,14 +119,40 @@ no longer apply):
       goes to mainnet, whichever comes first; ADR 0013 and AD-12 link to it
 - [ ] The threat model lists the `upto` risk: a stolen key settles open payments at their full
       `max_amount`
-- [ ] No contract gives a channel address any power: `upto-proxy` and every other contract
-      checked, the result recorded
+- [x] No contract gives a channel address any power: `upto-proxy` and every other contract
+      checked, the result recorded (Implementation Notes, 2026-11-24)
 - [ ] `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` are read from the server's `.env`, not
       `deploy/production/compose.yaml`, so a new key needs no PR
 - [ ] `docs/runbook.md` has a "lost access" section: new key, fee account, channels, `.env`,
       restart, alarms, and when the same server may stay
 - [ ] A testnet drill moves the facilitator to a new key, fee account and channels with that
       section, timed, and the result recorded
+
+## Implementation Notes
+
+**Channel addresses hold no power in any contract** (checked 2026-11-24, commit `49e656ef`'s
+tree). Abandoned channels keep a stolen key at medium, which is what a G address's
+`require_auth` checks in Soroban, and since 0093 a channel is the settlement's caller. So a
+contract that named a channel as an authority would hand a thief that power forever.
+
+- `upto-proxy` (`contracts/upto-proxy/src/lib.rs`), the only contract we deploy for production:
+  - it asks for exactly two authorizations, `from.require_auth_for_args` (`:123`) and
+    `receiver_authorizer.require_auth()` (`:136`), both addresses named in the client's signed
+    arguments; it never reads the invoker;
+  - the spender of the client's `approve` is the proxy itself (`:161-163`), not the caller;
+  - it stores nothing but its instance TTL (`:168`), has no admin and no upgrade path (`:5-8`);
+  - in facilitator-delegated mode `receiver_authorizer` is the key the facilitator publishes in
+    `/supported` (`contracts/upto-proxy/README.md:347-348`), which is `FACILITATOR_ADDRESS`
+    (`apps/facilitator/src/http/supported.ts:13`), not a channel.
+- `exact` calls the token's own `transfer` with the payer's `ADDRESS` credentials; the token
+  checks only `from`.
+- `test-token`, `hostile-token` and `test-wallet` are test fixtures. `deploy-contract.sh`
+  deploys `upto-proxy` and `test-token` to testnet only (`deploy/scripts/deploy-contract.sh:15`),
+  and `test-token` checks only `from` and `spender` (`contracts/test-token/src/lib.rs:117-155`).
+- **Rule for later work:** `extra.receiverAuthorizer` must stay the facilitator key and never a
+  channel, and no contract may take a channel address as an authority. A channel is the
+  transaction source, so a contract asking for a channel's `require_auth` would be satisfied by
+  the channel's source-account credentials, which a stolen key still controls.
 
 ## Design Decisions
 
@@ -167,7 +193,5 @@ today's setup"). Each one holds whichever option the re-check picks.
 - **`upto` is missing from the threat model.** A stolen key is `receiver_authorizer` on every open
   `upto` payment and can settle each at its full `max_amount` until its `deadline`. The money goes
   to the seller, but the payer pays more. Record it before `upto` reaches mainnet.
-- **Confirm nothing trusts a channel address.** Abandoned channels keep the old key at medium,
-  and so Soroban `require_auth`, forever. `upto-proxy` checks only `from` and
-  `receiver_authorizer` (`contracts/upto-proxy/src/lib.rs:123-136`), not the caller; confirm
-  there and for any later contract.
+- ~~**Confirm nothing trusts a channel address.**~~ Checked 2026-11-24: nothing does
+  (Implementation Notes). The rule stays for any later contract.
