@@ -1,7 +1,7 @@
 import type { ApiKeyStore } from "@stellar-x402/api-keys";
 import type { CatalogAttemptStore, CatalogStore } from "./catalog-store.js";
 import type { RateLimitStore } from "./rate-limit-store.js";
-import type { SearchCardStore } from "./search-card-store.js";
+import type { SearchCardStore, SearchVectorStore } from "./search-card-store.js";
 import type { SettlementStore } from "./settlement-store.js";
 import type { SpendStore } from "./spend-store.js";
 
@@ -21,8 +21,14 @@ export type {
   CatalogStore,
   UpsertOutcome,
 } from "./catalog-store.js";
+export type { Embedder, Embedding } from "./embedder.js";
 export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
-export type { CardListing, SearchCardStore } from "./search-card-store.js";
+export type {
+  CardListing,
+  SearchCard,
+  SearchCardStore,
+  SearchVectorStore,
+} from "./search-card-store.js";
 export {
   FINAL_SETTLEMENT_STATES,
   HashConflictError,
@@ -59,7 +65,8 @@ export interface Stores {
   settlements: SettlementStore;
   catalog: CatalogStore;
   catalogAttempts: CatalogAttemptStore;
-  searchCards: SearchCardStore;
+  /** One table: the card rewrite writes its fields, the vectors its vector. */
+  searchCards: SearchCardStore & SearchVectorStore;
   rateLimits: RateLimitStore;
   spend: SpendStore;
   apiKeys: ApiKeyStore;

@@ -1,8 +1,15 @@
 import { searchFields } from "@stellar-x402/bazaar";
 import type pg from "pg";
-import type { CardListing, SearchCardStore } from "../ports/index.js";
+import type {
+  CardListing,
+  CatalogKey,
+  Embedding,
+  SearchCard,
+  SearchCardStore,
+  SearchVectorStore,
+} from "../ports/index.js";
 
-export class PostgresSearchCardStore implements SearchCardStore {
+export class PostgresSearchCardStore implements SearchCardStore, SearchVectorStore {
   constructor(private readonly pool: pg.Pool) {}
 
   async listings(after: string, limit: number): Promise<CardListing[]> {
@@ -36,6 +43,50 @@ export class PostgresSearchCardStore implements SearchCardStore {
         fields.tags,
         fields.description,
         fields.parameters,
+      ],
+    );
+    return rowCount === 1;
+  }
+
+  async cards(after: string, limit: number): Promise<SearchCard[]> {
+    const { rows } = await this.pool.query<SearchCard>(
+      `SELECT seq, name, tags, description, parameters, model, text_hash AS "textHash"
+         FROM catalog_search WHERE seq > $1 ORDER BY seq LIMIT $2`,
+      [after, limit],
+    );
+    return rows;
+  }
+
+  async card(key: CatalogKey): Promise<SearchCard | undefined> {
+    const { rows } = await this.pool.query<SearchCard>(
+      `SELECT s.seq, s.name, s.tags, s.description, s.parameters, s.model,
+              s.text_hash AS "textHash"
+         FROM catalog c JOIN catalog_search s USING (seq)
+        WHERE c.network = $1 AND c.pay_to = $2 AND c.method = $3 AND c.resource_url = $4`,
+      [key.network, key.payTo, key.method, key.resourceUrl],
+    );
+    return rows[0];
+  }
+
+  /**
+   * The model takes its time without a lock held (ADR 0014), so the catalog may write the
+   * listing's card meanwhile. The update then waits for that write and re-reads the card: a card
+   * whose fields are no longer the ones embedded keeps what it holds, and the next pass embeds
+   * its new text. pgvector reads a vector from its text form, `[1,2,3]`.
+   */
+  async writeVector(card: SearchCard, embedding: Embedding, textHash: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE catalog_search SET model = $2, text_hash = $3, embedding = $4::public.vector
+        WHERE seq = $1 AND (name, tags, description, parameters) = ($5, $6, $7, $8)`,
+      [
+        card.seq,
+        embedding.model,
+        textHash,
+        `[${embedding.vector.join(",")}]`,
+        card.name,
+        card.tags,
+        card.description,
+        card.parameters,
       ],
     );
     return rowCount === 1;

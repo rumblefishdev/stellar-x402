@@ -1,5 +1,6 @@
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
+import type { Embedding } from "./embedder.js";
 
 /** `network + payTo + method + normalized resource URL` (AD-19). */
 export interface CatalogKey {
@@ -58,9 +59,14 @@ export interface CatalogSearch {
   limit: number;
   /** The last result of the page before; this page starts after it. */
   after?: CatalogSearchPosition;
+  /** The query's vector; without it, search ranks by words alone. */
+  meaning?: Embedding;
 }
 
-/** Where a result sits: its rank by words, as PostgreSQL writes it, and its key for ties. */
+/**
+ * Where a result sits: its rank (by words, or the fused score), as PostgreSQL writes it, and its
+ * key for ties.
+ */
 export interface CatalogSearchPosition {
   rank: string;
   key: CatalogKey;
@@ -90,10 +96,12 @@ export interface CatalogStore {
    */
   list(query: CatalogQuery): Promise<CatalogPage>;
   /**
-   * Entries that hold a word of `text`, ranked by words (ADR 0014): a word in the name counts
-   * most, then tags, description and parameters, and each repeat counts again (threat model,
-   * "Ranking by repeated words"). Equal ranks go by key, so a page that starts `after` a result
-   * goes on exactly where the page before stopped.
+   * With `meaning`, entries whose vector of that model is close to it (cosine similarity 0.60 or
+   * more), ranked by meaning and by words fused (ADR 0014); words never add an entry. Without it,
+   * entries that hold a word of `text`, ranked by words: a word in the name counts most, then
+   * tags, description and parameters, and each repeat counts again (threat model, "Ranking by
+   * repeated words"). Equal ranks go by key, so a page that starts `after` a result goes on
+   * exactly where the page before stopped.
    */
   search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
 }

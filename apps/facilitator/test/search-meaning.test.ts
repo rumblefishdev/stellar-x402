@@ -167,7 +167,7 @@ describe("GET /discovery/search by meaning, vectors stored (0120 G, I)", () => {
   });
 
   it("pages the fused ranking with a cursor that carries the ranking and the model (G, I)", async () => {
-    const seen: string[] = [];
+    const seen: (string | undefined)[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < 5; page++) {
       const { body } = await search(

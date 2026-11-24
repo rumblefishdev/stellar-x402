@@ -14,8 +14,10 @@ import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
+import { createSearchModelClient } from "./adapters/search-model.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { createSearchCardRewrite } from "./catalog/search-cards.js";
+import { createSearchVectors, type SearchVectors } from "./catalog/search-vectors.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
 import { parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
@@ -334,6 +336,8 @@ export function compose(
   signer: OpenBaoSigner;
   /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
   rpcStall: RpcStallTracker;
+  /** Unstarted: `main()` starts the pass after the search card rewrite. None without a model. */
+  vectors: SearchVectors | undefined;
 } {
   const { logger } = opts;
   const { stores } = opts;
@@ -341,6 +345,11 @@ export function compose(
   // One child per network; a root write of a network-scoped metric would carry no `network`, so
   // the root's type doesn't take one.
   const metrics = root.for({ network: config.network });
+  // The search model (ADR 0014): the route asks it for each query's vector, the vectors for each
+  // listing's. The cards serve every network, so they write through the root.
+  const embedder = config.searchModel && createSearchModelClient(config.searchModel);
+  const vectors =
+    embedder && createSearchVectors({ store: stores.searchCards, embedder, logger, metrics: root });
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
   // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
@@ -350,6 +359,7 @@ export function compose(
     logger,
     metrics: root,
     listLocal: config.catalog.listLocal,
+    vectors,
   });
   // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
   // A test's `rpc` serves every URL.
@@ -465,12 +475,14 @@ export function compose(
       floor,
       drain,
       signerState: signer.state,
+      embedder,
     },
     cataloger,
     metrics: root,
     rpc,
     signer,
     rpcStall,
+    vectors,
   };
 }
 
@@ -538,7 +550,7 @@ export async function main(
       onIssue: (issue) => logger.warn("metric_issue", { ...issue }),
     }));
     const composed = compose(config, { logger, stores, metrics });
-    const { deps, cataloger, rpc, signer } = composed;
+    const { deps, cataloger, rpc, signer, vectors } = composed;
     // With the graph, like the writer's timers: an RPC that hangs the startup checks shows as a
     // rising `rpc_stalled_seconds`.
     rpcStall = composed.rpcStall;
@@ -580,21 +592,25 @@ export async function main(
     pruner.start();
     const searchCards = createSearchCardRewrite({ store: stores.searchCards, logger, metrics });
     const searchCardsRewritten = searchCards.start();
-    // Catalog writes, a prune and the search card rewrite already under way finish before the process
-    // exits, and before the pools end, even if closing the server fails; the pools end even if
-    // draining fails.
+    // After the rewrite, so each vector is made from the card's text under this release's rules.
+    void searchCardsRewritten.then(() => vectors?.start());
+    // Catalog writes, a prune, the search card rewrite and the vector pass already under way
+    // finish before the process exits, and before the pools end, even if closing the server fails;
+    // the pools end even if draining fails.
     // The metrics' final flush comes last, after every part that counts, and is awaited:
     // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
     const closeOnce = async () => {
       signer.close();
-      // The search card rewrite stops at once, so it holds no connection through the drain.
+      // The search card rewrite and the vector pass stop at once, so they hold no connection
+      // through the drain. A pass that hasn't started yet then reads nothing.
       const rewriteClosed = searchCards.close();
+      const vectorsClosed = vectors?.close();
       try {
         try {
           await started.close();
         } finally {
           try {
-            await Promise.all([cataloger.drain(), pruner.close(), rewriteClosed]);
+            await Promise.all([cataloger.drain(), pruner.close(), rewriteClosed, vectorsClosed]);
           } finally {
             await endPools();
           }

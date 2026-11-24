@@ -269,6 +269,8 @@ describe("CATALOG", () => {
       "http_requests_total",
       "store_prune_failures_total",
       "search_card_failures_total",
+      "search_vector_failures_total",
+      "search_words_only_total",
       "catalog_internal_errors_total",
       "catalog_attempts_total",
       "catalog_upsert_failures_total",
@@ -359,6 +361,8 @@ describe("scope-split name types", () => {
       | "http_requests_total"
       | "store_prune_failures_total"
       | "search_card_failures_total"
+      | "search_vector_failures_total"
+      | "search_words_only_total"
       | "catalog_internal_errors_total"
       | "catalog_attempts_total"
       | "catalog_upsert_failures_total"

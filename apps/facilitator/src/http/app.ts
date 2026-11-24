@@ -9,7 +9,7 @@ import type { SignerState } from "../adapters/openbao-signer.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
-import type { Stores } from "../ports/index.js";
+import type { Embedder, Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
@@ -62,6 +62,8 @@ export interface AppDeps {
   drain?: () => Promise<void>;
   /** The facilitator key's signer as `/health` reports it (0036); tests may leave it out. */
   signerState?: () => SignerState;
+  /** The search model (ADR 0014); without it, `/discovery/search` ranks by words alone. */
+  embedder?: Embedder;
 }
 
 /** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
@@ -209,6 +211,7 @@ export function createApp({
   lease,
   closing,
   signerState,
+  embedder,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -361,7 +364,7 @@ export function createApp({
   });
   app.use("/discovery", rateLimit(budget("discovery", config.http.rateLimit.discovery)));
   app.get("/discovery/resources", discoveryResources(stores.catalog, logger, metrics));
-  app.get("/discovery/search", discoverySearch(stores.catalog, logger, metrics));
+  app.get("/discovery/search", discoverySearch(stores.catalog, embedder, logger, metrics));
 
   app.use((_req, res) => {
     res.status(404).json({ error: "not_found" });

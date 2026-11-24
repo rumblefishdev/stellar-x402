@@ -1137,7 +1137,7 @@ describe("PostgreSQL stores", () => {
         ORDER BY attname`,
     );
     expect(columns).toEqual([
-      { attname: "embedding", type: "vector(384)" },
+      { attname: "embedding", type: "public.vector(384)" },
       { attname: "model", type: "text" },
       { attname: "text_hash", type: "text" },
     ]);
@@ -1320,6 +1320,7 @@ describe("PostgreSQL stores", () => {
           "0015_settlement_refused",
           "0016_catalog_seed",
           "0017_catalog_search",
+          "0018_catalog_search_vector",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1356,6 +1357,7 @@ describe("PostgreSQL stores", () => {
         "0015_settlement_refused",
         "0016_catalog_seed",
         "0017_catalog_search",
+        "0018_catalog_search_vector",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

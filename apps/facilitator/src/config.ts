@@ -279,6 +279,14 @@ const envSchema = z
     CATALOG_LIST_LOCAL: oneOf(["true", "false"])
       .default("false")
       .transform((value) => value === "true"),
+    /**
+     * The search model container (ADR 0014), on the environment's internal network. Unset, search
+     * ranks by words alone and no listing gets a vector.
+     */
+    SEARCH_MODEL_URL: z
+      .string()
+      .refine(isHttpUrl, "must be an http(s) URL without credentials")
+      .optional(),
 
     /** The breakers are fixed in code now (0024, `BREAKERS` in `spend/policy.ts`); refused, like `STORE`. */
     BREAKER_FAILURES: z.string().optional(),
@@ -384,6 +392,12 @@ export type Env = z.input<typeof envSchema>;
 /** `SETTLE_TIMEOUT_MS` when unset, unless `SETTLE_BUDGET_MS` is shorter. */
 const DEFAULT_SETTLE_TIMEOUT_MS = 20_000;
 
+/**
+ * How long a search waits for the query's vector before it ranks by words alone (ADR 0014). An
+ * interim value: a measurement of the model on the server sets it.
+ */
+const SEARCH_MODEL_TIMEOUT_MS = 2_000;
+
 /** Parsed environment, grouped for the parts that consume it. */
 export interface Config {
   network: (typeof STELLAR_NETWORKS)[keyof typeof STELLAR_NETWORKS];
@@ -434,6 +448,8 @@ export interface Config {
     balanceIntervalMs: number;
   };
   catalog: { listLocal: boolean };
+  /** The search model container; unset, search ranks by words alone. */
+  searchModel?: { url: string; timeoutMs: number };
 }
 
 /** Names every invalid setting; never echoes a value, so a secret can't leak into logs. */
@@ -569,6 +585,10 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       balanceIntervalMs: e.SPEND_BALANCE_INTERVAL_MS,
     },
     catalog: { listLocal: e.CATALOG_LIST_LOCAL },
+    searchModel:
+      e.SEARCH_MODEL_URL === undefined
+        ? undefined
+        : { url: e.SEARCH_MODEL_URL, timeoutMs: SEARCH_MODEL_TIMEOUT_MS },
   };
 }
 

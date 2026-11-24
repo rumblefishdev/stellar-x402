@@ -13,6 +13,7 @@ import type {
   CatalogSearch,
   CatalogSearchHit,
   CatalogStore,
+  Embedding,
   UpsertOutcome,
 } from "../ports/index.js";
 import { assertCount, extensionKeys } from "./rules.js";
@@ -140,15 +141,9 @@ export class PostgresCatalogStore implements CatalogStore {
    * since PostgreSQL 12. Only the page's rows read `resource`, as in `list`.
    */
   async search(query: CatalogSearch): Promise<CatalogSearchHit[]> {
+    if (query.meaning !== undefined) return this.searchFused(query, query.meaning);
     const { text, type, payTo, network, limit, after } = query;
-    const { rows } = await this.listPool.query<{
-      rank: string;
-      network: StellarNetwork;
-      pay_to: string;
-      method: string;
-      resource_url: string;
-      resource: DiscoveryResource;
-    }>(
+    const { rows } = await this.listPool.query<HitRow>(
       `SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
          FROM (SELECT seq, network, pay_to, method, resource_url,
                       ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query) AS rank
@@ -185,18 +180,94 @@ export class PostgresCatalogStore implements CatalogStore {
         limit,
       ],
     );
-    return rows.map((row) => ({
-      rank: row.rank,
-      key: {
-        network: row.network,
-        payTo: row.pay_to,
-        method: row.method,
-        resourceUrl: row.resource_url,
-      },
-      resource: row.resource,
-    }));
+    return rows.map(hitOf);
+  }
+
+  /**
+   * The fused ranking (ADR 0014). A listing matches when its card holds a vector of the query's
+   * model with a cosine similarity of 0.60 or more to the query's (pgvector's `cosine_distance` is
+   * 1 minus it); words never add one. Each match scores 4 / (20 + its rank by meaning) +
+   * 1 / (20 + its rank by words among the matches), with no words term when it holds no query
+   * word, the words ranked as in words alone. Equal values share a rank. The filters apply first,
+   * so ranks count among the listings that pass. Every match is ranked, with an exact scan and no
+   * vector index, and nothing is cut, so paging reaches the last one. The score goes out and comes
+   * back as PostgreSQL's text for the `float8` it is, which holds every digit, as the words rank's
+   * does.
+   */
+  private async searchFused(query: CatalogSearch, meaning: Embedding): Promise<CatalogSearchHit[]> {
+    const { text, type, payTo, network, limit, after } = query;
+    const { rows } = await this.listPool.query<HitRow>(
+      `SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
+         FROM (SELECT seq, network, pay_to, method, resource_url,
+                      4 / (20 + rank() OVER (ORDER BY similarity DESC))::float8
+                        + CASE WHEN words_rank IS NULL THEN 0
+                               ELSE 1 / (20 + rank() OVER (ORDER BY words_rank DESC NULLS LAST))::float8
+                          END AS rank
+                 FROM (SELECT seq, network, pay_to, method, resource_url,
+                              1 - public.cosine_distance(embedding, $5::public.vector) AS similarity,
+                              CASE WHEN words @@ words_query
+                                   THEN ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query)
+                              END AS words_rank
+                         FROM catalog
+                         JOIN catalog_search USING (seq),
+                              (SELECT string_agg(term, ' | ' ORDER BY first)::tsquery AS words_query
+                                 FROM (SELECT term, min(n) AS first
+                                         FROM unnest(string_to_array(plainto_tsquery('english', $1)::text,
+                                                                     ' & ')) WITH ORDINALITY AS t(term, n)
+                                        GROUP BY term
+                                        ORDER BY first
+                                        LIMIT 32) terms) q
+                        WHERE model = $6
+                          AND ($2::text IS NULL OR type = $2)
+                          AND ($3::text IS NULL OR pay_to = $3)
+                          AND ($4::text IS NULL OR network = $4)) m
+                WHERE similarity >= 0.60) p
+         JOIN catalog c USING (seq)
+        WHERE $7::float8 IS NULL
+           OR p.rank < $7::float8
+           OR (p.rank = $7::float8
+               AND (p.network, p.pay_to, p.method, p.resource_url) > ($8, $9, $10, $11))
+        ORDER BY p.rank DESC, p.network, p.pay_to, p.method, p.resource_url
+        LIMIT $12`,
+      [
+        text,
+        type ?? null,
+        payTo ?? null,
+        network ?? null,
+        `[${meaning.vector.join(",")}]`,
+        meaning.model,
+        after?.rank ?? null,
+        after?.key.network ?? null,
+        after?.key.payTo ?? null,
+        after?.key.method ?? null,
+        after?.key.resourceUrl ?? null,
+        limit,
+      ],
+    );
+    return rows.map(hitOf);
   }
 }
+
+/** A search result as both rankings' queries return it. */
+interface HitRow {
+  rank: string;
+  network: StellarNetwork;
+  pay_to: string;
+  method: string;
+  resource_url: string;
+  resource: DiscoveryResource;
+}
+
+const hitOf = (row: HitRow): CatalogSearchHit => ({
+  rank: row.rank,
+  key: {
+    network: row.network,
+    payTo: row.pay_to,
+    method: row.method,
+    resourceUrl: row.resource_url,
+  },
+  resource: row.resource,
+});
 
 /**
  * A NUL inside a payer's or seller's text is valid JSON, but neither `text` nor `jsonb` stores it,

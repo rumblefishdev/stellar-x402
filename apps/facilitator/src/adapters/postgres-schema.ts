@@ -344,6 +344,23 @@ CREATE TABLE catalog_search (
 CREATE INDEX catalog_search_words ON catalog_search USING gin (words);
 `,
   },
+  {
+    // 0120: each card's vector (ADR 0014), with the model that made it and the hash of the text it
+    // was made from, so a vector of another model or of an older text reads as stale. NULL until
+    // the facilitator writes it. pgvector's extension lives in `public`, so every schema sees the
+    // type. The vector is kept in the row (`PLAIN`), as pgvector's README suggests for an exact
+    // scan: a 384-number vector fits a page. Nullable columns without a default change only the
+    // catalog, and the release before never reads them.
+    name: "0018_catalog_search_vector",
+    sql: `
+CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
+ALTER TABLE catalog_search
+  ADD COLUMN model text,
+  ADD COLUMN text_hash text,
+  ADD COLUMN embedding public.vector(384);
+ALTER TABLE catalog_search ALTER COLUMN embedding SET STORAGE PLAIN;
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

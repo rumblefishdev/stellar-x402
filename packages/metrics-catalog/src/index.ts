@@ -361,6 +361,27 @@ export const CATALOG = [
     sets: PLAIN,
     emit: "aggregated",
   },
+  // A card's vector the search model failed to give (0120): the same shared table.
+  {
+    namespace: FAC,
+    name: "search_vector_failures_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
+  // A search answered by words alone because the model couldn't be used (0120); the route serves
+  // every network.
+  {
+    namespace: FAC,
+    name: "search_words_only_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
   {
     namespace: FAC,
     name: "catalog_internal_errors_total",
@@ -382,6 +403,7 @@ export const CATALOG = [
         "not_success",
         "no_ledger",
         "header",
+        "vector",
         "other",
       ],
       origin: ["settle", "resolved", "other"],
