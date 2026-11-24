@@ -42,7 +42,8 @@ The measurements are in
   in four fields:
   - name: the service name, an MCP listing's tool name and the words of the URL path;
   - tags;
-  - description: the listing's, an MCP tool's own and its input schema's;
+  - description: the listing's, its input's own (an MCP tool's or an HTTP endpoint's) and its
+    input schema's;
   - parameters: the names and descriptions of the inputs a listing takes, an HTTP listing's query
     and body fields or an MCP tool's arguments, each name once, at most 40 entries (a name or a description each), each cut at 300
     characters.
