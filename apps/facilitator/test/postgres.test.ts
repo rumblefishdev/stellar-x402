@@ -1044,6 +1044,10 @@ describe("PostgreSQL stores", () => {
     // A check that started earlier writes neither the listing nor its card.
     expect(await catalog.upsert(listing(1, "Stocks"))).toBe("stale");
     expect(await card()).toEqual([fieldsOf("Tides")]);
+    // A listing stored before cards existed gets its card with its next write.
+    await pool.query("DELETE FROM catalog_search");
+    expect(await catalog.upsert(listing(3, "Waves"))).toBe("updated");
+    expect(await card()).toEqual([fieldsOf("Waves")]);
   });
 
   it("applies the migrations once when two runs race", async () => {

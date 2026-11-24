@@ -71,6 +71,15 @@ describe("searchFields", () => {
     });
   });
 
+  it("reads an HTTP listing's own input description too", () => {
+    const http = listing({
+      resource: "https://sea.example/tides",
+      description: "Tide tables",
+      extensions: { bazaar: { info: { input: { type: "http", description: "For a port" } } } },
+    });
+    expect(searchFields(http).description).toBe("Tide tables For a port");
+  });
+
   it("keeps an input's description from the schema when the listing's info has none", () => {
     const body = listing({
       extensions: {

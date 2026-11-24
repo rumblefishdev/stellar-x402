@@ -33,7 +33,7 @@ function memoryStore(listings: StaleListing[], fail?: { write?: Error; seq?: str
 }
 
 describe("search card writer", () => {
-  it("writes each stale listing's card from its fields, its check and the rules version", async () => {
+  it("writes each stale listing's card from its fields and the rules version", async () => {
     const { store, written } = memoryStore([stale("1", "Weather"), stale("2", "Stocks")]);
     const lines: string[] = [];
     const writer = createSearchCardWriter({
