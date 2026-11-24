@@ -52,8 +52,8 @@ The measurements are in
   card: a row of its own table, `catalog_search`, one per catalog listing, which the words part,
   the meaning part and the text's hash all read, so they can't disagree about what a listing says.
   One background loop in the facilitator is the card's only writer: it writes the card of a
-  listing that has none, that was checked again since, or whose card an older version of the rules
-  built. A listing enters search once its card exists. A change to the rules is a version bump the
+  listing that has none, that was checked again since, or whose card another version of the rules
+  built, so a rolled-back release rewrites the cards to its own rules. A listing enters search once its card exists. A change to the rules is a version bump the
   loop carries to every card, and the catalog table is never rewritten for search.
 
 - **Matches.** A listing matches a query when its meaning is close enough: cosine similarity

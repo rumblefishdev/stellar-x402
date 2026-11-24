@@ -47,13 +47,13 @@ export function createSearchCardWriter(deps: SearchCardWriterDeps): SearchCardWr
       // A shutdown waits for this pass, so it stops between cards.
       if (closed) break;
       try {
-        const wrote = await store.write({
+        await store.write({
           seq: listing.seq,
           checkedAt: listing.checkedAt,
           rules: SEARCH_FIELDS_VERSION,
           fields: searchFields(listing.resource),
         });
-        if (wrote) written++;
+        written++;
       } catch (error) {
         logger.warn("search_card_failed", { seq: listing.seq, error });
         metrics.increment("search_card_failures_total");
