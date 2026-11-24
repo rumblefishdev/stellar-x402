@@ -345,43 +345,41 @@ The upstream section published nothing for two days, so `upstream-changed` sees 
 
 ## The facilitator
 
-The facilitator writes its metrics as EMF lines (#112) in the stream `facilitator` of
-`/x402/production/metrics`, every minute for its gauges and sweeps, and at once for each event.
-A stopped process writes nothing: Level alarms then keep their last state and Event alarms read
-OK, so [facilitator-silent](#facilitator-silent) is the one that says so. The events named below
-are the `event` field of its log lines (The logs, above). The pool's own events
-(`channel-quarantined`, `sequence-resync`, `send-retry`, `fee-raised`) are counted in
-`pool_events_total`, not logged, so the log doesn't name their channel yet (task 0125). Only
-`sequence-resync` has a `type` dimension in `x402-facilitator`; the others go into the network's
-total alone. Each count is in the `type` field of its EMF line, so Logs Insights on
-`/x402/production/metrics` finds them:
+Since 0139's switch the facilitator serves its metrics as Prometheus text on `/metrics`, on its
+own port (`METRICS_PORT`, 9464 in production) on the `x402-metrics` network only, and the agent on
+the server scrapes it every 15 s and sends it to the monitoring VM. Its alarms are rules there
+([The Prometheus rules](#the-prometheus-rules)). Every counter is written from the start at 0, and a
+gauge is read at each scrape. A stopped process is scraped as down, so
+[facilitator-silent](#facilitator-silent) and `target-down` say so. The events named below are the
+`event` field of its log lines (The logs, above). The pool's own events (`channel-quarantined`,
+`sequence-resync`, `send-retry`, `fee-raised`) are counted in `pool_events_total`, not logged, so
+the log doesn't name their channel yet (task 0125); its `type` label tells them apart, in
+Prometheus on the VM (`ssh -L 9090:localhost:9090 monitoring`):
 
 ```
-filter type = "fee-raised" | stats sum(pool_events_total) by bin(5m)
+sum by (type) (increase(pool_events_total{project="x402"}[1h]))
 ```
 
 ### facilitator-silent
 
-No sweep line from the facilitator for 15 minutes, though it writes one every minute: the process
-is down, its start hangs or fails (a crash loop included), or its lines don't reach CloudWatch. It
+The rule `x402-facilitator-silent`: the facilitator's liveness series,
+`facilitator_started_timestamp_seconds`, has been missing for 10 minutes. The process writes it
+once it has started, so this is a process that is down, a start that hangs or fails (a crash loop
+included), a `/metrics` the agent can't scrape, or an agent whose samples don't reach the VM. It
 fires beside [uptime](#uptime) when the process is down.
 
 1. If `uptime` fires too, follow it: the process is down.
-2. If not, the facilitator runs but its lines don't arrive: on the server,
-   `systemctl status x402@production`, then check [telemetry-silent](#telemetry-silent) and the
-   agent.
+2. If not, the facilitator runs but its series don't arrive: `target-down` for `job="facilitator"`
+   names a scrape that fails (on the server, `systemctl status x402@production`, and the
+   facilitator on the `x402-metrics` network); `server-silent` or `agent-behind`, the agent.
 
 ### gauges-silent
 
-One of the facilitator's gauges sent no point for 15 minutes while the sweeps did: its read keeps
-throwing, and that gauge's own alarm keeps its last state. The gauges are
-`settlement_oldest_open_seconds`, `pool_queued`, `pool_quarantined`, `rpc_on_fallback`,
-`rpc_stalled_seconds` and `balance_reading_age_seconds`, and `channel_longest_hold_seconds` once
-the `channelHeld` group is on.
-
-1. In the CloudWatch metrics console, namespace `x402-facilitator`, find the gauge with no recent
-   point.
-2. Find the error in the app logs around the time it stopped; its event names the read.
+The CloudWatch alarm on a gauge with no point while the sweeps arrived, until 0139's switch. Since
+then a gauge whose read keeps throwing is [gauge-stale](#gauge-stale), which reads each gauge's
+last successful read: the gauges are `settlement_oldest_open_seconds`, `pool_queued`,
+`pool_quarantined`, `rpc_on_fallback`, `rpc_stalled_seconds` and `balance_reading_age_seconds`, and
+`channel_longest_hold_seconds` once the `channelHeld` group is on.
 
 ### http-500
 
@@ -809,7 +807,8 @@ VM (ADR 0011, "Monitoring stack"). The rule file is
 [`deploy/metrics/rules/x402-production.yml`](../deploy/metrics/rules/x402-production.yml),
 written by `make rules` in `infra/` from the same rows as the alarms
 (`infra/src/lib/rules.ts`), so each rule keeps its alarm's name with an `x402-` prefix, its
-threshold and this page's section. Until the switch nothing on the VM loads it.
+threshold and this page's section. CloudWatch keeps only the rows that stay (below), and the
+Alarms stack builds those alone, so no check is both a rule and an alarm (`route` in `rules.ts`).
 
 - `network` is a label, not part of the name: pubnet adds alert instances, not rules.
 - Every Event alarm is one branch of the single rule `x402-event`; its `check` label is the
@@ -830,9 +829,12 @@ threshold and this page's section. Until the switch nothing on the VM loads it.
   series goes stale, so a resolved message can mean the series stopped. The silence rules say
   which: `facilitator-silent`, `gauge-stale`, `textfile-stale` (for `probe-silent`) and
   `server-silent` (for the agent, `telemetry-silent` in CloudWatch).
-- What stays in CloudWatch: the off-server check's and the uptime probe's alarms, `audit-disk`,
-  `certificate`, `credentials-stale`, `telemetry-silent` and `log-volume-app`. The EMF alarms go
-  with EMF.
+- What stays in CloudWatch, 18 alarms in production: the off-server check's (`balance-low`,
+  `balance-critical`, `watch-errors`, `watch-no-invocations`, `protocol-changed`,
+  `protocol-upgrade-coming`) and the uptime probe's (`uptime`, `uptime-flapping`), the log path's
+  (`telemetry-silent`, `log-volume-app`, `log-volume-metrics`, `emf-validation`, `emf-parsing`, for
+  the host probe's EMF lines), and `audit-disk`, `certificate` and `credentials-stale`, which must
+  page when the VM can't. Besides them, `monitoring-heartbeat`, its own stack.
 - `facilitator-silent`, `gauges-silent` and `probe-silent` read a series' arrival, which
   Prometheus reads another way: `x402-facilitator-silent` (the liveness series),
   `x402-gauge-stale` and `x402-textfile-stale` below.
@@ -858,6 +860,16 @@ certificate.
 ### target-down
 
 The agent has failed to scrape one of its targets (`job`) for 5 minutes.
+
+### agent-behind
+
+The metrics agent on ch-prod-01 is over 5 minutes behind in sending to the VM
+(`prometheus_remote_storage_queue_highest_timestamp_seconds` against
+`..._queue_highest_sent_timestamp_seconds`), or the VM refused samples the agent then dropped
+(`prometheus_remote_storage_samples_failed_total`), for 5 minutes. The agent still looks up, so
+`server-silent` stays quiet while the rules read old or missing data. On the server,
+`/var/log/x402/metrics/agent.log` names the `remote_write` error: a 4xx refused samples, a 5xx or a
+timeout the VM or the way to it; then Caddy's log on the VM.
 
 ### agent-certificate
 
