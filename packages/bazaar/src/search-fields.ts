@@ -14,14 +14,13 @@ export interface SearchFields {
   parameters: string;
 }
 
-/** ADR 0014: at most 40 parameter words, each cut at 300 characters. */
-const MAX_PARAMETER_WORDS = 40;
+/** ADR 0014: at most 40 parameter entries, a name or a description each, cut at 300 characters. */
+const MAX_PARAMETER_ENTRIES = 40;
 const MAX_PARAMETER_CHARS = 300;
 
 type Json = Record<string, unknown>;
-const isRecord = (value: unknown): value is Json =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const record = (value: unknown): Json => (isRecord(value) ? value : {});
+const record = (value: unknown): Json =>
+  typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Json) : {};
 const text = (value: unknown): string | undefined =>
   typeof value === "string" && value !== "" ? value : undefined;
 const join = (parts: (string | undefined)[]) => parts.filter((part) => part).join(" ");
@@ -39,7 +38,8 @@ function pathWords(url: string): string {
  * - tags;
  * - description: the listing's, the MCP tool's own and its input schema's;
  * - parameters: each input's name once, with its description, from the HTTP query and body fields
- *   or the MCP tool's arguments, then the extension schema's.
+ *   or the MCP tool's arguments. An HTTP listing's `info` holds example values (`validate.ts`), so
+ *   only its names are read there; descriptions come from the schemas.
  * A field of an unexpected shape adds nothing.
  */
 export function searchFields(listing: DiscoveryResource): SearchFields {
@@ -56,18 +56,18 @@ export function searchFields(listing: DiscoveryResource): SearchFields {
 
   // An HTTP listing names its inputs twice, in `info` and in the schema: each counts once.
   const inputs = new Map<string, string | undefined>();
-  for (const fields of [
-    input["queryParams"],
-    input["body"],
+  const add = (name: string, description: string | undefined) =>
+    inputs.set(name, inputs.get(name) ?? description);
+  for (const examples of [input["queryParams"], input["body"]])
+    for (const name of Object.keys(record(examples))) add(name, undefined);
+  for (const schema of [
     record(input["inputSchema"])["properties"],
     record(schemaInput["queryParams"])["properties"],
     record(schemaInput["body"])["properties"],
   ])
-    for (const [name, value] of Object.entries(record(fields)))
-      inputs.set(name, inputs.get(name) ?? text(record(value)["description"]));
-  const words = [...inputs].flatMap(([name, description]) =>
-    description === undefined ? [name] : [name, description],
-  );
+    for (const [name, value] of Object.entries(record(schema)))
+      add(name, text(record(value)["description"]));
+  const entries = [...inputs].flat().filter((entry) => entry !== undefined);
 
   return {
     name: join([
@@ -81,9 +81,9 @@ export function searchFields(listing: DiscoveryResource): SearchFields {
       text(input["description"]),
       text(record(input["inputSchema"])["description"]),
     ]),
-    parameters: words
-      .slice(0, MAX_PARAMETER_WORDS)
-      .map((word) => Array.from(word).slice(0, MAX_PARAMETER_CHARS).join(""))
+    parameters: entries
+      .slice(0, MAX_PARAMETER_ENTRIES)
+      .map((entry) => Array.from(entry).slice(0, MAX_PARAMETER_CHARS).join(""))
       .join(" "),
   };
 }
