@@ -954,9 +954,9 @@ not here yet).
    read -rs BAO_TOKEN && export BAO_TOKEN   # paste the root token, Enter
    bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
    n=testnet
-   bao write -f transit/keys/stellar-$n/rotate </dev/null
+   bao write -f transit/keys/stellar-$n/rotate </dev/null >/dev/null
    v=$(bao read -field=latest_version transit/keys/stellar-$n </dev/null) && echo "version $v"
-   bao write transit/keys/stellar-$n/config min_encryption_version=$v </dev/null
+   bao write transit/keys/stellar-$n/config min_encryption_version=$v </dev/null >/dev/null
    bao write -f sys/leases/revoke-prefix/auth/approle/login </dev/null
    for a in $(bao list -format=json auth/approle/role/x402-$n/secret-id </dev/null | python3 -c 'import json, sys; print(" ".join(json.load(sys.stdin)))'); do bao write auth/approle/role/x402-$n/secret-id-accessor/destroy secret_id_accessor=$a </dev/null && echo "destroyed $a"; done
    s=$(bao write -f -field=secret_id auth/approle/role/x402-$n/secret-id </dev/null) && [ -n "$s" ] &&
@@ -984,7 +984,9 @@ not here yet).
 
 6. **Start it, and check the signer.** A wrong version or address doesn't stop the start: the
    facilitator runs, `/health` says `signer: failed`, the log has `signer_failed` with its reason
-   (`address_mismatch`, `denied`), and every settle fails until it is fixed.
+   (`address_mismatch` for a wrong address, `error` for a version below `min_encryption_version`,
+   which OpenBao answers with a 500, `denied` for a credential), and every settle fails until it
+   is fixed.
 
    ```sh
    sudo systemctl start x402@production

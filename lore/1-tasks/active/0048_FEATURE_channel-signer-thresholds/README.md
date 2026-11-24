@@ -159,6 +159,27 @@ contract that named a channel as an authority would hand a thief that power fore
   transaction source, so a contract asking for a channel's `require_auth` would be satisfied by
   the channel's source-account credentials, which a stolen key still controls.
 
+**Local rehearsal of "Lost access" (2026-11-24).** A real OpenBao 2.7.2 from a copy of
+`deploy/openbao` (own volume names, the socket on the host), the facilitator from source on the
+local PostgreSQL and the public testnet RPCs, 2 channels instead of 20. Key v1 with its fee account
+`GBVJ2B6C…BSWY` and channels ran with `signer: ok`; then steps 1–6:
+
+- **Step 3** (rotate, `min_encryption_version`, revoke the AppRole's tokens, destroy its secret
+  IDs, a new secret ID): every command worked as written. Checked after it: a token taken with the
+  old secret ID answers 403, the old secret ID can't log in (400), signing with version 1 is refused
+  ("requested version for signing is less than the minimum encryption key version"), and the new
+  secret ID signs with version 2.
+- **Steps 4–6:** a new fee account `GAX4LGRF…UVGM` and 2 channels, the facilitator on version 2:
+  `ready`, `listed`, `signer: ok`, and `/supported` lists the new address.
+- **Time:** 62 s of commands for steps 1–6 (step 3: 2 s, step 4: 13 s), without typing, decisions
+  or step 7. A real run adds the root token, 20 channels in 2 transactions, the server's `.env`
+  and the Watch deploy.
+- **Fixed in the runbook from it:** `rotate` and `config` print the whole key (now `>/dev/null`);
+  a version below `min_encryption_version` shows as `signer_failed` reason `error` (OpenBao's 500),
+  not `address_mismatch` or `denied`.
+- **Not covered locally:** systemd, `x402@`, the server's `.env`, `systemd-creds`, a paid request,
+  and step 7. The timed drill on the production server covers them after #235 is deployed.
+
 ## Design Decisions
 
 ### From Plan
