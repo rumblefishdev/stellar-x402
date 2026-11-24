@@ -610,10 +610,11 @@ export class SettlementSubmitter {
    * don't draw it; a failed read keeps the channel.
    *
    * Failed reads stop at the caller's `deadline` too, with the last read's error, and the channel
-   * goes back to the pool (0056): past it the call won't send, so retrying only holds the channel.
-   * Once the RPC has answered "no entry", the read keeps its whole window instead, so a missing
-   * channel is still retired: the facilitator's deadline is shorter than `timeoutSeconds`, and
-   * nobody can use a missing channel meanwhile.
+   * goes back to the pool (0056): past it the caller refuses the send, so retrying only holds the
+   * channel. The check runs again after each wait, so no read starts past the window; the wait's
+   * own ledger poll can still overrun it by one RPC call. Once the RPC has answered "no entry", the
+   * read keeps its whole window instead, so a missing channel is still retired: the facilitator's
+   * deadline is shorter than `timeoutSeconds`, and nobody can use a missing channel meanwhile.
    */
   private async readSequence(
     channel: Channel,
@@ -621,6 +622,8 @@ export class SettlementSubmitter {
     deadline: number | undefined,
   ): Promise<bigint> {
     const giveUpAt = this.now() + this.timeoutSeconds * 1000;
+    // A NaN deadline would never be reached and failed reads would retry forever: ignore it.
+    const callerStop = deadline !== undefined && Number.isFinite(deadline) ? deadline : Infinity;
     let noEntry = false;
     for (;;) {
       let account: xdr.AccountEntry | undefined;
@@ -636,18 +639,21 @@ export class SettlementSubmitter {
       noEntry ||= missing;
       const error = missing ? new Error(`Account not found: ${channel.address}`) : failure;
       const message = error instanceof Error ? error.message : String(error);
-      const stopAt = noEntry ? giveUpAt : Math.min(giveUpAt, deadline ?? Infinity);
-      if (this.now() >= stopAt) {
+      const stopAt = noEntry ? giveUpAt : Math.min(giveUpAt, callerStop);
+      const giveUp = () => {
         if (missing) {
           this.pool.retire(channel);
           hold.retired = true;
           this.emit({ type: "channel-quarantined", channel: channel.address, reason: message });
         }
-        throw error;
-      }
+        return error;
+      };
+      if (this.now() >= stopAt) throw giveUp();
       if (this.closing) throw new ShutdownError("the submitter closed while a read was retried");
       this.emit({ type: "read-retry", channel: channel.address, message });
       await Promise.race([this.clock.following(stopAt), this.closed]);
+      // The wait can end on its deadline: give up with this read's error rather than read again.
+      if (this.now() >= stopAt) throw giveUp();
     }
   }
 

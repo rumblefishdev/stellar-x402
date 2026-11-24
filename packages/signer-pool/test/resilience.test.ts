@@ -162,8 +162,15 @@ describe("sequence reads", () => {
 
   it("stops failed reads at the caller's deadline, with the read's error, and keeps the channel (0056)", async () => {
     const { fake, submitter } = setup({ timeoutSeconds: 60 });
+    // A real outage: ledger polls fail too (time still passes), so the wait between reads ends on
+    // its deadline, not on a new ledger.
+    const closeLedger = fake.getLatestLedger.bind(fake);
     Object.assign(fake, {
       getLedgerEntries: async () => Promise.reject(new Error("fetch failed")),
+      getLatestLedger: async () => {
+        await closeLedger();
+        throw new Error("fetch failed");
+      },
     });
     const deadline = fake.closeTime * 1000 + 10_000;
     await expect(submitter.submit(call(), { deadline })).rejects.toThrow("fetch failed");
@@ -186,6 +193,25 @@ describe("sequence reads", () => {
     expect(events).toContainEqual(
       expect.objectContaining({ type: "channel-quarantined", channel: channels[0] }),
     );
+  });
+
+  it("keeps reading to timeoutSeconds after one 'no entry', even when later reads fail (0056)", async () => {
+    const { fake, submitter } = setup({ timeoutSeconds: 60 });
+    let reads = 0;
+    Object.assign(fake, {
+      getLedgerEntries: async () => {
+        if (reads++ === 0) return { entries: [], latestLedger: fake.ledger };
+        throw new Error("fetch failed");
+      },
+    });
+    const start = fake.closeTime * 1000;
+    await expect(submitter.submit(call(), { deadline: start + 10_000 })).rejects.toThrow(
+      "fetch failed",
+    );
+    // The "no entry" answer sticks: the 502s past the deadline don't end the window early.
+    expect(fake.closeTime * 1000).toBeGreaterThanOrEqual(start + 60_000);
+    // The last read failed rather than answering "no entry", so the channel stays.
+    expect(submitter.stats()).toMatchObject({ quarantined: 0, channels: 1, busy: 0 });
   });
 
   it("fails waiting calls once the last channel is quarantined", async () => {
