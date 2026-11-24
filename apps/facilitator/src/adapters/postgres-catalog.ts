@@ -188,7 +188,8 @@ export class PostgresCatalogStore implements CatalogStore {
    * model with a cosine similarity of 0.60 or more to the query's (pgvector's `cosine_distance` is
    * 1 minus it); words never add one. Each match scores 4 / (20 + its rank by meaning) +
    * 1 / (20 + its rank by words among the matches), with no words term when it holds no query
-   * word, the words ranked as in words alone. Equal values share a rank. The filters apply first,
+   * word, the words ranked as in words alone. Ranks are positions, 1, 2, 3, with equal values in key
+   * order, as 0134 measured the fusion (`matches.py`). The filters apply first,
    * so ranks count among the listings that pass. Every match is ranked, with an exact scan and no
    * vector index, and nothing is cut, so paging reaches the last one. The score goes out and comes
    * back as PostgreSQL's text for the `float8` it is, which holds every digit, as the words rank's
@@ -199,9 +200,9 @@ export class PostgresCatalogStore implements CatalogStore {
     const { rows } = await this.listPool.query<HitRow>(
       `SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
          FROM (SELECT seq, network, pay_to, method, resource_url,
-                      4 / (20 + rank() OVER (ORDER BY similarity DESC))::float8
+                      4 / (20 + row_number() OVER (ORDER BY similarity DESC, network, pay_to, method, resource_url))::float8
                         + CASE WHEN words_rank IS NULL THEN 0
-                               ELSE 1 / (20 + rank() OVER (ORDER BY words_rank DESC NULLS LAST))::float8
+                               ELSE 1 / (20 + row_number() OVER (ORDER BY words_rank DESC NULLS LAST, network, pay_to, method, resource_url))::float8
                           END AS rank
                  FROM (SELECT seq, network, pay_to, method, resource_url,
                               1 - public.cosine_distance(embedding, $5::public.vector) AS similarity,
