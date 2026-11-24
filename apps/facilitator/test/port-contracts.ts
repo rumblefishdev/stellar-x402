@@ -1,4 +1,4 @@
-import { CATALOG_KEY_VERSION, SEARCH_FIELDS_VERSION } from "@stellar-x402/bazaar";
+import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
@@ -14,6 +14,7 @@ import {
   type CatalogStore,
   type NewSettlement,
   type RateLimitStore,
+  type CardListing,
   type SearchCardStore,
   type SettlementKey,
   type SettlementStore,
@@ -1998,7 +1999,7 @@ export function searchCardStoreContract(
       ({ catalog, cards } = await make());
     });
 
-    const list = (url: string, checkedAt: number) =>
+    const list = (url: string, checkedAt: number, description = "") =>
       catalog.upsert({
         keyVersion: CATALOG_KEY_VERSION,
         ledger: null,
@@ -2010,42 +2011,32 @@ export function searchCardStoreContract(
           x402Version: 2,
           accepts: [requirements()],
           lastUpdated: "2026-11-24T00:00:00.000Z",
+          description,
         },
       });
     const fields = { name: "n", tags: "", description: "", parameters: "" };
-    const urls = async (rules: number, limit = 10) =>
-      (await cards.stale(rules, limit)).map((listing) => listing.resource.resource);
-    const other = SEARCH_FIELDS_VERSION + 1;
+    const urls = (page: CardListing[]) => page.map((listing) => listing.resource.resource);
 
-    it("finds a stored listing's card at these rules, and names it to other rules", async () => {
-      await list("https://a.example", 1);
-      expect(await urls(SEARCH_FIELDS_VERSION)).toEqual([]);
-      expect(await cards.stale(other, 10)).toMatchObject([
-        { resource: { resource: "https://a.example" } },
-      ]);
-    });
-
-    it("names a card other rules built, older or newer, so a rollback rewrites it", async () => {
-      await list("https://a.example", 1);
-      const [listing] = await cards.stale(other, 10);
-      expect(await cards.write({ seq: listing!.seq, rules: other, fields })).toBe(true);
-      expect(await urls(other)).toEqual([]);
-      expect(await urls(SEARCH_FIELDS_VERSION)).toEqual(["https://a.example"]);
-    });
-
-    it("returns at most `limit` listings, in catalog order", async () => {
+    it("pages through every listing in catalog order", async () => {
       for (const host of ["a", "b", "c"]) await list(`https://${host}.example`, 1);
-      expect(await urls(other, 2)).toEqual(["https://a.example", "https://b.example"]);
+      const first = await cards.listings(null, 2);
+      expect(urls(first)).toEqual(["https://a.example", "https://b.example"]);
+      const second = await cards.listings(first[1]!.seq, 2);
+      expect(urls(second)).toEqual(["https://c.example"]);
+      expect(await cards.listings(second[0]!.seq, 2)).toEqual([]);
     });
 
-    it("never writes over a card these rules built, which the listing's own write may have", async () => {
+    it("writes the card of the listing it read", async () => {
       await list("https://a.example", 1);
-      const [listing] = await cards.stale(other, 10);
-      expect(await cards.write({ seq: listing!.seq, rules: SEARCH_FIELDS_VERSION, fields })).toBe(
-        false,
-      );
-      expect(await cards.write({ seq: listing!.seq, rules: other, fields })).toBe(true);
-      expect(await cards.write({ seq: listing!.seq, rules: other, fields })).toBe(false);
+      const [listing] = await cards.listings(null, 10);
+      expect(await cards.write(listing!, fields)).toBe(true);
+    });
+
+    it("writes no card for a listing written again since it was read", async () => {
+      await list("https://a.example", 1, "Weather");
+      const [listing] = await cards.listings(null, 10);
+      await list("https://a.example", 2, "Tides");
+      expect(await cards.write(listing!, fields)).toBe(false);
     });
   });
 }

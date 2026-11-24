@@ -1,11 +1,5 @@
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 
-/**
- * The version of the rules below. Search keeps it on each listing's card, so a change to the rules
- * is a bump here: the facilitator rewrites every card built by an older version.
- */
-export const SEARCH_FIELDS_VERSION = 1;
-
 /** The four fields search ranks a listing by, weighted name, tags, description, parameters. */
 export interface SearchFields {
   name: string;

@@ -19,7 +19,7 @@ export type {
   UpsertOutcome,
 } from "./catalog-store.js";
 export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
-export type { SearchCard, SearchCardStore, StaleListing } from "./search-card-store.js";
+export type { CardListing, SearchCardStore } from "./search-card-store.js";
 export {
   FINAL_SETTLEMENT_STATES,
   HashConflictError,

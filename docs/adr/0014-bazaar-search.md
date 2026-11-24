@@ -52,10 +52,10 @@ The measurements are in
   card: a row of its own table, `catalog_search`, one per catalog listing, which the words part,
   the meaning part and the text's hash all read, so they can't disagree about what a listing says.
   The catalog's write stores the listing and its card in one statement, so search finds what the
-  catalog holds from the moment it holds it. A change to the rules is a version bump: a background
-  loop rewrites every card another version of the rules built, so a rolled-back release rewrites
-  them to its own rules, and writes the cards of listings stored before cards existed. The catalog
-  table is never rewritten for search.
+  catalog holds from the moment it holds it. Each release, as it starts, rewrites every card once
+  in the background with its own rules, so a change to the rules, the listings stored before cards
+  existed and a rolled-back release all leave the cards matching their listings. The catalog table
+  is never rewritten for search.
 
 - **Matches.** A listing matches a query when its meaning is close enough: cosine similarity
   0.60 or more (below). Words never add a listing; they only order the listings that match. On
@@ -290,8 +290,8 @@ The measurements are in
   its lock (285–576 ms for 2,500 listings, 5.5 s for 35,000), and so would every later change to
   the fields, past what ADR 0012 lets a transactional migration hold.
 - Each catalog write computes the card's fields, but only when the listing changes: a repeat
-  payment whose copy is unchanged writes nothing. After a rules bump, a card keeps the older
-  rules' fields until the loop reaches it, at 500 listings every 5 seconds.
+  payment whose copy is unchanged writes nothing. Each start rewrites every card; after a change
+  to the rules, a card keeps the older rules' fields until the rewrite reaches it.
 - A seller can repeat words in its listing to rise in the words ranking, since `ts_rank_cd` counts
   each occurrence. Parameters are capped above; name, tags and description only by ADR 0008's
   listing limit. Fusion takes ranks, not scores, which bounds the gain, but the effect of

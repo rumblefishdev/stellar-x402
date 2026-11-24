@@ -1,4 +1,4 @@
-import { SEARCH_FIELDS_VERSION, searchFields } from "@stellar-x402/bazaar";
+import { searchFields } from "@stellar-x402/bazaar";
 import { PaymentRequirementsV2Schema } from "@x402/core/schemas";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type pg from "pg";
@@ -60,7 +60,6 @@ export class PostgresCatalogStore implements CatalogStore {
       entry.ledger,
       entry.checkedAt,
       ...resourceColumns(entry.resource),
-      SEARCH_FIELDS_VERSION,
       card.name,
       card.tags,
       card.description,
@@ -73,8 +72,8 @@ export class PostgresCatalogStore implements CatalogStore {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (network, pay_to, method, resource_url) DO NOTHING
          RETURNING seq)
-       INSERT INTO catalog_search (seq, rules, name, tags, description, parameters)
-       SELECT seq, $11::integer, $12, $13, $14, $15 FROM listing`,
+       INSERT INTO catalog_search (seq, name, tags, description, parameters)
+       SELECT seq, $11, $12, $13, $14 FROM listing`,
       values,
     );
     if (inserted.rowCount === 1) return "inserted";
@@ -86,10 +85,9 @@ export class PostgresCatalogStore implements CatalogStore {
            extension_keys = $10
          WHERE ${CATALOG_KEY_WHERE} AND coalesce(checked_at, 0) <= $7
          RETURNING seq)
-       INSERT INTO catalog_search (seq, rules, name, tags, description, parameters)
-       SELECT seq, $11::integer, $12, $13, $14, $15 FROM listing
-       ON CONFLICT (seq) DO UPDATE SET rules = $11, name = $12, tags = $13, description = $14,
-         parameters = $15`,
+       INSERT INTO catalog_search (seq, name, tags, description, parameters)
+       SELECT seq, $11, $12, $13, $14 FROM listing
+       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14`,
       values,
     );
     return updated.rowCount === 1 ? "updated" : "stale";

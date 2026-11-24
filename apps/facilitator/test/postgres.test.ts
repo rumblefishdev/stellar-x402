@@ -1,8 +1,9 @@
 import { PostgresSealedKeyStore } from "@stellar-x402/api-keys";
 import { apiKeyStoreContract, sealedKeyStoreContract } from "@stellar-x402/api-keys/testing";
-import { CATALOG_KEY_VERSION, SEARCH_FIELDS_VERSION, searchFields } from "@stellar-x402/bazaar";
+import { CATALOG_KEY_VERSION, searchFields } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
+import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PostgresSpendStore, postgresStores } from "../src/adapters/postgres.js";
@@ -738,8 +739,10 @@ describe("PostgreSQL stores", () => {
     const pools = app.pools;
     expect(pools).toBeDefined();
     try {
-      // The startup sweep reads the settlements on the main pool, and only there.
+      // The startup sweep reads the settlements on the main pool, and only there; so does the
+      // search card rewrite.
       await app.reconciled;
+      await app.searchCardsRewritten;
       const main = pools?.main.totalCount;
       expect(main).toBeGreaterThan(0);
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
@@ -985,13 +988,9 @@ describe("PostgreSQL stores", () => {
        RETURNING seq`,
     );
     const seq = listing[0]!.seq;
-    // A listing stored before cards existed has none, and the loop's store names it.
-    expect(await db.stores().searchCards.stale(SEARCH_FIELDS_VERSION, 10)).toEqual([
-      { seq, resource: {} },
-    ]);
     await pool.query(
-      `INSERT INTO catalog_search (seq, rules, name, tags, description, parameters)
-       VALUES ($1, 1, 'Tides', 'ocean', 'Weather', 'city')`,
+      `INSERT INTO catalog_search (seq, name, tags, description, parameters)
+       VALUES ($1, 'Tides', 'ocean', 'Weather', 'city')`,
       [seq],
     );
     const words = await pool.query("SELECT words::text FROM catalog_search WHERE seq = $1", [seq]);
@@ -1003,23 +1002,22 @@ describe("PostgreSQL stores", () => {
     // A card for a listing the catalog doesn't hold is refused.
     await expect(
       pool.query(
-        `INSERT INTO catalog_search (seq, rules, name, tags, description, parameters)
-         VALUES (-1, 1, '', '', '', '')`,
+        `INSERT INTO catalog_search (seq, name, tags, description, parameters)
+         VALUES (-1, '', '', '', '')`,
       ),
     ).rejects.toThrow(/foreign key/);
     // The store writes each field to its column.
-    await db.stores().searchCards.write({
-      seq,
-      rules: 2,
-      fields: { name: "N", tags: "T", description: "D", parameters: "P" },
-    });
+    await db
+      .stores()
+      .searchCards.write(
+        { seq, resource: {} as DiscoveryResource },
+        { name: "N", tags: "T", description: "D", parameters: "P" },
+      );
     const card = await pool.query(
-      "SELECT rules, name, tags, description, parameters FROM catalog_search WHERE seq = $1",
+      "SELECT name, tags, description, parameters FROM catalog_search WHERE seq = $1",
       [seq],
     );
-    expect(card.rows).toEqual([
-      { rules: 2, name: "N", tags: "T", description: "D", parameters: "P" },
-    ]);
+    expect(card.rows).toEqual([{ name: "N", tags: "T", description: "D", parameters: "P" }]);
     await pool.query("DELETE FROM catalog WHERE seq = $1", [seq]);
     const left = await pool.query("SELECT count(*)::int AS n FROM catalog_search");
     expect(left.rows).toEqual([{ n: 0 }]);
@@ -1029,16 +1027,12 @@ describe("PostgreSQL stores", () => {
     await db.empty();
     const { catalog } = db.stores();
     const card = async () =>
-      (await pool.query("SELECT rules, name, tags, description, parameters FROM catalog_search"))
-        .rows;
+      (await pool.query("SELECT name, tags, description, parameters FROM catalog_search")).rows;
     const listing = (checkedAt: number, description: string) => {
       const entry = catalogEntry();
       return { ...entry, checkedAt, resource: { ...entry.resource, description } };
     };
-    const fieldsOf = (description: string) => ({
-      rules: SEARCH_FIELDS_VERSION,
-      ...searchFields(listing(1, description).resource),
-    });
+    const fieldsOf = (description: string) => searchFields(listing(1, description).resource);
     expect(await catalog.upsert(listing(1, "Weather"))).toBe("inserted");
     expect(await card()).toEqual([fieldsOf("Weather")]);
     expect(await catalog.upsert(listing(2, "Tides"))).toBe("updated");
@@ -1050,6 +1044,31 @@ describe("PostgreSQL stores", () => {
     await pool.query("DELETE FROM catalog_search");
     expect(await catalog.upsert(listing(3, "Waves"))).toBe("updated");
     expect(await card()).toEqual([fieldsOf("Waves")]);
+  });
+
+  it("waits for a listing write under way, and then writes no card over the newer one (0120)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    await catalog.upsert(catalogEntry());
+    const [read] = await searchCards.listings(null, 10);
+    const writer = await pool.connect();
+    try {
+      // A catalog write under way: the listing has changed but is not yet committed.
+      await writer.query("BEGIN");
+      await writer.query(
+        `UPDATE catalog SET resource = jsonb_set(resource, '{description}', '"Tides"') WHERE seq = $1`,
+        [read!.seq],
+      );
+      const fields = { name: "old", tags: "", description: "", parameters: "" };
+      const rewrite = searchCards.write(read!, fields);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await writer.query("COMMIT");
+      expect(await rewrite).toBe(false);
+    } finally {
+      writer.release();
+    }
+    const { rows } = await pool.query("SELECT name FROM catalog_search");
+    expect(rows).not.toContainEqual({ name: "old" });
   });
 
   it("applies the migrations once when two runs race", async () => {
