@@ -34,24 +34,29 @@ export function createSearchCardWriter(deps: SearchCardWriterDeps): SearchCardWr
   const { store, logger, metrics, random = Math.random } = deps;
 
   const runOnce = async () => {
-    let written = 0;
+    let stale;
     try {
-      const stale = await store.stale(SEARCH_FIELDS_VERSION, BATCH);
-      for (const listing of stale) {
-        const fields = searchFields(listing.resource);
+      stale = await store.stale(SEARCH_FIELDS_VERSION, BATCH);
+    } catch (error) {
+      logger.warn("search_cards_failed", { error });
+      metrics.increment("search_card_failures_total");
+      return;
+    }
+    let written = 0;
+    // One card that fails is logged and skipped, so it never holds up the listings after it.
+    for (const listing of stale) {
+      try {
         await store.write({
           seq: listing.seq,
           checkedAt: listing.checkedAt,
           rules: SEARCH_FIELDS_VERSION,
-          fields,
+          fields: searchFields(listing.resource),
         });
         written++;
+      } catch (error) {
+        logger.warn("search_card_failed", { seq: listing.seq, error });
+        metrics.increment("search_card_failures_total");
       }
-    } catch (error) {
-      // `written` counts the cards this pass wrote before the failure.
-      logger.warn("search_cards_failed", { written, error });
-      metrics.increment("search_card_failures_total");
-      return;
     }
     if (written > 0) logger.info("search_cards_written", { written });
   };

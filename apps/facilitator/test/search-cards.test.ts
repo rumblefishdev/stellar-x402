@@ -19,13 +19,13 @@ const stale = (seq: string, description: string): StaleListing => ({
 });
 
 /** A store whose stale listings are the ones without a card written by this test. */
-function memoryStore(listings: StaleListing[], fail?: { write?: Error }) {
+function memoryStore(listings: StaleListing[], fail?: { write?: Error; seq?: string }) {
   const written: SearchCard[] = [];
   const store: SearchCardStore = {
     stale: async (_rules, limit) =>
       listings.filter((l) => !written.some((card) => card.seq === l.seq)).slice(0, limit),
     write: async (card) => {
-      if (fail?.write) throw fail.write;
+      if (fail?.write && (fail.seq === undefined || fail.seq === card.seq)) throw fail.write;
       written.push(card);
     },
   };
@@ -82,5 +82,23 @@ describe("search card writer", () => {
     failure.write = undefined;
     await writer.runOnce();
     expect(written.map((card) => card.seq)).toEqual(["1"]);
+  });
+
+  it("skips a card that fails, so the listings after it still get theirs", async () => {
+    const failure = { write: new Error("bad card"), seq: "1" };
+    const { store, written } = memoryStore([stale("1", "Weather"), stale("2", "Stocks")], failure);
+    const lines: string[] = [];
+    const metrics = memoryMetrics();
+    const writer = createSearchCardWriter({
+      store,
+      logger: jsonLogger("debug", (line) => lines.push(line)),
+      metrics,
+    });
+    await writer.runOnce();
+    expect(written.map((card) => card.seq)).toEqual(["2"]);
+    expect(metrics.value("search_card_failures_total")).toBe(1);
+    expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+      expect.objectContaining({ event: "search_card_failed", seq: "1" }),
+    );
   });
 });
