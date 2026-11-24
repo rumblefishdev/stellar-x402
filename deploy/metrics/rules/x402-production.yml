@@ -221,6 +221,20 @@
           }
         },
         {
+          "alert": "x402-agent-behind",
+          "expr": "max(prometheus_remote_storage_queue_highest_timestamp_seconds{project=\"x402\",job=\"agent\"} - prometheus_remote_storage_queue_highest_sent_timestamp_seconds{project=\"x402\",job=\"agent\"}) > 300 or sum(increase(prometheus_remote_storage_samples_failed_total{project=\"x402\",job=\"agent\"}[15m])) > 0",
+          "for": "5m",
+          "labels": {
+            "check": "agent-behind",
+            "severity": "warning",
+            "shape": "server",
+            "project": "x402"
+          },
+          "annotations": {
+            "description": "The metrics agent on ch-prod-01 is over 5 minutes behind in sending to the VM, or the VM refused samples it then dropped: the rules read old or missing data while the agent still looks up. Next: On the server: /var/log/x402/metrics/agent.log for remote_write errors (a 4xx names refused samples, a 5xx or timeout the VM or the way to it), then Caddy's log on the VM. No data: An agent that sends nothing is server-silent. Runbook: docs/monitoring.md, agent-behind."
+          }
+        },
+        {
           "alert": "x402-agent-certificate",
           "expr": "certificate_days_left{project=\"x402\",certificate=\"metrics-agent\"} < 30",
           "labels": {

@@ -442,6 +442,21 @@ export function serverRules(c: EnvironmentConfig): Rule[] {
     5,
   );
 
+  // The agent's own sending (Karol's point 2 on #211): a dead agent is server-silent, but one that
+  // falls behind or has samples refused still looks up while the rules read old or missing data.
+  const agent = `${PROJECT},job="agent"`;
+  rule(
+    "agent-behind",
+    "host",
+    `max(prometheus_remote_storage_queue_highest_timestamp_seconds{${agent}} - prometheus_remote_storage_queue_highest_sent_timestamp_seconds{${agent}}) > 300 or sum(increase(prometheus_remote_storage_samples_failed_total{${agent}}[15m])) > 0`,
+    {
+      what: "The metrics agent on ch-prod-01 is over 5 minutes behind in sending to the VM, or the VM refused samples it then dropped: the rules read old or missing data while the agent still looks up.",
+      next: "On the server: /var/log/x402/metrics/agent.log for remote_write errors (a 4xx names refused samples, a 5xx or timeout the VM or the way to it), then Caddy's log on the VM.",
+      noData: "An agent that sends nothing is server-silent.",
+    },
+    5,
+  );
+
   rule(
     "agent-certificate",
     "host",
