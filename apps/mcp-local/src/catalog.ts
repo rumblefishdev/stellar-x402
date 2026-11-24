@@ -76,7 +76,10 @@ const SEARCH_RESOURCES_INPUT = LIST_RESOURCES_INPUT.omit({ offset: true }).exten
   cursor: z
     .string()
     .optional()
-    .describe("pagination.cursor of the previous page, as it came; absent for the first page"),
+    .describe(
+      "pagination.cursor of the previous page, as it came, with the same query and filters; " +
+        "absent for the first page and after any change to them",
+    ),
 });
 
 /** Upstream's search answer; the spec makes `partialResults` and `pagination` optional. */
