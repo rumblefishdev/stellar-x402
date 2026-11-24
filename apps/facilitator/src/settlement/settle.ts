@@ -323,11 +323,11 @@ export function createSettler(deps: SettlerDeps): Settle & {
     if (!valid) return settled;
     const { expiration, left } = valid;
     // First: a client reads the archived entries at the end of the checks' message (0066).
-    const withExtra = (advice: string, retryable: boolean): Settled => ({
+    const withExtra = (text: string, retryable: boolean): Settled => ({
       ...settled,
       response: {
         ...response,
-        errorMessage: response.errorMessage ? `${advice}; ${response.errorMessage}` : advice,
+        errorMessage: response.errorMessage ? `${text}; ${response.errorMessage}` : text,
         extra: { ...response.extra, retryable, expirationLedger: expiration },
       },
     });
