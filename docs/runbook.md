@@ -222,14 +222,25 @@ ADR 0013's first upgrade (Not here yet).
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
 - The signer (0036), and the key's account and channels (OpenBao, step 6).
-- `/srv/x402/production/.env` with the key's address and its channels, from OpenBao's steps 4
-  and 6: public values, so a plain file, owned by `x402`, mode 0644, which the playbook leaves
-  alone. `compose.yaml` requires both: without them `x402@`, the deploy's `migrate-testnet` and
-  the `docker compose` commands here stop at interpolation.
+- `/srv/x402/production/.env` with the Transit key's name and version, its address and its
+  channels, from OpenBao's steps 4 and 6: public values, so a plain file, owned by `x402`,
+  mode 0644, which the playbook leaves alone. They change together, so they live together, and a
+  new key needs no pull request (ADR 0015). `compose.yaml` requires all four: without them `x402@`,
+  the deploy's `migrate-testnet` and the `docker compose` commands here stop at interpolation.
 
   ```sh
-  printf 'FACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' ADDRESS CHANNELS |
+  printf 'OPENBAO_KEY_TESTNET=%s\nOPENBAO_KEY_VERSION_TESTNET=%s\nFACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' \
+    stellar-testnet 1 ADDRESS CHANNELS |
     ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+  ```
+
+  A server set up before the key's name and version moved here (2026-11-24, task 0048) has only
+  the last two lines: add the first two before the deploy that carries this change, or `x402@`
+  stops at interpolation.
+
+  ```sh
+  printf 'OPENBAO_KEY_TESTNET=stellar-testnet\nOPENBAO_KEY_VERSION_TESTNET=1\n' |
+    ssh SERVER 'sudo tee -a /srv/x402/production/.env >/dev/null'
   ```
 
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server
