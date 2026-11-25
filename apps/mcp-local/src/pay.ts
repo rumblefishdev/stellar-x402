@@ -1,6 +1,14 @@
 import { LIMITS } from "@stellar-x402/bazaar";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
+import {
+  InsufficientBalanceError,
+  STELLAR_ASSET_ADDRESS_REGEX,
+  STELLAR_DESTINATION_ADDRESS_REGEX,
+  TrustlineMissingError,
+  USDC_PUBNET_ADDRESS,
+  USDC_TESTNET_ADDRESS,
+} from "@x402/stellar";
 import { z } from "zod";
 import { checkUrl, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { asToolError, ToolError } from "./results.js";
@@ -76,6 +84,67 @@ function dailyDatabaseFailed(error: unknown): ToolError {
   );
 }
 
+/**
+ * The classic assets behind upstream's default asset contracts, as `changeTrust` takes them: a
+ * contract's id is a hash, so it can't be read back from the id. `pay.test.ts` checks each against
+ * its id.
+ */
+export const CLASSIC_ASSETS: Readonly<Record<string, string>> = {
+  [USDC_TESTNET_ADDRESS]: "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+  [USDC_PUBNET_ADDRESS]: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+};
+
+/** An asset contract as a message names it: the classic asset too, when it is a known one. */
+function assetName(asset: string): string {
+  const classic = CLASSIC_ASSETS[asset];
+  return classic ? `${classic} (the asset contract ${asset})` : `the asset contract ${asset}`;
+}
+
+/**
+ * The tool error for a payment that could not be signed. `@x402/stellar` simulates before it signs
+ * and names what the asset contract refused: a missing trustline, the payer's or the seller's, or a
+ * balance too low. Any other failure, and a simulation it could not name, is `payment_failed`.
+ */
+function signingFailure(error: Error, payer: string, payTo: string | undefined): ToolError {
+  const detail = String(error);
+  if (error instanceof InsufficientBalanceError) {
+    return new ToolError(
+      "insufficient_funds",
+      "The payer does not hold enough of the asset.",
+      detail,
+    );
+  }
+  // The account and the asset go into the message the agent reads, so only in an address's shape:
+  // upstream takes them from the simulation, but another scheme could put any text there.
+  if (
+    error instanceof TrustlineMissingError &&
+    STELLAR_DESTINATION_ADDRESS_REGEX.test(error.account) &&
+    STELLAR_ASSET_ADDRESS_REGEX.test(error.asset)
+  ) {
+    const asset = assetName(error.asset);
+    // The asset contract stops at its first failure, the payer's side first, so a payer without a
+    // trustline says nothing about the seller's.
+    if (error.account === payer) {
+      return new ToolError(
+        "payer_trustline_missing",
+        `The payer ${error.account} has no trustline to ${asset} and must add one before it can ` +
+          "pay. The seller's account was not checked. Nothing was sent.",
+        detail,
+      );
+    }
+    // As the facilitator's refusal says: the SAC reports an account that doesn't exist the same way.
+    if (error.account === payTo) {
+      return new ToolError(
+        "payto_trustline_missing",
+        `The seller's account ${error.account} has no trustline to ${asset}: the account must ` +
+          "exist and hold one, and only the seller can add it. Nothing was sent.",
+        detail,
+      );
+    }
+  }
+  return new ToolError("payment_failed", "The payment could not be created.", detail);
+}
+
 export async function callPaidHttp(
   request: { url: string; method: string; headers?: Record<string, string>; body?: string },
   config: PaymentConfig,
@@ -94,8 +163,13 @@ export async function callPaidHttp(
   // One client per call, so its hooks know which payment is this call's.
   const client = x402Client.fromConfig({ schemes: config.schemes, spendControls: false });
   let refusal: ToolError | undefined;
-  /** `countedIn` is where the amount was counted in the daily record, so a refund finds it. */
-  let paid: { network: string; asset: string; amount: bigint; countedIn: DailyEntry } | undefined;
+  /**
+   * `countedIn` is where the amount was counted in the daily record, so a refund finds it; `payTo`
+   * tells the seller's missing trustline from the payer's.
+   */
+  let paid:
+    | { network: string; asset: string; payTo: string; amount: bigint; countedIn: DailyEntry }
+    | undefined;
   let signingError: Error | undefined;
   const now = config.now ?? (() => new Date());
   // True once the request carrying the signed payment has been handed to the network.
@@ -160,10 +234,10 @@ export async function callPaidHttp(
       refusal ??= new ToolError("over_budget", "The payment would exceed the daily budget.");
       return { abort: true, reason: refusal.code };
     }
-    paid = { network: offer.network, asset: offer.asset, amount, countedIn };
+    paid = { network: offer.network, asset: offer.asset, payTo: offer.payTo, amount, countedIn };
   });
-  // Nothing was sent: signing failed (an unfunded payer fails here, in simulation), so the amount
-  // goes back to the budget.
+  // Nothing was sent: signing failed (a payer without the trustline or the funds fails here, in
+  // simulation), so the amount goes back to the budget.
   client.onPaymentCreationFailure(async ({ error }) => {
     signingError = error;
     giveBack();
@@ -208,23 +282,7 @@ export async function callPaidHttp(
     }
     if (failure) throw failure;
     if (refusal) throw refusal;
-    if (signingError) {
-      // The payer's simulation fails in the asset contract: #10 is a balance too low, #13 a missing
-      // trustline (both measured on testnet: `#13` for an account without a USDC trustline, `#10` for one
-      // with a trustline and no USDC).
-      if (/Error\(Contract, #(10|13)\)/.test(String(signingError))) {
-        throw new ToolError(
-          "insufficient_funds",
-          "The payer does not hold enough of the asset.",
-          String(signingError),
-        );
-      }
-      throw new ToolError(
-        "payment_failed",
-        "The payment could not be created.",
-        String(signingError),
-      );
-    }
+    if (signingError) throw signingFailure(signingError, config.payer, paid?.payTo);
     // wrapFetchWithPayment adds these prefixes when it cannot read the seller's 402 or finds no offer
     // this server can pay with (an unregistered network, scheme or version). Anything else is a bug.
     if (
