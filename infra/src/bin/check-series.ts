@@ -22,6 +22,7 @@ import {
   listMetricsArgs,
   listsExactSeries,
 } from "../lib/series.js";
+import { buildRules } from "../lib/rules.js";
 import { AlarmsStack } from "../lib/stacks/alarms-stack.js";
 
 const require = createRequire(import.meta.url);
@@ -50,6 +51,15 @@ const series = new Map<string, SeriesRef>();
 for (const r of stack.alarms.records)
   for (const s of r.series) series.set(JSON.stringify([s.namespace, s.metricName, s.dims]), s);
 if (series.size === 0) {
+  // Since the switch (0139) a group on the server's metrics is Prometheus rules, not CloudWatch
+  // alarms: its series are checked on the VM, not here (Oskar's review of #242).
+  const rules = buildRules({ ...config, alarmGroups: only, thresholds }).rules.map((r) => r.alert);
+  if (rules.length > 0) {
+    console.log(
+      `${group}: its rows are Prometheus rules on the monitoring VM (${rules.join(", ")}), so their series are checked there: each selector in deploy/metrics/rules/x402-production.yml returns a series (docs/monitoring.md, The Prometheus rules).`,
+    );
+    process.exit(0);
+  }
   console.error(
     `${group}: no alarm to check. A group that reads named mounts needs host.diskMounts or host.auditDiskMount first.`,
   );

@@ -231,7 +231,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
       signal: { catalog: "settlement_reconciled_total", dims: { network, state: "expired" } },
       description: {
         what: `A settlement on ${network} expired: reconciliation found no transaction of it landed by its ledger bound, so the payer's payment did not settle and the payer has to sign a new one. One is rare; several mean submissions don't land.`,
-        next: "Read reconcile_finished and the record's settlement_hashes for its attempts, then the fee-raised and send-retry counts (Logs Insights on /x402/production/metrics, field type; counts only, task 0125) and the RPC around that time.",
+        next: "Read reconcile_finished and the record's settlement_hashes for its attempts, then the fee-raised and send-retry counts (pool_events_total by type, in Prometheus on the monitoring VM; counts only, task 0125) and the RPC around that time.",
         noData: SILENT_EVENT,
       },
     });

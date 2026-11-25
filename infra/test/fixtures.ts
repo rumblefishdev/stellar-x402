@@ -1,9 +1,11 @@
 // What the tests build from: envs/production.json as committed, and the same with every group on
 // and two networks, so that every alarm in the list is in the template.
 import { createRequire } from "node:module";
+import * as cdk from "aws-cdk-lib";
 import { Template } from "aws-cdk-lib/assertions";
 import { type X402App, createApp } from "../src/lib/app.js";
 import type { EnvironmentConfig } from "../src/lib/config.js";
+import { AlarmsStack } from "../src/lib/stacks/alarms-stack.js";
 
 const require = createRequire(import.meta.url);
 
@@ -60,6 +62,15 @@ export function allOn(): EnvironmentConfig {
 
 const json = (s: Parameters<typeof Template.fromStack>[0]) =>
   Template.fromStack(s).toJSON() as TemplateJson;
+
+/** The Alarms stack with every row built, Prometheus's included: each row's own definition. */
+export function everyRow(config: EnvironmentConfig) {
+  const stack = new AlarmsStack(new cdk.App(), "X402-production-Alarms", {
+    config,
+    everyRow: true,
+  });
+  return { stack, alarms: json(stack) };
+}
 
 export function synth(config: EnvironmentConfig) {
   const x: X402App = createApp(config);
