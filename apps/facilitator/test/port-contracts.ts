@@ -2519,6 +2519,19 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
       ]);
     });
 
+    it("ranks by the first 32 distinct words of a long query only (G)", async () => {
+      await listing(key("a"), { description: "w32" }, 0.9);
+      await listing(key("b"), { description: "w31" }, 0.8);
+      const words = Array.from({ length: 33 }, (_, i) => `w${i}`);
+      // Repeats don't count against the 32: w31 is a word looked for, w32 is not.
+      const hits = await fused(["w0", ...words].join(" "));
+      expect(hosts(hits)).toEqual(["b", "a"]);
+      expect(hits.map((hit) => Number(hit.rank))).toEqual([
+        expect.closeTo(score(2, 1), 6),
+        expect.closeTo(score(1), 6),
+      ]);
+    });
+
     it("matches by meaning at a cosine of 0.60 or more, not below (G)", async () => {
       await listing(key("above"), { description: "Tides" }, 0.61);
       await listing(key("below"), { description: "Waves" }, 0.59);

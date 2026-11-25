@@ -235,6 +235,8 @@ describe("GET /discovery/search and the search model (0120 H, I, J)", () => {
   it("asks the same model for the query's vector, with the query's text (J)", async () => {
     await search(`query=${encodeURIComponent("weather in Kraków")}`);
     expect(model.queries).toEqual(["weather in Kraków"]);
+    // A query's text is read up to 256 tokens, not a listing's 512 (ADR 0014).
+    expect(vi.mocked(embedder.embed)).toHaveBeenCalledWith("weather in Kraków", "query");
   });
 
   it("asks the model nothing for a request it refuses, or one nothing can match (J)", async () => {

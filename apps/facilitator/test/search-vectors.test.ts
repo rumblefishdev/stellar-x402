@@ -27,20 +27,22 @@ function vectorFor(text: string): number[] {
 }
 
 /**
- * An embedder that records each text, tracks how many calls run at once, fails a text `fail`
- * names, and waits on `hold` when one is set.
+ * An embedder that records each text and the kind it is sent as, tracks how many calls run at
+ * once, fails a text `fail` names, and waits on `hold` when one is set.
  */
 function fakeEmbedder(fail: (text: string) => boolean = () => false) {
   const state = {
     calls: [] as string[],
+    kinds: [] as string[],
     inFlight: 0,
     maxInFlight: 0,
     hold: undefined as Promise<void> | undefined,
     started: undefined as (() => void) | undefined,
   };
   const embedder: Embedder = {
-    embed: async (text) => {
+    embed: async (text, kind) => {
       state.calls.push(text);
+      state.kinds.push(kind);
       state.inFlight++;
       state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
       try {
@@ -127,8 +129,20 @@ describe("the vector pass at start (0120 F)", () => {
     await vectors(embedder).start();
     const [one, two, three] = await readCards(db.pool);
     expect(state.calls).toEqual([meaningText(one!), meaningText(three!)]);
+    // A listing's text is read up to the model's 512 tokens, not a query's 256 (ADR 0014).
+    expect(state.kinds).toEqual(["listing", "listing"]);
     expect([current(one!), current(three!)]).toEqual([true, true]);
     expect(sameVector(two!.embedding, unitVector(0.7))).toBe(true);
+  });
+
+  it("reads the cards a page after another, past the first 100 (F)", async () => {
+    for (let i = 0; i < 101; i++) await list(`h${i}`, { description: `Tides ${i}` });
+    const { embedder, state } = fakeEmbedder();
+    await vectors(embedder).start();
+    const cards = await readCards(db.pool);
+    expect(cards).toHaveLength(101);
+    expect(cards.every(current)).toBe(true);
+    expect(state.calls).toHaveLength(101);
   });
 
   it("embeds a card's fields joined with a line break, empty ones skipped (B)", async () => {
@@ -194,6 +208,38 @@ describe("the vector pass at start (0120 F)", () => {
     expect(state.calls).toHaveLength(3);
   });
 
+  it("logs and counts a failed read of the cards, and stops: the cards wait for the next start (F)", async () => {
+    await list("one", { description: "Weather one" });
+    const { embedder, state } = fakeEmbedder();
+    const lines: string[] = [];
+    const metrics = memoryMetrics();
+    const store = db.stores().searchCards;
+    const pass = createSearchVectors({
+      store: {
+        ...store,
+        cards: async () => {
+          throw new Error("database down");
+        },
+      },
+      model: MODEL,
+      embedder,
+      logger: jsonLogger("debug", (line) => lines.push(line)),
+      metrics,
+    });
+    await pass.start();
+    expect(metrics.value("search_vector_failures_total")).toBe(1);
+    expect(parsed(lines)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        event: "search_vectors_read_failed",
+        written: 0,
+        error: expect.objectContaining({ message: "database down" }),
+      }),
+    );
+    expect(state.calls).toEqual([]);
+    expect((await readCards(db.pool))[0]!.embedding).toBeNull();
+  });
+
   it("stops between listings once closed, and close waits for the one under way (F)", async () => {
     await list("one", { description: "Weather one" });
     await list("two", { description: "Tides two" });
@@ -242,6 +288,7 @@ describe("a listing's vector after the catalog writes it (0120 E)", () => {
     await vectors(embedder).listed(key("one"));
     const [one, two] = await readCards(db.pool);
     expect(state.calls).toEqual([meaningText(one!)]);
+    expect(state.kinds).toEqual(["listing"]);
     expect(current(one!)).toBe(true);
     expect(two!.embedding).toBeNull();
   });
@@ -268,6 +315,23 @@ describe("a listing's vector after the catalog writes it (0120 E)", () => {
     await list("one", { description: "Weather one, hourly" }, 2);
     await vectors(again.embedder).listed(key("one"));
     expect(again.state.calls).toHaveLength(1);
+  });
+
+  it("logs and counts a listing the catalog holds no card for, and asks the model nothing", async () => {
+    const { embedder, state } = fakeEmbedder();
+    const lines: string[] = [];
+    const metrics = memoryMetrics();
+    await expect(vectors(embedder, lines, metrics).listed(key("none"))).resolves.toBeUndefined();
+    expect(state.calls).toEqual([]);
+    expect(metrics.value("search_vector_failures_total")).toBe(1);
+    expect(parsed(lines)).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "search_vector_failed",
+        resourceUrl: key("none").resourceUrl,
+        error: expect.objectContaining({ message: expect.stringContaining("no card") }),
+      }),
+    );
   });
 
   it("logs and counts a failure, and resolves: the listing stays stored", async () => {
@@ -297,6 +361,7 @@ describe("main() and the vector pass (0120 C, F)", () => {
   let model: Server;
   let modelUrl: string;
   const asked: string[] = [];
+  const kinds: string[] = [];
   let inFlight = 0;
   let maxInFlight = 0;
 
@@ -311,8 +376,9 @@ describe("main() and the vector pass (0120 C, F)", () => {
         maxInFlight = Math.max(maxInFlight, inFlight);
         await new Promise((resolve) => setTimeout(resolve, 5));
         inFlight--;
-        const { text } = JSON.parse(body) as { text: string };
+        const { text, kind } = JSON.parse(body) as { text: string; kind: string };
         asked.push(text);
+        kinds.push(kind);
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ model: MODEL, vector: vectorFor(text) }));
       });
@@ -348,6 +414,8 @@ describe("main() and the vector pass (0120 C, F)", () => {
       });
       expect(maxInFlight).toBe(1);
       expect(asked.every((text) => !text.startsWith("old"))).toBe(true);
+      expect(kinds.length).toBeGreaterThan(0);
+      expect(kinds.every((kind) => kind === "listing")).toBe(true);
     } finally {
       await app.close();
     }
