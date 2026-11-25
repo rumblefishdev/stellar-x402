@@ -22,6 +22,22 @@ const ENV = z.object({
       .refine((port) => port <= 65_535, "must be between 0 and 65535"),
     "4021",
   ),
+  // Behind a proxy (the server's Cloudflare tunnel) the request arrives as plain http, so the
+  // 402 would name an http:// resource, which a catalog refuses. This names the public one.
+  PUBLIC_ORIGIN: z.preprocess(
+    (given) => (given === "" ? undefined : given),
+    z
+      .string()
+      .url("must be a URL")
+      // Zod runs each check even after one failed, so none of these parses the value.
+      .refine((url) => url.startsWith("https://"), "must be https")
+      .refine(
+        (url) => /^https:\/\/[^/?#]+\/?$/.test(url),
+        "must be an origin only, such as https://seller.example.com",
+      )
+      .transform((url) => url.replace(/\/$/, ""))
+      .optional(),
+  ),
 });
 
 /** Reads the seller's settings from the environment; a wrong value stops the start. */
@@ -31,6 +47,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     const [issue] = parsed.error.issues;
     throw new Error(`${issue!.path.join(".")} ${issue!.message}.`);
   }
-  const { SELLER_ADDRESS, FACILITATOR_URL, PORT } = parsed.data;
-  return { payTo: SELLER_ADDRESS, facilitatorUrl: FACILITATOR_URL, port: PORT };
+  const { SELLER_ADDRESS, FACILITATOR_URL, PORT, PUBLIC_ORIGIN } = parsed.data;
+  return {
+    payTo: SELLER_ADDRESS,
+    facilitatorUrl: FACILITATOR_URL,
+    port: PORT,
+    ...(PUBLIC_ORIGIN && { publicOrigin: PUBLIC_ORIGIN }),
+  };
 }

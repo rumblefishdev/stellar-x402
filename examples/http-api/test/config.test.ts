@@ -28,6 +28,17 @@ describe("loadConfig", () => {
     });
   });
 
+  it("reads the public origin and drops a trailing slash", () => {
+    expect(
+      loadConfig({ SELLER_ADDRESS, PUBLIC_ORIGIN: "https://seller.example.com/" }).publicOrigin,
+    ).toBe("https://seller.example.com");
+  });
+
+  it("leaves the public origin out when it is unset or empty", () => {
+    expect(loadConfig({ SELLER_ADDRESS })).not.toHaveProperty("publicOrigin");
+    expect(loadConfig({ SELLER_ADDRESS, PUBLIC_ORIGIN: "" })).not.toHaveProperty("publicOrigin");
+  });
+
   it("accepts PORT 0, which lets the system pick a free port", () => {
     expect(loadConfig({ SELLER_ADDRESS, PORT: "0" }).port).toBe(0);
   });
@@ -38,6 +49,16 @@ describe("loadConfig", () => {
     [{ SELLER_ADDRESS, FACILITATOR_URL: "x402.org" }, "FACILITATOR_URL must be a URL"],
     [{ SELLER_ADDRESS, PORT: "abc" }, "PORT must be a port number"],
     [{ SELLER_ADDRESS, PORT: "70000" }, "PORT must be between 0 and 65535"],
+    [{ SELLER_ADDRESS, PUBLIC_ORIGIN: "seller.example.com" }, "PUBLIC_ORIGIN must be a URL"],
+    [{ SELLER_ADDRESS, PUBLIC_ORIGIN: "http://seller.example.com" }, "PUBLIC_ORIGIN must be https"],
+    [
+      { SELLER_ADDRESS, PUBLIC_ORIGIN: "https://seller.example.com/weather" },
+      "PUBLIC_ORIGIN must be an origin only",
+    ],
+    [
+      { SELLER_ADDRESS, PUBLIC_ORIGIN: "https://seller.example.com?a=1" },
+      "PUBLIC_ORIGIN must be an origin only",
+    ],
   ])("refuses %j", (env, message) => {
     expect(() => loadConfig(env)).toThrow(message);
   });

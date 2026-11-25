@@ -17,6 +17,7 @@ const TRANSACTION = "a".repeat(64);
 let facilitator: Server;
 let seller: Server;
 let sellerUrl: string;
+let facilitatorUrl: string;
 /** The paths the seller called on the facilitator, reset before each test. */
 let facilitatorCalls: string[] = [];
 
@@ -71,7 +72,7 @@ beforeAll(async () => {
     }
     res.writeHead(404).end();
   });
-  const facilitatorUrl = await listen(facilitator);
+  facilitatorUrl = await listen(facilitator);
   seller = createServer(createApp({ payTo: PAY_TO, facilitatorUrl }));
   sellerUrl = await listen(seller);
 });
@@ -135,5 +136,55 @@ describe("GET /weather", () => {
 
   it("serves nothing else", async () => {
     expect((await fetch(`${sellerUrl}/other`)).status).toBe(404);
+  });
+
+  it("names the URL the request came in on as the resource when no public origin is set", async () => {
+    const response = await fetch(`${sellerUrl}/weather?city=Warsaw`);
+    const required = decodePaymentRequiredHeader(response.headers.get("payment-required")!);
+    expect(required.resource.url).toBe(`${sellerUrl}/weather?city=Warsaw`);
+  });
+});
+
+describe("GET /weather behind a proxy, with a public origin", () => {
+  const PUBLIC_ORIGIN = "https://seller.example.com";
+  let proxied: Server;
+  let proxiedUrl: string;
+
+  beforeAll(async () => {
+    proxied = createServer(
+      createApp({ payTo: PAY_TO, facilitatorUrl, publicOrigin: PUBLIC_ORIGIN }),
+    );
+    proxiedUrl = await listen(proxied);
+  });
+
+  afterAll(() => {
+    proxied.close();
+  });
+
+  it("names the public https resource, not the http one the request came in on", async () => {
+    // As the tunnel delivers it: plain http, the public host in Host.
+    const response = await fetch(`${proxiedUrl}/weather?city=Warsaw`, {
+      headers: { "x-forwarded-proto": "https" },
+    });
+    expect(response.status).toBe(402);
+    const required = decodePaymentRequiredHeader(response.headers.get("payment-required")!);
+    expect(required.resource.url).toBe(`${PUBLIC_ORIGIN}/weather`);
+  });
+
+  it("still answers a paid request and settles it", async () => {
+    const terms = await fetch(`${proxiedUrl}/weather?city=Warsaw`);
+    const required = decodePaymentRequiredHeader(terms.headers.get("payment-required")!);
+    const payment = encodePaymentSignatureHeader({
+      x402Version: 2,
+      resource: required.resource,
+      accepted: required.accepts[0]!,
+      payload: { transaction: "signed-by-the-buyer" },
+    });
+    const response = await fetch(`${proxiedUrl}/weather?city=Warsaw`, {
+      headers: { "payment-signature": payment },
+    });
+
+    expect(response.status).toBe(200);
+    expect(facilitatorCalls).toContain("/settle");
   });
 });
