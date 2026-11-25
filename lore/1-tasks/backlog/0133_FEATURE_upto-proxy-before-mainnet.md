@@ -59,3 +59,6 @@ the contract we will deploy.
       instance, then its measured fee is under the `upto` fee ceiling, and the numbers are recorded
 - [ ] The protocol version the contract needs is checked against mainnet's and recorded
 - [ ] The audit scope for `UptoProxy` is written and handed to 0121
+- [ ] ADR 0015's `upto` trigger is answered before mainnet: how a stolen facilitator key's power
+      over open facilitator-delegated authorizations is limited (for example a separate receiver
+      authorizer key, or short windows), recorded in ADR 0015 or a new ADR

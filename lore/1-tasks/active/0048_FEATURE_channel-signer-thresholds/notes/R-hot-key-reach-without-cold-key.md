@@ -248,7 +248,7 @@ The case where nothing changes: thresholds stay 0, no second key, and the hot ke
 6. New `FACILITATOR_ADDRESS` and `CHANNELS`, then restart.
 7. The balance and theft alarms on the new addresses.
 
-Steps 3–7 take a few hours with tools we already have.
+Steps 3–7 take about an hour with tools we already have, to be confirmed by the timed drill.
 
 **What A and B0 change:** under A the thief can't Payment the float or take the channels, only burn the float on fees; the rebuild is the same, with less lost. Under B0, K1 and K2 swap the key on every account in one transaction: no new accounts and no loss. Step 2 stays in every option.
 
