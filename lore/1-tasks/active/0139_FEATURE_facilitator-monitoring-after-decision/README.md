@@ -102,7 +102,8 @@ losing an alarm that protects money or a payment.
       13:45 UTC, drill 14:00 to 15:24)
 - [x] Given the monitoring VM or its Alertmanager stops, then a CloudWatch alarm fires from
       outside it, shown once (2026-11-25; on 2026-11-24 it fired but never reached Slack)
-- [ ] `docs/monitoring.md` and the runbook describe the new setup, and ADR 0011 matches it
+- [x] `docs/monitoring.md` and the runbook describe the new setup, and ADR 0011 matches it
+      (2026-11-25, amended for the three deploys and Grafana over SSH)
 
 ## Design Decisions
 

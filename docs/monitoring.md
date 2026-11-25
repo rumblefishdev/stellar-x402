@@ -559,8 +559,8 @@ channels.
 1. The pool takes a channel out only when the RPC still answers, at the end of the read's
    timeout, that the channel's account doesn't exist; a read that fails or times out keeps the
    channel. So the usual cause is a channel account that is gone, such as after a testnet reset,
-   or an RPC behind on a new account. `pool_quarantined` in `x402-facilitator` says how many are
-   out.
+   or an RPC behind on a new account. `pool_quarantined` in Prometheus on the VM says how many
+   are out.
 2. The `settlement_submit_failed` event names the channel: its error reads
    `Account not found: <channel>`, and [submit-failed](#submit-failed) fires beside this alarm.
    In Logs Insights on `/x402/production/app`:
@@ -900,10 +900,11 @@ The metrics agent's client certificate has under 30 days left. Renew it as the
 Every metric in [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts), then
 the AWS metrics the alarms read. What each one measures and where it comes from is in
 [G-metrics](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
-set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Logs Insights or in
-the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
-lacks. The Dimensions column is CloudWatch's. In Prometheus (0139) a series also carries each field
-the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_total`'s `replay`.
+set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Prometheus on the VM or in the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
+lacks. Since 0139's switch the `x402-facilitator` metrics are Prometheus series on the VM, where the
+Dimensions column's names are labels, and each field the catalog closes in `fieldValues` is one
+too, such as `settlement_outcomes_total`'s `replay`; the `x402-host` ones also still reach
+CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are CloudWatch's alone.
 
 | Metric                                      | Namespace          | Kind, unit     | Dimensions                                               | Alarms                                                                                                        |
 | ------------------------------------------- | ------------------ | -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |

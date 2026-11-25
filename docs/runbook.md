@@ -1053,18 +1053,18 @@ outlives the server (0027 decision 1); `journalctl -u` keeps only a unit's own s
 lines. The watchdog, the host probe, the helper and the agent itself stay in the journal (the
 agent's own log is `/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log`).
 
-| `/var/log/x402/`                  | Written by                                    | Stream, group                                      |
-| --------------------------------- | --------------------------------------------- | -------------------------------------------------- |
-| `production/facilitator.log`      | `x402@production`, stdout                     | `facilitator` in `app`; its EMF lines in `metrics` |
-| `production/facilitator.err.log`  | `x402@production`, stderr                     | `facilitator-stderr` in `app`                      |
-| `production/postgres-testnet.log` | `x402-db-testnet@production`                  | `postgres-testnet` in `app`                        |
-| `production/cloudflared.log`      | `x402-tunnel@production`                      | `cloudflared` in `app`                             |
-| `production/deploy.log`           | the deploys, their migrations, `x402-migrate` | `deploy` in `app`                                  |
-| `production/portal.log`           | `x402-portal@production`                      | `portal` in `app`                                  |
-| `production/portal-deploy.log`    | the portal's deploys                          | `portal-deploy` in `app`                           |
-| `openbao/openbao.log`             | `x402-openbao`                                | `openbao` in `app`                                 |
-| `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`                                |
-| `metrics/agent.log`               | `x402-metrics`                                | `metrics-agent` in `app`                           |
+| `/var/log/x402/`                  | Written by                                    | Stream, group                 |
+| --------------------------------- | --------------------------------------------- | ----------------------------- |
+| `production/facilitator.log`      | `x402@production`, stdout                     | `facilitator` in `app`        |
+| `production/facilitator.err.log`  | `x402@production`, stderr                     | `facilitator-stderr` in `app` |
+| `production/postgres-testnet.log` | `x402-db-testnet@production`                  | `postgres-testnet` in `app`   |
+| `production/cloudflared.log`      | `x402-tunnel@production`                      | `cloudflared` in `app`        |
+| `production/deploy.log`           | the deploys, their migrations, `x402-migrate` | `deploy` in `app`             |
+| `production/portal.log`           | `x402-portal@production`                      | `portal` in `app`             |
+| `production/portal-deploy.log`    | the portal's deploys                          | `portal-deploy` in `app`      |
+| `openbao/openbao.log`             | `x402-openbao`                                | `openbao` in `app`            |
+| `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`           |
+| `metrics/agent.log`               | `x402-metrics`                                | `metrics-agent` in `app`      |
 
 `x402-logrotate.timer` runs every 10 minutes and rotates each file once a day, empty or not, or
 sooner once past 100 MB; it keeps 10, `*.log.1` as it was and the older ones compressed, and
