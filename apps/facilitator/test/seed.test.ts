@@ -218,6 +218,19 @@ describe("seedHosts (0155)", () => {
     const { cataloger, wait } = setup();
     const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
     expect(report).toMatchObject({ file: "disallowed by robots.txt", results: [] });
+    expect(report!.skipped).toEqual([
+      { entry: `${seller.url}/.well-known/x402`, method: "GET", reason: "robots" },
+    ]);
+    expect(reportLines([report!]).join("\n")).toContain("1 refused by robots.txt");
+    expect(seller.requests.map((request) => request.url)).toEqual(["/robots.txt"]);
+  });
+
+  it("names robots.txt as the cause when robots.txt can't be read (W233)", async () => {
+    seller.reply = async (request) => ({ status: request.url === "/robots.txt" ? 301 : 402 });
+    seller.files["/.well-known/x402"] = JSON.stringify({ resources: [`${seller.url}/a`] });
+    const { cataloger, wait } = setup();
+    const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
+    expect(report!.file).toMatch(/^robots\.txt: redirect/);
     expect(seller.requests.map((request) => request.url)).toEqual(["/robots.txt"]);
   });
 
@@ -264,7 +277,7 @@ describe("seedHosts (0155)", () => {
     seller.files["/.well-known/x402"] = JSON.stringify({ resources: [`${seller.url}/a`] });
     const { cataloger, wait } = setup();
     const [report] = await seedHosts([seller.url], cataloger, { listLocal: true, wait });
-    expect(report).toMatchObject({ file: "robots.txt status 503", results: [] });
+    expect(report).toMatchObject({ file: "robots.txt: status 503", results: [] });
   });
 
   it("reports a host whose file can't be read, and seeds the other hosts", async () => {
