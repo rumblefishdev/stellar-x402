@@ -108,6 +108,14 @@ losing an alarm that protects money or a payment.
    standing alert still comes back once a day. An Event alert resolves after its 15-minute window
    with no resolved message, so it never repeats. All routes: `group_wait` 30 s,
    `group_interval` 5 min, `group_by` `[alertname, check, network, project]`.
+4. **The switch leaves a window ADR 0011 rules out (2026-11-24).** ADR 0011 has the EMF adapter
+   and the `x402-facilitator` alarms go in the same change that turns the rules on. On the day
+   they are three deploys (G-switch-plan): the facilitator stops writing EMF at step 1, and the
+   rules go on at step 3, so between them nothing watches its metrics. Accepted with only testnet
+   in production (Adam's and Oskar's reviews of #240), and kept to one playbook run by having
+   soroban-infrastructure#20 merged before the day. CloudWatch's `facilitator-silent` posts to
+   Slack after 15 minutes of it: expected, not an outage. The other half of the ADR holds: no
+   period runs both the old alarms and the rules.
 
 ## For the switch
 
