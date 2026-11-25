@@ -1,4 +1,7 @@
+import { once } from "node:events";
 import { readFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
 import {
   PostgresAccountPlanStore,
@@ -17,8 +20,8 @@ import {
 import { getNetworkPassphrase, getUsdcAddress, type FacilitatorStellarSigner } from "@x402/stellar";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
-import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
+import { metricsListener, prometheusMetrics } from "./adapters/prometheus-metrics.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
@@ -319,7 +322,7 @@ export function buildSettlement(
 /**
  * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
  * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
- * PostgreSQL stores and the EMF writer; tests pass their own `rpc`, `makeScheme`, pool `sleep`
+ * PostgreSQL stores and the Prometheus writer; tests pass their own `rpc`, `makeScheme`, pool `sleep`
  * and `metrics` (in memory by default).
  *
  * Metrics follow each one's catalog `scope` (0027 AD-3): every part of this network (settlement,
@@ -492,10 +495,7 @@ export function compose(
 }
 
 export interface MainOptions {
-  /**
-   * Where the log lines and the EMF metric lines go, each ending in a newline; stdout by default.
-   * The smoke scripts read them here.
-   */
+  /** Where the log lines go, each ending in a newline; stdout by default. The smoke scripts read them here. */
   write?: (line: string) => void;
 }
 
@@ -514,8 +514,8 @@ export async function main(
     | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   let rpcStall: RpcStallTracker | undefined;
-  /** The EMF writer, for the catch: a start that failed stops it. */
-  let emf: ReturnType<typeof emfMetrics> | undefined;
+  /** `/metrics`'s listener, for the catch: a start that failed closes it. */
+  let metricsServer: Server | undefined;
   try {
     // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
     // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
@@ -546,14 +546,17 @@ export async function main(
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
     const stores = postgresStores(pools.main, pools);
-    // The EMF writer (0027 AD-4) on its own sink, never through the logger. Its timers start
-    // with the graph's gauges, so a startup that hangs still writes them; its liveness seed waits
-    // for `start()` below. On stdout by default, where each write is awaited by the final flush.
-    const { write } = opts;
-    const metrics = (emf = emfMetrics({
-      ...(write && { write: (line: string) => write(`${line}\n`) }),
+    // The metrics as Prometheus text (ADR 0011, "Metrics"; 0139), read by the agent on the server.
+    // `/metrics` listens before the graph is built, so a startup that hangs still shows its
+    // gauges; the liveness series waits for `start()` below.
+    const metrics = prometheusMetrics({
+      networks: [config.network],
       onIssue: (issue) => logger.warn("metric_issue", { ...issue }),
-    }));
+    });
+    if (config.metricsPort !== undefined) {
+      metricsServer = createServer(metricsListener(metrics.render)).listen(config.metricsPort);
+      await once(metricsServer, "listening");
+    }
     const composed = compose(config, { logger, stores, metrics });
     const { deps, cataloger, rpc, signer } = composed;
     // With the graph, like the writer's timers: an RPC that hangs the startup checks shows as a
@@ -571,11 +574,9 @@ export async function main(
       restoreConsole();
       throw error;
     });
-    // The liveness point `facilitator-silent` reads, from the service's start on (AD-4): a start
-    // that hangs or fails, a crash loop of them included, writes none and shows as missing data.
-    metrics.seedZero([
-      { name: "settlement_sweeps_total", labels: { network: config.network, outcome: "listed" } },
-    ]);
+    // The liveness series `facilitator-silent` reads, from the service's start on: a start that
+    // hangs or fails, a crash loop of them included, writes none.
+    metrics.markStarted();
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
     // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
@@ -600,9 +601,8 @@ export async function main(
     const searchCardsRewritten = searchCards.start();
     // Catalog writes, a prune and the search card rewrite already under way finish before the process
     // exits, and before the pools end, even if closing the server fails; the pools end even if
-    // draining fails.
-    // The metrics' final flush comes last, after every part that counts, and is awaited:
-    // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
+    // draining fails. `/metrics` closes last, after every part that counts, so a scrape meanwhile
+    // still reads them.
     const closeOnce = async () => {
       signer.close();
       // The search card rewrite stops at once, so it holds no connection through the drain.
@@ -618,14 +618,15 @@ export async function main(
           }
         }
       } finally {
-        // Its last reading goes out with the final flush; no read starts after it.
         rpcStall?.stop();
-        await metrics.close();
+        await closeMetrics(metricsServer);
       }
     };
     let closing: Promise<void> | undefined;
     return {
       ...started,
+      /** `/metrics`'s port when `METRICS_PORT` is set: for tests, which pass 0. */
+      ...(metricsServer && { metricsPort: (metricsServer.address() as AddressInfo).port }),
       /** The graph's stores and their pools: for tests. */
       stores,
       pools,
@@ -645,14 +646,20 @@ export async function main(
     // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
     // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
     logger.error("startup_failed", { error });
-    // No final metrics flush: the writer stops with its open window unwritten, so a start that
-    // failed adds no point after the error. It wrote no seed either (above), so a crash loop
-    // shows as missing data. Eager-first lines are out already.
-    emf?.stop();
+    // It wrote no liveness series (above), so a crash loop shows as missing data.
+    await closeMetrics(metricsServer);
     rpcStall?.stop();
     await endPools();
     throw error;
   }
+}
+
+/** Closes `/metrics`, the scraper's kept-alive connection included, which would hold `close()`. */
+async function closeMetrics(server: Server | undefined): Promise<void> {
+  if (!server?.listening) return;
+  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+  server.closeAllConnections();
+  await closed;
 }
 
 /** Logs an idle connection's error with its message only; the URL never reaches the log. */

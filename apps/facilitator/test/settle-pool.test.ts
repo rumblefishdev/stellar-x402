@@ -8,8 +8,7 @@ import { openBaoSigner } from "../src/adapters/openbao-signer.js";
 import { parseConfig, type Config, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { buildChecks, buildRpc, buildSettlement, compose } from "../src/main.js";
-import type { BuildIssue } from "../src/adapters/emf.js";
-import { emfMetrics } from "../src/adapters/emf-metrics.js";
+import { prometheusMetrics, type MetricIssue } from "../src/adapters/prometheus-metrics.js";
 import { memoryMetrics, type ProcessMetrics } from "../src/metrics.js";
 import type { LeaseFence, SettlementStore, SpendScope } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
@@ -559,22 +558,27 @@ describe("main()'s composition (compose)", () => {
     return { deps, cataloger, metrics: metrics as MemoryMetrics, fake };
   }
 
-  /** An EMF writer on a captured sink and a scheduler that never fires: only `flush()` writes. */
-  function capturedEmf() {
-    const lines: string[] = [];
-    const issues: BuildIssue[] = [];
-    const metrics = emfMetrics({
-      write: (line) => void lines.push(line),
+  /** The Prometheus writer `main()` builds, its issues captured, and its samples parsed. */
+  function capturedPrometheus() {
+    const issues: MetricIssue[] = [];
+    const metrics = prometheusMetrics({
+      networks: ["stellar:testnet"],
       onIssue: (issue) => void issues.push(issue),
-      schedule: { setTimeout: () => undefined, clearTimeout: () => {} },
     });
-    type Line = { _aws: { CloudWatchMetrics: { Dimensions: string[][] }[] } } & Record<
-      string,
-      unknown
-    >;
-    const linesFor = (name: string) =>
-      lines.map((line) => JSON.parse(line) as Line).filter((line) => name in line);
-    return { metrics, lines, issues, linesFor };
+    /** A metric's samples above 0: each one's labels and value. */
+    const samplesOf = (name: string) =>
+      metrics
+        .render()
+        .split("\n")
+        .flatMap((line) => {
+          const m = /^(\w+)(?:\{(.*)\})? (\S+)$/.exec(line);
+          if (!m || m[1] !== name || Number(m[3]) === 0) return [];
+          const labels = Object.fromEntries(
+            [...(m[2] ?? "").matchAll(/(\w+)="([^"]*)"/g)].map(([, k, v]) => [k, v]),
+          );
+          return [{ labels, value: Number(m[3]) }];
+        });
+    return { metrics, issues, samplesOf };
   }
 
   it("writes a settle's settlement_outcomes_total with network and result, and no issue (0027)", async () => {
@@ -585,10 +589,10 @@ describe("main()'s composition (compose)", () => {
       extensions: { bazaar },
     }));
     onTestFinished(() => void seller.server.close());
-    const emf = capturedEmf();
+    const prom = capturedPrometheus();
     const { deps, cataloger, fake } = await composed(
       { CATALOG_LIST_LOCAL: "true" },
-      { metrics: emf.metrics },
+      { metrics: prom.metrics },
     );
     const local = {
       ...payload(fake.ledger + 30, { bazaar }),
@@ -598,27 +602,22 @@ describe("main()'s composition (compose)", () => {
     expect(settled.response).toMatchObject({ success: true });
     settled.afterResponse!();
     await cataloger.drain();
-    await emf.metrics.close();
-    const [outcome, ...rest] = emf.linesFor("settlement_outcomes_total");
-    expect(rest).toEqual([]);
-    expect(outcome).toMatchObject({
+    expect(prom.samplesOf("settlement_outcomes_total")).toEqual([
+      {
+        labels: expect.objectContaining({ network: "stellar:testnet", result: "success" }),
+        value: 1,
+      },
+    ]);
+    // A network-scoped metric written through the root would carry `network="other"` and report
+    // `missing-label`; the catalog's series, process-scoped, carries no `network`.
+    expect(prom.issues).toEqual([]);
+    const [attempt] = prom.samplesOf("catalog_attempts_total");
+    // `reason` has open values, so it stays in the app line, not a label (0139 step 4).
+    expect(attempt?.labels).toEqual({ origin: "settle", stage: "seller", outcome: "refreshed" });
+    expect(attempt?.labels).not.toHaveProperty("network");
+    expect(prom.samplesOf("lease_changes_total")[0]?.labels).toMatchObject({
       network: "stellar:testnet",
-      result: "success",
-      settlement_outcomes_total: 1,
     });
-    expect(outcome!._aws.CloudWatchMetrics[0]!.Dimensions).toEqual([["network", "result"]]);
-    // A network-scoped metric written through the root would write no line and report
-    // `no-valid-set`; the catalog's line, process-scoped, carries no `network`.
-    expect(emf.issues).toEqual([]);
-    const [attempt] = emf.linesFor("catalog_attempts_total");
-    expect(attempt).toMatchObject({
-      origin: "settle",
-      stage: "seller",
-      outcome: "refreshed",
-      reason: "inserted",
-    });
-    expect(attempt).not.toHaveProperty("network");
-    expect(emf.linesFor("lease_changes_total")[0]).toMatchObject({ network: "stellar:testnet" });
   });
 
   it("gives the network-scoped parts one network child and discovery and HTTP the root (0027)", async () => {
