@@ -75,18 +75,18 @@ asset, and name why they refused.
 A payment that is refused or fails is a `PaymentError`. Branch on `code`; `message` is this
 library's own text, and what a seller or another library wrote is in `cause` only.
 
-| `code`                    | When                                                                                          | `paid`        |
-| ------------------------- | --------------------------------------------------------------------------------------------- | ------------- |
-| `asset_not_allowed`       | no offer is in one of `assets`                                                                | `none`        |
-| `unsupported_payment`     | no offer with a price above zero and valid for at most 300 s, or none the schemes can pay     | `none`        |
-| `over_price_limit`        | every offer left costs more than `maxPerCall`                                                 | `none`        |
-| `over_budget`             | the offer would pass what is left of the day                                                  | `none`        |
-| `insufficient_funds`      | signing fails: the payer holds the trustline and too little of the asset                      | `none`        |
-| `payer_trustline_missing` | signing fails: the payer has no trustline to the asset; the seller's account was not checked  | `none`        |
-| `payto_trustline_missing` | signing fails: the seller's `payTo` has no trustline to the asset; only the seller can add it | `none`        |
-| `payment_failed`          | signing fails for another reason, or the budget store cannot be read or written               | `none`        |
-| `payment_rejected`        | after the payment was sent: the seller or its facilitator says it did not settle              | `not_settled` |
-| `payment_unknown`         | after the payment was sent, anything else goes wrong                                          | `unknown`     |
+| `code`                    | When                                                                                                             | `paid`        |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------- |
+| `asset_not_allowed`       | no offer is in one of `assets`                                                                                   | `none`        |
+| `unsupported_payment`     | no offer with a price above zero and valid for at most 300 s, or none the schemes can pay                        | `none`        |
+| `over_price_limit`        | every offer left costs more than `maxPerCall`                                                                    | `none`        |
+| `over_budget`             | the offer would pass what is left of the day                                                                     | `none`        |
+| `insufficient_funds`      | signing fails: the payer holds the trustline and too little of the asset                                         | `none`        |
+| `payer_trustline_missing` | signing fails: the payer has no trustline to the asset; the seller's account was not checked                     | `none`        |
+| `payto_trustline_missing` | signing fails: the seller's `payTo` has no trustline to the asset, or does not exist; only the seller can add it | `none`        |
+| `payment_failed`          | signing fails for another reason, or the budget store cannot be read or written                                  | `none`        |
+| `payment_rejected`        | after the payment was sent: the seller or its facilitator says it did not settle                                 | `not_settled` |
+| `payment_unknown`         | after the payment was sent, anything else goes wrong                                                             | `unknown`     |
 
 `paid` says whether money may have moved. `none`: nothing was signed or sent, and an amount
 already counted went back to the budget (the four refusals up to `over_budget` counted nothing).
@@ -96,7 +96,10 @@ two trustline codes also carry the `account` without the trustline and the `asse
 
 A missing trustline is found before anything is signed: `@x402/stellar` simulates the payment
 first. The SDK reports it and does not add the trustline: that takes XLM for the reserve and the
-fee, and a seller's only the seller can add.
+fee, and a seller's only the seller can add. The message names USDC as `CODE:ISSUER` too, as
+`changeTrust` takes it; other assets by their contract. A muxed `payTo` (`M…`) is
+`payment_failed`: the asset contract names the underlying `G…` account, which `@x402/stellar`
+doesn't match to it.
 
 A failure of the underlying `fetch` before any payment was sent is thrown as it is, not as a
 `PaymentError`.
