@@ -85,6 +85,7 @@ const list = (host: string, fields: Partial<DiscoveryResource>, checkedAt = 1) =
 function vectors(embedder: Embedder, lines: string[] = [], metrics = memoryMetrics()) {
   return createSearchVectors({
     store: db.stores().searchCards,
+    model: MODEL,
     embedder,
     logger: jsonLogger("debug", (line) => lines.push(line)),
     metrics,
@@ -99,6 +100,20 @@ const current = (card: Awaited<ReturnType<typeof readCards>>[number]) =>
 
 describe("the vector pass at start (0120 F)", () => {
   beforeEach(() => db.empty());
+
+  it("embeds again a card whose vector is of another model, as after a change of model (F)", async () => {
+    await list("one", { description: "Weather one" });
+    await setVector(db.pool, key("one"), "old-model", unitVector(0.9));
+    const { embedder, state } = fakeEmbedder();
+    await vectors(embedder).start();
+    const [one] = await readCards(db.pool);
+    expect(state.calls).toEqual([meaningText(one!)]);
+    expect(current(one!)).toBe(true);
+    // The catalog's write too: a card of another model gets the current one's vector.
+    await setVector(db.pool, key("one"), "old-model", unitVector(0.9));
+    await vectors(embedder).listed(key("one"));
+    expect(current((await readCards(db.pool))[0]!)).toBe(true);
+  });
 
   it("embeds every card without a vector, and no card that has one (F)", async () => {
     await list("one", { description: "Weather one" });

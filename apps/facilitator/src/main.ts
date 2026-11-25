@@ -11,6 +11,7 @@ import {
   type AccountPlan,
   type AccountPlanRecord,
 } from "@stellar-x402/api-keys";
+import { SEARCH_MODEL_ID } from "@stellar-x402/config";
 import {
   FallbackRpc,
   SettlementSubmitter,
@@ -370,6 +371,7 @@ export function compose(
   const embedder = createSearchModelClient(config.searchModel);
   const vectors = createSearchVectors({
     store: stores.searchCards,
+    model: SEARCH_MODEL_ID,
     embedder,
     logger,
     metrics: root,
@@ -890,6 +892,7 @@ export async function seedMain(
       rateLimits: stores.rateLimits,
       vectors: createSearchVectors({
         store: stores.searchCards,
+        model: SEARCH_MODEL_ID,
         embedder: createSearchModelClient(searchModel),
         logger,
         metrics,

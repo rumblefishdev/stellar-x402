@@ -35,8 +35,11 @@ export interface SearchCardStore {
    * already holds this text. True when written.
    */
   write(listing: CardListing): Promise<boolean>;
-  /** Up to `limit` cards without a vector after `after` (a `seq`; `"0"` from the start), in order. */
-  cards(after: string, limit: number): Promise<SearchCard[]>;
+  /**
+   * Up to `limit` cards without a vector of `model` after `after` (a `seq`; `"0"` from the start),
+   * in catalog order.
+   */
+  cards(after: string, limit: number, model: string): Promise<SearchCard[]>;
   /** The card of the listing at `key`; undefined when the catalog holds no such listing. */
   card(key: CatalogKey): Promise<SearchCard | undefined>;
   /**

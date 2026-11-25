@@ -17,6 +17,8 @@ export function meaningText(card: SearchCard): string {
 
 export interface SearchVectorsDeps {
   store: SearchCardStore;
+  /** The model the search model container runs (`SEARCH_MODEL_ID`): a vector of another is redone. */
+  model: string;
   embedder: Embedder;
   logger: Logger;
   metrics: ProcessMetrics;
@@ -37,12 +39,13 @@ export interface SearchVectors {
 /**
  * Each search card's vector (ADR 0014), asked of the search model one listing at a time, so a
  * backlog never takes the CPU queries need. The catalog's write asks for the vector of the listing
- * it wrote; once per start, after the card rewrite, a pass embeds every card without a vector. A
- * card holds a vector only of its current text: the write that changes its text clears it. A
+ * it wrote; once per start, after the card rewrite, a pass embeds every card without a vector of
+ * `model`. A card holds a vector only of its current text: the write that changes its text clears
+ * it. A
  * listing the model fails on is logged and counted, and waits for the next start.
  */
 export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
-  const { store, embedder, logger, metrics } = deps;
+  const { store, model, embedder, logger, metrics } = deps;
   let closed = false;
   let running: Promise<void> | undefined;
   // The model's queue: the pass and every catalog write wait their turn, so the model embeds one
@@ -61,7 +64,7 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
     while (!closed) {
       let page;
       try {
-        page = await store.cards(after, PAGE);
+        page = await store.cards(after, PAGE, model);
       } catch (error) {
         // Nothing tries again before the next start, so the cards past this page wait for it.
         logger.error("search_vectors_read_failed", { written, error });
@@ -100,7 +103,7 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
         if (card === undefined)
           throw new Error("the catalog holds no card for the listing written");
         // A write that left the card's text as it was kept its vector.
-        if (card.model !== null) return;
+        if (card.model === model) return;
         await store.writeVector(card, await embed(meaningText(card)));
       } catch (error) {
         logger.warn("search_vector_failed", { resourceUrl: key.resourceUrl, error });

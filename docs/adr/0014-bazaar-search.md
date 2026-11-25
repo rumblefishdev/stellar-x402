@@ -134,8 +134,10 @@ The measurements are in
   until a measurement on the server sets it. Every listing is then scored one way, so the answer
   includes listings with no current vector. Each fallback is logged with its cause and counted in
   a metric that monitoring can alert on.
-- **When the model changes.** No words-only window: the procedure is decided when a change comes,
-  and until then search reads only the current model's vectors.
+- **When the model changes.** The model is named once, in the shared config (`SEARCH_MODEL_ID`),
+  which the model's image and the facilitator both read. The start's pass embeds every card whose
+  vector is of another model, and meanwhile search reads only the current model's vectors and
+  answers partial. No words-only window: anything more is decided when a change comes.
 - **Quality score.** A listing's score is its fused score times a quality factor q (task 0154), in
   the fused ranking and in words alone:
   - q = (1 + 0.2 × p / (p + 2)) × 0.9 on a tunnel host × 0.9 with an empty description, where p is

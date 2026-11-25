@@ -49,11 +49,11 @@ export class PostgresSearchCardStore implements SearchCardStore {
     return rowCount === 1;
   }
 
-  async cards(after: string, limit: number): Promise<SearchCard[]> {
+  async cards(after: string, limit: number, model: string): Promise<SearchCard[]> {
     const { rows } = await this.pool.query<SearchCard>(
       `SELECT seq, name, tags, description, parameters, model
-         FROM catalog_search WHERE seq > $1 AND embedding IS NULL ORDER BY seq LIMIT $2`,
-      [after, limit],
+         FROM catalog_search WHERE seq > $1 AND model IS DISTINCT FROM $3 ORDER BY seq LIMIT $2`,
+      [after, limit, model],
     );
     return rows;
   }
