@@ -24,5 +24,8 @@
     "@x402/core": "~2.31.0",
     "@x402/fetch": "~2.31.0",
     "@x402/stellar": "~2.31.0"
+  },
+  "devDependencies": {
+    "@stellar/stellar-sdk": "^16.4.1"
   }
 }

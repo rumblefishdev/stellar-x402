@@ -1,3 +1,4 @@
+import { Asset, Networks } from "@stellar/stellar-sdk";
 import { encodePaymentRequiredHeader, encodePaymentResponseHeader } from "@x402/core/http";
 import type { PaymentRequired, SchemeNetworkClient } from "@x402/core/types";
 import { InsufficientBalanceError, TrustlineMissingError } from "@x402/stellar";
@@ -8,6 +9,7 @@ import {
   PaymentError,
   type PayingFetchConfig,
 } from "../src/buyer/index.js";
+import { CLASSIC_ASSETS } from "../src/buyer/call.js";
 
 // MCP's `pay.test.ts` and `daily.test.ts` run this code against a seller over HTTP, with every
 // refusal and failure. These tests hold what only the SDK's own surface shows.
@@ -257,5 +259,15 @@ describe("createPayingFetch", () => {
     expect(
       (await createPayingFetch(config(shop, { assets, budget }))(PAID_URL)).payment,
     ).toBeDefined();
+  });
+});
+
+describe("the classic assets a trustline message names", () => {
+  it.each(Object.entries(CLASSIC_ASSETS))("%s is the contract of %s", (contract, classic) => {
+    const [code, issuer] = classic.split(":");
+    const ids = [Networks.TESTNET, Networks.PUBLIC].map((network) =>
+      new Asset(code!, issuer!).contractId(network),
+    );
+    expect(ids).toContain(contract);
   });
 });

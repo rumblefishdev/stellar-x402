@@ -1,13 +1,12 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { Asset, Networks } from "@stellar/stellar-sdk";
 import type { SchemeNetworkClient } from "@x402/core/types";
 import { SimulationFailedError } from "@x402/stellar";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLASSIC_ASSETS, type PaymentConfig } from "../src/pay.js";
+import type { PaymentConfig } from "../src/pay.js";
 import { createServer } from "../src/server.js";
 import {
   BUYER,
@@ -475,16 +474,6 @@ describe("call_paid_http", () => {
     expect((await pay("/free")).error.code).toBe("response_too_large");
     expect((await pay()).error.code).toBe("payment_unknown");
     expect(logs.join()).toContain("response_too_large");
-  });
-});
-
-describe("the classic assets a trustline message names", () => {
-  it.each(Object.entries(CLASSIC_ASSETS))("%s is the contract of %s", (contract, classic) => {
-    const [code, issuer] = classic.split(":");
-    const ids = [Networks.TESTNET, Networks.PUBLIC].map((network) =>
-      new Asset(code!, issuer!).contractId(network),
-    );
-    expect(ids).toContain(contract);
   });
 });
 
