@@ -1,18 +1,10 @@
 import { LIMITS } from "@stellar-x402/bazaar";
+import { createPayingFetch, PaymentError, type BudgetStore } from "@stellar-x402/sdk/buyer";
 import { x402Client, x402HTTPClient, type SchemeRegistration } from "@x402/core/client";
-import { wrapFetchWithPayment } from "@x402/fetch";
-import {
-  InsufficientBalanceError,
-  STELLAR_ASSET_ADDRESS_REGEX,
-  STELLAR_DESTINATION_ADDRESS_REGEX,
-  TrustlineMissingError,
-  USDC_PUBNET_ADDRESS,
-  USDC_TESTNET_ADDRESS,
-} from "@x402/stellar";
 import { z } from "zod";
 import { checkUrl, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { asToolError, ToolError } from "./results.js";
-import { countDaily, refundDaily, utcDay, type DailyEntry } from "./daily.js";
+import { countDaily, refundDaily } from "./daily.js";
 
 /** The call_paid_http tool's input and output, as server.ts registers it. */
 export const CALL_PAID_HTTP_INPUT = z
@@ -69,11 +61,8 @@ export interface PaidResponse {
   payment?: { transaction: string | null; network: string; asset: string; amount: string };
 }
 
-/**
- * The longest a seller may keep our signed payment valid: 300 s is the `@x402/express` default (seen in
- * the 402 of examples/http-api). A longer one could be settled long after the agent got its answer.
- */
-const MAX_AUTHORIZATION_SECONDS = 300;
+/** The daily database failed under the SDK's budget: told from a signing failure by this class. */
+class DailyDatabaseError extends Error {}
 
 /** The daily database could not be read or written, so how much is left today is unknown: pay nothing. */
 function dailyDatabaseFailed(error: unknown): ToolError {
@@ -85,64 +74,58 @@ function dailyDatabaseFailed(error: unknown): ToolError {
 }
 
 /**
- * The classic assets behind upstream's default asset contracts, as `changeTrust` takes them: a
- * contract's id is a hash, so it can't be read back from the id. `pay.test.ts` checks each against
- * its id.
+ * The SDK's budget store over the daily database (`daily.ts`), which every server process of the
+ * buyer shares. The day's spending is read and the amount recorded in one transaction, so processes
+ * paying at the same moment never pass the day together.
  */
-export const CLASSIC_ASSETS: Readonly<Record<string, string>> = {
-  [USDC_TESTNET_ADDRESS]: "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
-  [USDC_PUBNET_ADDRESS]: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
-};
-
-/** An asset contract as a message names it: the classic asset too, when it is a known one. */
-function assetName(asset: string): string {
-  const classic = CLASSIC_ASSETS[asset];
-  return classic ? `${classic} (the asset contract ${asset})` : `the asset contract ${asset}`;
+function dailyBudget(dir: string, log: (message: string) => void): BudgetStore {
+  return {
+    count(entry, amount, daily) {
+      try {
+        return countDaily(dir, entry, amount, daily);
+      } catch (error) {
+        throw new DailyDatabaseError(String(error), { cause: error });
+      }
+    },
+    giveBack(entry, amount) {
+      try {
+        refundDaily(dir, entry, amount);
+      } catch (refundError) {
+        // The amount stays counted for today: too strict, never too loose.
+        log(
+          `call_paid_http: could not give back ${amount} to the daily budget (${String(refundError)})`,
+        );
+      }
+    },
+  };
 }
 
 /**
- * The tool error for a payment that could not be signed. `@x402/stellar` simulates before it signs
- * and names what the asset contract refused: a missing trustline, the payer's or the seller's, or a
- * balance too low. Any other failure, and a simulation it could not name, is `payment_failed`.
+ * The tool error for what the SDK's paying fetch threw, or `undefined` when it is not the SDK's: a
+ * seller-fetch refusal before any payment passes through it unchanged. The code and the message
+ * are the SDK's; what a seller or a library wrote (`cause`) goes to the log only.
  */
-function signingFailure(error: Error, payer: string, payTo: string | undefined): ToolError {
-  const detail = String(error);
-  if (error instanceof InsufficientBalanceError) {
+function paymentToolError(error: unknown, deadline: AbortSignal): ToolError | undefined {
+  // A payment signed after the deadline is never sent: the SDK gives the amount back and throws
+  // the deadline's own reason. A refusal, not a payment of unknown outcome.
+  if (deadline.aborted && error === deadline.reason) {
     return new ToolError(
-      "insufficient_funds",
-      "The payer does not hold enough of the asset.",
-      detail,
+      "upstream_error",
+      "The time limit passed before the payment was sent; nothing was sent.",
     );
   }
-  // The account and the asset go into the message the agent reads, so only in an address's shape:
-  // upstream takes them from the simulation, but another scheme could put any text there.
-  if (
-    error instanceof TrustlineMissingError &&
-    STELLAR_DESTINATION_ADDRESS_REGEX.test(error.account) &&
-    STELLAR_ASSET_ADDRESS_REGEX.test(error.asset)
-  ) {
-    const asset = assetName(error.asset);
-    // The asset contract stops at its first failure, the payer's side first, so a payer without a
-    // trustline says nothing about the seller's.
-    if (error.account === payer) {
-      return new ToolError(
-        "payer_trustline_missing",
-        `The payer ${error.account} has no trustline to ${asset} and must add one before it can ` +
-          "pay. The seller's account was not checked. Nothing was sent.",
-        detail,
-      );
-    }
-    // As the facilitator's refusal says: the SAC reports an account that doesn't exist the same way.
-    if (error.account === payTo) {
-      return new ToolError(
-        "payto_trustline_missing",
-        `The seller's account ${error.account} has no trustline to ${asset}: the account must ` +
-          "exist and hold one, and only the seller can add it. Nothing was sent.",
-        detail,
-      );
-    }
-  }
-  return new ToolError("payment_failed", "The payment could not be created.", detail);
+  if (!(error instanceof PaymentError)) return undefined;
+  const { cause } = error;
+  if (cause instanceof DailyDatabaseError) return dailyDatabaseFailed(cause.cause);
+  if (cause === undefined) return new ToolError(error.code, error.message);
+  const below = asToolError(cause);
+  const detail =
+    typeof cause === "string"
+      ? cause
+      : below
+        ? `${below.code}: ${below.detail ?? below.message}`
+        : String(cause);
+  return new ToolError(error.code, error.message, detail);
 }
 
 export async function callPaidHttp(
@@ -160,201 +143,50 @@ export async function callPaidHttp(
   // One deadline for the call's requests, the unpaid one and the paid retry. Signing is not cut off:
   // a signature that comes after the deadline is never sent, and the amount goes back.
   const deadline = AbortSignal.timeout(limits.timeoutMs);
-  // One client per call, so its hooks know which payment is this call's.
-  const client = x402Client.fromConfig({ schemes: config.schemes, spendControls: false });
-  let refusal: ToolError | undefined;
-  /**
-   * `countedIn` is where the amount was counted in the daily record, so a refund finds it; `payTo`
-   * tells the seller's missing trustline from the payer's.
-   */
-  let paid:
-    | { network: string; asset: string; payTo: string; amount: bigint; countedIn: DailyEntry }
-    | undefined;
-  let signingError: Error | undefined;
-  const now = config.now ?? (() => new Date());
-  // True once the request carrying the signed payment has been handed to the network.
-  let paymentSent = false;
-  // Nothing was sent, so the amount goes back to the day it was counted on.
-  const giveBack = () => {
-    if (!paid) return;
-    try {
-      refundDaily(config.dailyDir, paid.countedIn, paid.amount);
-    } catch (refundError) {
-      // The amount stays counted for today: too strict, never too loose.
-      log(
-        `call_paid_http: could not give back ${paid.amount} to the daily budget (${String(refundError)})`,
-      );
-    }
-  };
-
-  // Of the seller's offers, keep those in an allowed asset, at a price above zero, with a short enough
-  // authorization and within the per-call limit; the library pays the first one left, and the daily
-  // budget is counted when it is chosen.
-  client.registerPolicy((_version, offers) => {
-    const allowed = offers.filter((offer) => Object.hasOwn(config.assets, offer.asset));
-    // A zero or negative price would be counted before the library refuses to sign it, and a negative
-    // count raises the day's budget for every process until it is given back.
-    const priced = allowed.filter((offer) => /^[1-9][0-9]*$/.test(offer.amount));
-    const shortLived = priced.filter(
-      (offer) => offer.maxTimeoutSeconds <= MAX_AUTHORIZATION_SECONDS,
-    );
-    const affordable = shortLived.filter(
-      (offer) => BigInt(offer.amount) <= config.assets[offer.asset]!.maxPerCall,
-    );
-    if (allowed.length === 0) {
-      refusal = new ToolError("asset_not_allowed", "The seller asks for an asset not allowed.");
-    } else if (priced.length === 0) {
-      refusal = new ToolError(
-        "unsupported_payment",
-        "The seller's price is not a whole number of atomic units above zero.",
-      );
-    } else if (shortLived.length === 0) {
-      refusal = new ToolError(
-        "unsupported_payment",
-        `The seller wants the payment valid for more than ${MAX_AUTHORIZATION_SECONDS} s.`,
-      );
-    } else if (affordable.length === 0) {
-      refusal = new ToolError("over_price_limit", "The price is over the per-call limit.");
-    }
-    return affordable;
+  // The limits, the daily budget and the payment itself are the SDK's (`@stellar-x402/sdk/buyer`),
+  // over this server's guarded fetch and its daily database.
+  const pay = createPayingFetch({
+    schemes: config.schemes,
+    payer: config.payer,
+    assets: config.assets,
+    budget: dailyBudget(config.dailyDir, log),
+    now: config.now,
+    fetch: guardedFetch(limits, deadline),
   });
-  client.onBeforePaymentCreation(async ({ selectedRequirements: offer }) => {
-    const amount = BigInt(offer.amount);
-    // The day's spending is read and the amount recorded in one transaction, so processes paying at
-    // the same moment never pass the day together. Once signed the amount is never given back,
-    // so a seller cannot return it to the budget by claiming the payment failed.
-    const countedIn = { day: utcDay(now()), payer: config.payer, asset: offer.asset };
-    let counted = false;
-    try {
-      counted = countDaily(config.dailyDir, countedIn, amount, config.assets[offer.asset]!.daily);
-    } catch (error) {
-      refusal = dailyDatabaseFailed(error);
-    }
-    if (!counted) {
-      refusal ??= new ToolError("over_budget", "The payment would exceed the daily budget.");
-      return { abort: true, reason: refusal.code };
-    }
-    paid = { network: offer.network, asset: offer.asset, payTo: offer.payTo, amount, countedIn };
-  });
-  // Nothing was sent: signing failed (a payer without the trustline or the funds fails here, in
-  // simulation), so the amount goes back to the budget.
-  client.onPaymentCreationFailure(async ({ error }) => {
-    signingError = error;
-    giveBack();
-  });
-
-  const sellerFetch = guardedFetch(limits, deadline);
-  const pay = wrapFetchWithPayment(async (input, init) => {
-    const outgoing = new Request(input, init);
-    if (outgoing.headers.has("PAYMENT-SIGNATURE")) {
-      // Past the deadline the request would be refused before it connects: nothing is sent, so this
-      // is a refusal with the amount given back, not a payment of unknown outcome.
-      if (deadline.aborted) {
-        giveBack();
-        throw new ToolError(
-          "upstream_error",
-          "The time limit passed before the payment was sent; nothing was sent.",
-        );
-      }
-      paymentSent = true;
-    }
-    return sellerFetch(outgoing);
-  }, client);
-  let response: Response;
+  let response;
   try {
     response = await pay(url, {
       method: request.method,
       headers: request.headers,
       body: request.body,
+      signal: deadline,
     });
   } catch (error) {
-    const failure = asToolError(error);
-    if (paymentSent) {
-      // The signed payment left this process; whether the seller settled it is unknown.
-      const detail = failure
-        ? `${failure.code}: ${failure.detail ?? failure.message}`
-        : String(error);
-      throw new ToolError(
-        "payment_unknown",
-        "The payment's outcome is unknown; it counts as spent.",
-        detail,
-      );
-    }
-    if (failure) throw failure;
-    if (refusal) throw refusal;
-    if (signingError) throw signingFailure(signingError, config.payer, paid?.payTo);
-    // wrapFetchWithPayment adds these prefixes when it cannot read the seller's 402 or finds no offer
-    // this server can pay with (an unregistered network, scheme or version). Anything else is a bug.
-    if (
-      error instanceof Error &&
-      /^Failed to (parse payment requirements|create payment payload):/.test(error.message)
-    ) {
-      throw new ToolError(
-        "unsupported_payment",
-        "The seller asks for a payment this server cannot make.",
-        error.message,
-      );
-    }
-    throw error;
+    throw paymentToolError(error, deadline) ?? error;
   }
 
   const body = await response.text();
   const contentType = response.headers.get("content-type")?.slice(0, LIMITS.mimeTypeChars) ?? null;
-  if (!paid) {
+  const { payment } = response;
+  if (!payment) {
     if (response.ok) return { status: response.status, contentType, body };
     if (response.status === 404) {
       throw new ToolError("resource_not_found", "The seller has no resource at this URL.");
     }
     throw new ToolError("upstream_error", `The seller answered ${response.status}.`);
   }
-  let settle;
-  try {
-    settle = new x402HTTPClient(client).getPaymentSettleResponse((name) =>
-      response.headers.get(name),
-    );
-  } catch (error) {
+  if (payment.transaction === null) {
+    // The answer is what was paid for; the log says why it carries no transaction.
     if (response.headers.has("PAYMENT-RESPONSE")) {
-      log(`call_paid_http: ${url} sent a settlement that cannot be read (${String(error)})`);
+      try {
+        new x402HTTPClient(new x402Client()).getPaymentSettleResponse((name) =>
+          response.headers.get(name),
+        );
+      } catch (error) {
+        log(`call_paid_http: ${url} sent a settlement that cannot be read (${String(error)})`);
+      }
     }
-    // A seller that answers 402 again without a settlement refused the payment before settling it.
-    if (response.status === 402) {
-      throw new ToolError(
-        "payment_rejected",
-        "The seller refused the payment.",
-        body.slice(0, 500),
-      );
-    }
-  }
-  if (settle && !settle.success) {
-    throw new ToolError(
-      "payment_rejected",
-      "The seller's facilitator refused the payment.",
-      // Seller-written, so for the log only: the message's ledger could be any number.
-      [settle.errorReason, settle.errorMessage].filter(Boolean).join(": "),
-    );
-  }
-  // A Stellar transaction hash is 64 hex characters; anything else is not a settlement we can show.
-  const transaction =
-    settle && /^[0-9a-f]{64}$/i.test(settle.transaction) ? settle.transaction : null;
-  if (transaction === null && response.ok) {
     log(`call_paid_http: paid ${url} but the seller sent no settlement it could show`);
   }
-  if (transaction === null && !response.ok) {
-    throw new ToolError(
-      "payment_unknown",
-      "The payment's outcome is unknown; it counts as spent.",
-      `status ${response.status} without a settlement`,
-    );
-  }
-  return {
-    status: response.status,
-    contentType,
-    body,
-    payment: {
-      transaction,
-      network: paid.network,
-      asset: paid.asset,
-      amount: paid.amount.toString(),
-    },
-  };
+  return { status: response.status, contentType, body, payment };
 }

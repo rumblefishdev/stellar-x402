@@ -17,6 +17,10 @@ the catalog's access log may keep it. Seller-written text is returned as data an
 limits: descriptions to 500 characters, MIME types to 127. Every failure comes back as a code from
 a fixed list ([Error codes](#error-codes)); causes go to stderr only.
 
+`call_paid_http` pays through the TypeScript SDK's buyer helper
+([`@stellar-x402/sdk/buyer`](../../packages/sdk/README.md)): the limits and the payment are the
+SDK's, and this server adds its address guard, its time limit and the daily budget in SQLite.
+
 To try it locally, run the example seller in [`examples/http-api`](../../examples/http-api)
 (`http://localhost:4021/weather?city=Warsaw`, 0.001 testnet USDC) and start this server with
 `STELLAR_X402_ALLOW_INSECURE_LOCAL=1`. It is not in any catalog, so give its URL to `get_resource`

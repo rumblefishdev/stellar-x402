@@ -17,6 +17,7 @@ package. Status: skeleton, nothing implemented yet.
 | `packages/signer-pool`  | channel accounts: funding, sequence tracking, retry, fee bump               |
 | `packages/seller-fetch` | requests to seller URLs: public addresses only, no redirects, limits        |
 | `packages/config`       | shared network config and types                                             |
+| `packages/sdk`          | TypeScript helpers `@stellar-x402/sdk`: a buyer pays a 402 within limits    |
 | `packages/sdk/rust`     | Rust crate `stellar-x402`: a seller charges for a route (axum layer)        |
 | `contracts/upto-proxy`  | Soroban contract for the `upto` scheme                                      |
 | `examples/`             | a test seller (`http-api`) and a placeholder for a second example           |
