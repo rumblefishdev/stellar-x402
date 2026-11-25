@@ -58,8 +58,9 @@ The options, compared in
   authorization. So that re-check needs its own answer, such as a separate receiver authorizer key
   or short windows.
 
-  The weekly review (ADR 0013) checks the 500 XLM line from the first deploy: the fee account's
-  balance plus 1.5 XLM per channel in `CHANNELS`. Task 0133, which readies `upto-proxy` for
+  The weekly review (ADR 0013) checks the 500 XLM line after the mainnet deploy: mainnet's fee
+  account balance plus 1.5 XLM per mainnet channel. Testnet's Friendbot XLM stakes nothing, so it
+  doesn't count. Task 0133, which readies `upto-proxy` for
   mainnet, carries the `upto` re-check as an acceptance criterion.
 
 - **What a recovery needs is in place before mainnet** (task 0048):
