@@ -112,10 +112,11 @@ The MCP part, in `apps/mcp-local`:
 - `e2e/test/after-signing.ts`: E-14 expects `payer_trustline_missing` with the account and the
   asset named; E-14d is new, a seller whose `payTo` has no trustline.
 
-Testnet run on 2026-11-25, on commit c1c4df80 (`e2e/results/testnet-results.json`): 26 scenarios,
-124 rows, none failed. E-14 (the payer's trustline), E-14b (a balance too low) and E-14d (the
-seller's trustline) each got their code from the real `ExactStellarScheme`, with the account and
-the asset in the tool's text and the RPC's text in the log only.
+Testnet run on 2026-11-25, on commit c1c4df80: 26 scenarios, 124 rows, none failed. Run again after
+the rebase onto 0137's search tool (#245), on commit 50a59216 (`e2e/results/testnet-results.json`):
+27 scenarios, 128 rows, none failed. Both times E-14 (the payer's trustline), E-14b (a balance too
+low) and E-14d (the seller's trustline) each got their code from the real `ExactStellarScheme`, with
+the account and the asset in the tool's text and the RPC's text in the log only.
 
 The SDK criteria (1, 2 and 5) are built with 0102's buyer helper, which moves this code.
 

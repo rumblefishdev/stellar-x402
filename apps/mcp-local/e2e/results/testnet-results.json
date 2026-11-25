@@ -1,7 +1,7 @@
 {
-  "ranAt": "2026-11-24T17:43:26.940Z",
-  "commit": "398c2bcdff1e22fb6aaa12d31cd05f45be5d95b2",
-  "rows": 125,
+  "ranAt": "2026-11-25T11:14:13.043Z",
+  "commit": "50a592167bf334bbd05c0c1280d94bef48b60016",
+  "rows": 128,
   "failed": 0,
   "results": [
     {
@@ -10,16 +10,16 @@
       "expected": [
         {
           "asset": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
-          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
           "amount": "5000"
         }
       ],
       "got": [
         {
           "asset": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
-          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
           "amount": "5000"
         }
       ],
@@ -27,7 +27,7 @@
     },
     {
       "id": "E-13b",
-      "check": "signature valid for 60 more ledgers: within the offer's 300 s and 300 s",
+      "check": "signature valid for 59 more ledgers: within the offer's 300 s and 300 s",
       "expected": [
         true,
         true
@@ -57,12 +57,25 @@
       "id": "E-14",
       "check": "both calls (the second is not over_budget: the amount came back)",
       "expected": [
-        "insufficient_funds",
-        "insufficient_funds"
+        "payer_trustline_missing",
+        "payer_trustline_missing"
       ],
       "got": [
-        "insufficient_funds",
-        "insufficient_funds"
+        "payer_trustline_missing",
+        "payer_trustline_missing"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14",
+      "check": "the tool text names the payer's account and the asset",
+      "expected": [
+        true,
+        true
+      ],
+      "got": [
+        true,
+        true
       ],
       "pass": true
     },
@@ -96,6 +109,36 @@
       ],
       "got": [
         "insufficient_funds",
+        true,
+        false
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14d",
+      "check": "refused, nothing sent, the amount given back",
+      "expected": [
+        "payto_trustline_missing",
+        0,
+        "0"
+      ],
+      "got": [
+        "payto_trustline_missing",
+        0,
+        "0"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14d",
+      "check": "the tool text names the seller's account and the asset, and not the payer's",
+      "expected": [
+        true,
+        true,
+        false
+      ],
+      "got": [
+        true,
         true,
         false
       ],
@@ -351,7 +394,7 @@
     },
     {
       "id": "E-18",
-      "check": "locked: payment_failed after the 5 s wait (took 5.2 s), log names the lock",
+      "check": "locked: payment_failed after the 5 s wait (took 5.0 s), log names the lock",
       "expected": [
         "payment_failed",
         true,
@@ -1002,7 +1045,7 @@
     },
     {
       "id": "E-06",
-      "check": "call_paid_http {\"url\":\"http://127.0.0.1:63407/ok\",\"method\":\"HEAD\"}: -32602",
+      "check": "call_paid_http {\"url\":\"http://127.0.0.1:43989/ok\",\"method\":\"HEAD\"}: -32602",
       "expected": [
         true,
         true
@@ -1053,8 +1096,8 @@
     {
       "id": "E-07",
       "check": "buyer balance unchanged",
-      "expected": "194729972",
-      "got": "194729972",
+      "expected": "480000",
+      "got": "480000",
       "pass": true
     },
     {
@@ -1244,7 +1287,7 @@
     },
     {
       "id": "E-09g",
-      "check": "get_resource http://127.0.0.1.nip.io:63429/free",
+      "check": "get_resource http://127.0.0.1.nip.io:36923/free",
       "expected": "unsafe_url",
       "got": "unsafe_url",
       "pass": true
@@ -1409,7 +1452,7 @@
         true
       ],
       "pass": true,
-      "transaction": "365c49d11d9358cec7085123a323b57026dcbf0fcb171a29977228866061545c"
+      "transaction": "975bdc71f246b3bc9e7e223c93d38df582ab75e557a4f9d543c55a930707d90a"
     },
     {
       "id": "E-21",
@@ -1417,21 +1460,21 @@
       "expected": [
         true,
         {
-          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
-          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
           "amount": "0.0010000"
         }
       ],
       "got": [
         true,
         {
-          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
-          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
           "amount": "0.0010000"
         }
       ],
       "pass": true,
-      "transaction": "365c49d11d9358cec7085123a323b57026dcbf0fcb171a29977228866061545c"
+      "transaction": "975bdc71f246b3bc9e7e223c93d38df582ab75e557a4f9d543c55a930707d90a"
     },
     {
       "id": "E-21",
@@ -1447,7 +1490,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "365c49d11d9358cec7085123a323b57026dcbf0fcb171a29977228866061545c"
+      "transaction": "975bdc71f246b3bc9e7e223c93d38df582ab75e557a4f9d543c55a930707d90a"
     },
     {
       "id": "E-22a",
@@ -1471,7 +1514,7 @@
         true
       ],
       "pass": true,
-      "transaction": "06168a913b66d73aeaa7921878099ea6d9e02d87f2b77c50126aa25cdc311971"
+      "transaction": "4d5afe1e03dd76514e7d1674677304fccdeb2b06527b4c366baaa11e90fde3ed"
     },
     {
       "id": "E-22a",
@@ -1479,21 +1522,21 @@
       "expected": [
         true,
         {
-          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
-          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
           "amount": "0.0010000"
         }
       ],
       "got": [
         true,
         {
-          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
-          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
           "amount": "0.0010000"
         }
       ],
       "pass": true,
-      "transaction": "06168a913b66d73aeaa7921878099ea6d9e02d87f2b77c50126aa25cdc311971"
+      "transaction": "4d5afe1e03dd76514e7d1674677304fccdeb2b06527b4c366baaa11e90fde3ed"
     },
     {
       "id": "E-22a",
@@ -1509,7 +1552,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "06168a913b66d73aeaa7921878099ea6d9e02d87f2b77c50126aa25cdc311971"
+      "transaction": "4d5afe1e03dd76514e7d1674677304fccdeb2b06527b4c366baaa11e90fde3ed"
     },
     {
       "id": "E-22b",
@@ -1529,12 +1572,12 @@
       "id": "E-22",
       "check": "buyer balance unchanged after b and after c",
       "expected": [
-        "194709972",
-        "194709972"
+        "460000",
+        "460000"
       ],
       "got": [
-        "194709972",
-        "194709972"
+        "460000",
+        "460000"
       ],
       "pass": true
     },
@@ -1546,7 +1589,7 @@
         true,
         "stellar:testnet",
         [
-          "http://127.0.0.1:62755/weather"
+          "http://127.0.0.1:36915/weather"
         ],
         true
       ],
@@ -1555,7 +1598,7 @@
         true,
         "stellar:testnet",
         [
-          "http://127.0.0.1:62755/weather"
+          "http://127.0.0.1:36915/weather"
         ],
         true
       ],
@@ -1583,7 +1626,7 @@
         true
       ],
       "pass": true,
-      "transaction": "a94b6cb6793a15d9dd55d8c1860e53f303fe268f5510f40758401dfa4e19b1c4"
+      "transaction": "06e4e3cf899e3fce48a4015fb19c8d5fce9b066f159d143b8137a92c67f37c0d"
     },
     {
       "id": "E-25",
@@ -1591,21 +1634,21 @@
       "expected": [
         true,
         {
-          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
-          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
           "amount": "0.0010000"
         }
       ],
       "got": [
         true,
         {
-          "from": "GDUFPEXV27XLNI2UNEIOY4HQAMAGSNIHV2QHPZRPFPK5QGK6S3AD5AFK",
-          "to": "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF",
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
           "amount": "0.0010000"
         }
       ],
       "pass": true,
-      "transaction": "a94b6cb6793a15d9dd55d8c1860e53f303fe268f5510f40758401dfa4e19b1c4"
+      "transaction": "06e4e3cf899e3fce48a4015fb19c8d5fce9b066f159d143b8137a92c67f37c0d"
     },
     {
       "id": "E-25",
@@ -1621,39 +1664,39 @@
         "0"
       ],
       "pass": true,
-      "transaction": "a94b6cb6793a15d9dd55d8c1860e53f303fe268f5510f40758401dfa4e19b1c4"
+      "transaction": "06e4e3cf899e3fce48a4015fb19c8d5fce9b066f159d143b8137a92c67f37c0d"
     },
     {
       "id": "E-23",
-      "check": "no buyer secret in 270 captures from 56 processes",
+      "check": "no buyer secret in 277 captures from 57 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no buyer without its S secret in 270 captures from 56 processes",
+      "check": "no buyer without its S secret in 277 captures from 57 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no unfunded secret in 270 captures from 56 processes",
+      "check": "no unfunded secret in 277 captures from 57 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no drained (E-14b) secret in 270 captures from 56 processes",
+      "check": "no drained (E-14b) secret in 277 captures from 57 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no malformed key of E-01l secret in 270 captures from 56 processes",
+      "check": "no malformed key of E-01l secret in 277 captures from 57 processes",
       "expected": false,
       "got": false,
       "pass": true
