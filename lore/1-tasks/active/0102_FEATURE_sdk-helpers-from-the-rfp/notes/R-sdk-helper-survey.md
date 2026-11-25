@@ -68,9 +68,9 @@ list that follows from them is in the task's README: five helpers in M2, the res
 - Deliverable: "SDK helpers for sellers, buyers, and agents" (`07:121`).
 - The panel review response, §5, as 0078 quotes it: "Our pre-flight simulation step detects a
   missing trustline before payment is attempted and returns an actionable error."
-  `docs/scf/milestone-1-evidence.md:270-271` leaves the buyer's side of it to "a later tranche
+  `docs/scf/milestone-1-evidence.md:271-272` leaves the buyer's side of it to "a later tranche
   (SDK helpers)".
-- Tranches (`milestone-1-evidence.md:129,133`): SDK helpers in #2 and #3, example integrations
+- Tranches (`milestone-1-evidence.md:129,132`): SDK helpers in #2 and #3, example integrations
   (0041) in #3.
 - 0132 defines no evidence for D4 and has no row for it; that is to agree with okarcz.
 - The response itself is not in the repo. Its budget line for D4 was not found; D5, the Rust crate,
@@ -232,6 +232,7 @@ All decided by akot on 2026-11-25; the owner's agreement to the resulting list i
 
 Seen while deciding 7 and 8: the MCP server is in Tranche #2 and this task moves code on its money
 path during M2. The first PR is early and a move only, with the testnet e2e run before and after.
+
 9. **Agent**, decided (akot, 2026-11-25):
    - `createBazaarClient({ url?, timeoutMs? })` with `list` and `search`, moved from `catalog.ts`.
      It answers with the trimmed entries MCP gives an agent today, and has a deadline; MCP's
