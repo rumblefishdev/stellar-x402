@@ -27,11 +27,24 @@ export interface Payment {
 /** The seller's answer; `payment` is present when a payment was sent for it. */
 export type PaidResponse = Response & { payment?: Payment };
 
+/** The headers that carry a signed payment, in x402 v2 and v1. */
+const PAYMENT_HEADERS = ["PAYMENT-SIGNATURE", "X-PAYMENT"];
+
+/**
+ * The headers `new Request(input, init)` would send, read without building it: building it would
+ * use up a request's body before upstream builds its own.
+ */
+function requestHeaders(input: Parameters<typeof fetch>[0], init?: RequestInit): Headers {
+  if (init?.headers !== undefined) return new Headers(init.headers);
+  return input instanceof Request ? input.headers : new Headers();
+}
+
 /**
  * A `fetch` that pays a seller's 402 within the config's limits and returns the seller's answer.
  * A payment that is refused or fails is a `PaymentError`; an answer without a payment, a 404 or a
  * 500 among them, is returned as it is, and a failure of the underlying fetch before any payment
- * was sent is thrown as it is.
+ * was sent is thrown as it is. A request that already carries a payment header is a `TypeError`,
+ * thrown before anything is counted.
  *
  * A request's `signal` is honored before the payment leaves: a payment signed after it aborted is
  * never sent, its amount goes back to the budget, and the signal's reason is thrown.
@@ -43,6 +56,14 @@ export function createPayingFetch(
   const baseFetch = config.fetch ?? globalThis.fetch;
 
   return async (input, init) => {
+    // A payment header of the caller's own would read as this fetch's payment having left, and
+    // upstream refuses it only after signing: refused here, before anything is counted.
+    if (PAYMENT_HEADERS.some((name) => requestHeaders(input, init).has(name))) {
+      throw new TypeError(
+        "The request already carries a payment header (PAYMENT-SIGNATURE or X-PAYMENT); this " +
+          "fetch makes the payment itself.",
+      );
+    }
     const call = startCall(config);
     // The caller's own signal, not a request's copy of it: upstream clones the request on its way,
     // and a clone's signal follows the original only loosely.
@@ -105,11 +126,14 @@ export function createPayingFetch(
     if (!paid) return response;
 
     let settle;
+    // Why a `PAYMENT-RESPONSE` could not be read, for the cause of an answer without a settlement.
+    let unreadable = "";
     try {
       settle = new x402HTTPClient(call.client).getPaymentSettleResponse((name) =>
         response.headers.get(name),
       );
-    } catch {
+    } catch (error) {
+      if (response.headers.has("PAYMENT-RESPONSE")) unreadable = `, unreadable: ${String(error)}`;
       // A seller that answers 402 again without a settlement refused the payment before settling
       // it. Upstream has read and bounded a 402's body by now, so the copy is small.
       if (response.status === 402) {
@@ -135,7 +159,7 @@ export function createPayingFetch(
       throw new PaymentError(
         "payment_unknown",
         "The payment's outcome is unknown; it counts as spent.",
-        { cause: `status ${response.status} without a settlement` },
+        { cause: `status ${response.status} without a settlement${unreadable}` },
       );
     }
     const payment: Payment = {

@@ -201,6 +201,8 @@ describe("createPayingFetch", () => {
       ]);
       // The library's own text, with upstream's error and the RPC's text in the cause only.
       expect(error.message).toContain(account);
+      // USDC also as `changeTrust` takes it.
+      expect(error.message).toContain(`${CLASSIC_ASSETS[USDC]} (the asset contract ${USDC})`);
       expect(error.message).not.toContain("HostError");
       expect(error.cause).toBe(cause);
       expect(shop.paid).toBe(0);
@@ -295,6 +297,77 @@ describe("createPayingFetch", () => {
     expect(
       (await createPayingFetch(config(shop, { assets, budget }))(PAID_URL)).payment,
     ).toBeDefined();
+  });
+
+  it("reads the signal from a Request passed without init", async () => {
+    const shop = seller();
+    const caller = new AbortController();
+    const reason = new Error("the caller gave up");
+    const slow: SchemeNetworkClient = {
+      scheme: "exact",
+      async createPaymentPayload(x402Version, requirements) {
+        caller.abort(reason);
+        return { x402Version, payload: { amount: requirements.amount } };
+      },
+    };
+    const pay = createPayingFetch(config(shop, {}, slow));
+    await expect(pay(new Request(PAID_URL, { signal: caller.signal }))).rejects.toBe(reason);
+    expect(shop.paid).toBe(0);
+  });
+
+  it.each([
+    ["PAYMENT-SIGNATURE in init", () => [PAID_URL, { headers: { "PAYMENT-SIGNATURE": "x" } }]],
+    ["X-PAYMENT in init", () => [PAID_URL, { headers: { "X-PAYMENT": "x" } }]],
+    ["a header on the Request", () => [new Request(PAID_URL, { headers: { "X-PAYMENT": "x" } })]],
+  ] as [string, () => Parameters<typeof fetch>][])(
+    "refuses a request carrying its own payment header (%s) before anything is counted",
+    async (_, args) => {
+      const shop = seller();
+      const signer = scheme();
+      const budget = memoryBudget();
+      const assets = { [USDC]: { maxPerCall: 20_000n, daily: 10_000n } };
+      const pay = createPayingFetch(config(shop, { assets, budget }, signer));
+      await expect(pay(...args())).rejects.toThrow(TypeError);
+      expect([signer.signed, shop.paid]).toEqual([0, 0]);
+      // Nothing was counted: the whole day's 10,000 is still there.
+      expect((await pay(PAID_URL)).payment).toBeDefined();
+    },
+  );
+
+  it("refuses a negative limit when it is made", () => {
+    const shop = seller();
+    for (const limits of [{ maxPerCall: -1n }, { maxPerCall: 1n, daily: -1n }]) {
+      const assets = { [USDC]: limits };
+      expect(() => createPayingFetch(config(shop, { assets, budget: memoryBudget() }))).toThrow(
+        /must not be negative/,
+      );
+    }
+  });
+
+  it("still names the signing failure when the store cannot give the amount back", async () => {
+    const budget = {
+      count: () => true,
+      giveBack: () => {
+        throw new Error("store down");
+      },
+    };
+    const assets = { [USDC]: { maxPerCall: 20_000n, daily: 15_000n } };
+    const tooLittle = new InsufficientBalanceError(BUYER, USDC, "HostError: Error(Contract, #10)");
+    const pay = createPayingFetch(config(seller(), { assets, budget }, scheme(tooLittle)));
+    expect((await failure(pay(PAID_URL))).code).toBe("insufficient_funds");
+  });
+
+  it("keeps why a settlement could not be read in the cause of an unknown outcome", async () => {
+    const shop = seller();
+    const answered = shop.fetch;
+    shop.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      if (!request.headers.has("PAYMENT-SIGNATURE")) return answered(request);
+      return new Response("down", { status: 500, headers: { "payment-response": "not base64!" } });
+    };
+    const error = await failure(createPayingFetch(config(shop))(PAID_URL));
+    expect([error.code, error.paid]).toEqual(["payment_unknown", "unknown"]);
+    expect(error.cause).toMatch(/^status 500 without a settlement, unreadable: /);
   });
 });
 
