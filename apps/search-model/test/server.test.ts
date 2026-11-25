@@ -30,7 +30,7 @@ describe.skipIf(MODEL_DIR === undefined)("search model server (0120 C, needs MOD
     return (await response.json()) as { model: string; vector: number[] };
   };
 
-  it("reads a query only up to 256 tokens, a listing up to 512 (W250)", async () => {
+  it("reads a query only up to 256 tokens, a listing up to 512 (ADR 0014)", async () => {
     const long = "weather forecast for every city and hour ".repeat(60);
     const asQuery = await embed(JSON.stringify({ text: long, kind: "query" }));
     const asListing = await embed(JSON.stringify({ text: long }));

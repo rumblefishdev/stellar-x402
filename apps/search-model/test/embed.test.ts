@@ -53,7 +53,7 @@ describe("cutTokens (0120 C: at most 512 tokens for a listing, the closing one k
   });
 });
 
-describe("cutTokens for a query (0120 W250: at most 256 tokens)", () => {
+describe("cutTokens for a query (ADR 0014: at most 256 tokens)", () => {
   const ids = (length: number) =>
     Array.from({ length }, (_, i) => (i === length - 1 ? 102 : 1_000 + i));
 

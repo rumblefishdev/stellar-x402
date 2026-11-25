@@ -115,7 +115,8 @@ a whole zone, to Cloudflare on the Free plan.
     costs.
 - **A search-model container** (ADR 0014), memory limit 768 MiB and one CPU: the embedding model
   used by `/discovery/search`, run from the facilitator's image with a command of its own. Its
-  peak was measured at 456–484 MiB on macOS arm64; Linux is not measured yet. The facilitator
+  peak was measured at 456–484 MiB on macOS arm64, and at 221 MiB in its Linux arm64 container
+  under 100 long texts at once (2026-11-25); amd64 follows the first deploy. The facilitator
   starts only once it is healthy.
 - **The limits add up to 2.375 GiB for production with testnet's database and the search model,**
   2.625 GiB with OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less. On

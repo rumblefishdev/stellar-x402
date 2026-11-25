@@ -139,8 +139,8 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
 /**
  * `GET /discovery/search` (0120) with upstream's search types (ADR 0014). It asks the search model
  * for the query's vector and ranks by meaning and words fused; every match is ranked, so
- * `partialResults` is `false`. When the model fails, doesn't answer within its timeout or isn't
- * configured, it ranks by words alone, logged and counted, and `partialResults` is `true`:
+ * `partialResults` is `false`. When the model fails or doesn't answer within its timeout, it ranks
+ * by words alone, logged and counted, and `partialResults` is `true`:
  * matches by meaning were not looked for. A cursor from another ranking or model is refused with
  * a 400. A store failure rejects, and the shared error handler answers it with a 500.
  */

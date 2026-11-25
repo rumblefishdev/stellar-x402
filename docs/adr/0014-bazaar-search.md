@@ -108,8 +108,8 @@ The measurements are in
   - It holds no database password. The facilitator computes a listing's vector right after the
     catalog writes the listing, and once at each start for every card whose vector is missing or
     stale (another model, another text hash), with no retry loop in between. It asks the
-    container for each vector without holding a lock, and writes it only `WHERE` the text hash is
-    still the one it embedded.
+    container for each vector without holding a lock, and writes it only `WHERE` the card's fields
+    are still the ones it embedded, so a vector never lands on a newer text.
   - The facilitator sends the container one listing at a time, so a backlog never takes the CPU
     that queries need.
   - A listing the container fails on is tried again at the next start. Failures are logged with
@@ -203,9 +203,11 @@ The measurements are in
 - **Typos need no trigram index while the model runs.** The meaning part handles them: fused 0.672
   against words-only 0.288 on typo queries. Words-only fallback has no typo handling.
 - **An exact scan is likely enough at this size.** 3,000 vectors scan in 0.18 ms in NumPy on an
-  M4, and the whole public catalog of all networks is about twelve times that. pgvector's scan
-  inside PostgreSQL is not measured yet; 0120 measures it on the server, with the vector stored in
-  line (`SET STORAGE PLAIN`), as pgvector's README suggests for scans.
+  M4, and the whole public catalog of all networks is about twelve times that. In PostgreSQL 18
+  with pgvector, with the vector stored in line (`SET STORAGE PLAIN`), the fused search took 4-14
+  ms over 1,637 cards and 140-411 ms over 40,000 with a quarter matching; with all 40,000 matching
+  and 32 common words it reached the 2 s statement timeout in 4 of 50 runs (random vectors,
+  measured locally on arm64, 2026-11-25). The server's figure follows the first deploy.
 - **A container of its own** keeps the model's memory out of the facilitator's 512 MiB and its
   CPU off the `/settle` path, and lets search fall back to words when it is down. Run from the
   facilitator's image, it needs no image, build or deploy step of its own.

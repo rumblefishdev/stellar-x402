@@ -11,7 +11,7 @@ const MAX_CHARS = 2_000;
 const MAX_TOKENS = 512;
 /**
  * A query is cut at 256 tokens, about 1,200 characters: a long query then costs about half as
- * much, and the queries measured (at most 31 tokens) are never cut (task 0120, W250).
+ * much, and the queries measured (at most 31 tokens) are never cut (ADR 0014).
  */
 const MAX_QUERY_TOKENS = 256;
 

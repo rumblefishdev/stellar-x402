@@ -356,7 +356,7 @@ export function compose(
   signer: OpenBaoSigner;
   /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
   rpcStall: RpcStallTracker;
-  /** Unstarted: `main()` starts the pass after the search card rewrite. None without a model. */
+  /** Unstarted: `main()` starts the pass after the search card rewrite. */
   vectors: SearchVectors;
 } {
   const { logger } = opts;

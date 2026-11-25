@@ -9,6 +9,6 @@ export interface Embedding {
  * when the model can't be used: search then ranks by words alone.
  */
 export interface Embedder {
-  /** A query's text is read only up to 256 tokens, a listing's up to the model's 512 (W250). */
+  /** A query's text is read only up to 256 tokens, a listing's up to the model's 512 (ADR 0014). */
   embed(text: string, kind: "listing" | "query"): Promise<Embedding>;
 }

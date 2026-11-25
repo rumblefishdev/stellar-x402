@@ -275,6 +275,25 @@ describe("the units' output", () => {
     expect(settings(unit("x402@.service"), "SuccessExitStatus")).toEqual(["130"]);
   });
 
+  test("x402@ starts the facilitator with the search model it depends on (ADR 0014)", () => {
+    // `--no-deps` would skip depends_on, and the model would never start on the server.
+    expect(settings(unit("x402@.service"), "ExecStart")).toEqual([
+      "/usr/local/libexec/x402/x402-compose %i up --no-log-prefix --no-color --pull never --exit-code-from facilitator facilitator",
+    ]);
+  });
+
+  test("the search model runs from the facilitator's image, capped, restarted, and waited for (ADR 0014)", () => {
+    const compose = read("production/compose.yaml");
+    const model = compose.match(/^ {2}search-model:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? "";
+    expect(model).toContain("image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}");
+    expect(model).toContain("command: [node, /search-model/dist/main.js]");
+    expect(model).toContain("restart: unless-stopped");
+    expect(model).toContain("mem_limit: 768m");
+    expect(model).toContain("cpus: 1");
+    expect(compose).toMatch(/depends_on:\n\s+search-model:\n\s+condition: service_healthy/);
+    expect(read("../apps/facilitator/Dockerfile")).toContain("ENV ORT_DISABLE_TELEMETRY=1");
+  });
+
   test("every count the scripts write is a host counter of the catalog", () => {
     const calls = readdirSync(`${DEPLOY}/libexec`).flatMap((f) => [
       ...read(`libexec/${f}`).matchAll(/x402-host-probe count ([a-z0-9_]+)/g),
