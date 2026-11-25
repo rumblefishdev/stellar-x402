@@ -967,13 +967,16 @@ catalog:
    on that same 402, so a seeded listing passes the same gates. Only when the 402 declares another
    method, or an MCP tool, is the seller asked once more that way. It has no `ledger` and its
    attempt rows no `payer`; a listing a settlement wrote keeps its `ledger`.
-4. Hosts run at once; within a host the seed waits 3 s after each request, 20 a minute, below the
-   30 checks a minute a host's checks after payments may use. A URL that fails never stops the
+4. Hosts run at once; within a host the seed waits, after each URL, 1 s for each request it cost (a
+   second request to the same URL follows the first at once), 60 a minute, so a host
+   of 581 URLs takes about 10 minutes. A URL that fails never stops the
    next, nor a host the others.
 
 The seed follows each host's `robots.txt` (RFC 9309) under the name `stellar-bazaar`: a URL it
-disallows is skipped and reported as `robots`; a 4xx means no rules; a 5xx or no answer means the
-host is not asked. Every request says `User-Agent: stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
+disallows is skipped and reported as `robots`, the URL of a second request a 402 asks for
+included, and a host that disallows its `/.well-known/x402`
+is not read at all; a 4xx means no rules; any other answer than 200, a redirect included (redirects are
+not followed), or no answer means the host is not asked. Every request says `User-Agent: stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
 so a seller can block it by name. The report goes to stdout: a tab-separated line per URL and
 account (URL, method, network, `payTo`, outcome, reason, detail), a line per skipped entry
 (outcome `skipped`), a line per host, the totals, and each `payTo` seen on more than one host. As
