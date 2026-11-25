@@ -312,6 +312,21 @@ history:
     status: active
     who: karolkow
     note: "From 0029, closed: 0026 turns on the upstream alarm group with the next production deploy, and reruns the conformance gate after the testnet reset of 2026-12-16 (two new criteria)."
+  - date: "2026-11-25"
+    status: active
+    who: okarcz
+    note: >
+      OpenBao's snapshot job set up on the server (runbook, OpenBao snapshots, setup steps 2-5).
+      Borg 1.2.8 on the server; step 3 made the repokey-blake2 repository and wrote
+      borg_passphrase and borg_key_export to the backup secret (version d62ee577, read back the
+      same); step 4 made the x402-snapshot policy and AppRole from a root token generated from
+      the recovery key, then revoked it. The first run saved openbao-2026-11-25T10:34:43Z (32281
+      bytes), snapshot_age_seconds dropped from 1e9 to 44 at 10:35 UTC, and the timer is started
+      (next run 2026-11-26 03:21 UTC). The snapshots flag stays off until Stan's switch to 0139's
+      rules (#242), at his request: today the flag also makes the CloudWatch alarm #242 removes.
+      Step 3's credential came out 0644 (systemd-creds follows the umask) and was set to 0600 by
+      hand; no runbook change (okarcz), since every creds directory is root 0700 (playbook), so
+      the file's mode exposes nothing.
 ---
 
 # Public testnet deployment
