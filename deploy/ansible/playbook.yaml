@@ -337,13 +337,17 @@
       register: x402_env_content
       when: x402_env_file.stat.exists
 
-    - name: The .env holds every name compose.yaml requires
+    # Read the way Compose reads .env: `export ` and leading blanks allowed, and an empty value
+    # (`NAME=`, `NAME=""`) counts as missing, since `${NAME:?}` stops on it too.
+    - name: The .env holds every name compose.yaml requires, with a value
       ansible.builtin.assert:
-        that: (x402_env_content.content | b64decode) is search('(?m)^' ~ item ~ '=')
+        that: (x402_env_content.content | b64decode) is search(x402_env_set | replace('NAME', item))
         fail_msg: >-
-          /srv/x402/{{ x402_environment }}/.env has no {{ item }}: add it before this playbook
-          copies compose.yaml (runbook, "Before the first deploy").
+          /srv/x402/{{ x402_environment }}/.env has no {{ item }} with a value: add it before
+          this playbook copies compose.yaml (runbook, "Before the first deploy").
         quiet: true
+      vars:
+        x402_env_set: '(?m)^[ \t]*(export[ \t]+)?NAME=[ \t]*(?![''"]{2}[ \t]*$)\S'
       loop:
         - FACILITATOR_ADDRESS_TESTNET
         - CHANNELS_TESTNET

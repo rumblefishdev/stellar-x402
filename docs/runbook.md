@@ -230,9 +230,14 @@ ADR 0013's first upgrade (Not here yet).
 
   ```sh
   printf 'OPENBAO_KEY_TESTNET=%s\nOPENBAO_KEY_VERSION_TESTNET=%s\nFACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' \
-    stellar-testnet 1 ADDRESS CHANNELS |
+    KEY_NAME KEY_VERSION ADDRESS CHANNELS |
     ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
   ```
+
+  `KEY_NAME` and `KEY_VERSION` are the Transit key's, from OpenBao's step 4: `stellar-testnet`
+  and `1` on a first setup, and something else after a "lost access" rebuild. This writes the
+  whole file, so use it only for a new `.env`; to change one value, edit only its line, as
+  [channel-quarantined](monitoring.md#channel-quarantined) does for `CHANNELS_TESTNET`.
 
   A server set up before the key's name and version moved here (2026-11-24, task 0048) has only
   the last two lines: add the first two before the playbook run that copies this `compose.yaml`.
