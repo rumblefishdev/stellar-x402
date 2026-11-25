@@ -57,7 +57,7 @@ but the task as first written could not run and was larger than needed.
 - Deleted or deferred: removal on request (decision 7) and a mark for listings not yet paid
   through us (decision 14).
 - Changed in the code, not asked: `catalog.ledger` and `catalog_attempts.payer` allow no value, a
-  seeded check is paced below the per-host budget, and a seller's file is read only for its own
+  seeded check keeps its own pace instead of the per-host budget (decision 12), and a seller's file is read only for its own
   host.
 
 ## Context
