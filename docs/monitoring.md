@@ -34,7 +34,7 @@ the alarms that read them. The [uptime figure](#the-uptime-figure) is under Upti
 | `facilitator-silent`      | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:49, OK 13:47:49 UTC                                                        |
 | `gauges-silent`           | `facilitator` | 2026-11-09 12:19 UTC | Not fired: it needs gauges missing while sweeps run ([Drills](#drills))                                                                 |
 | `http-500`                | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:00, OK 14:09:00 UTC                                                           |
-| `search-words-only`       | `facilitator` | next Alarms deploy   | Not yet: once, after that deploy                                                                                                        |
+| `search-words-only`       | `facilitator` | next rules deploy    | Not yet: a Prometheus rule ([The Prometheus rules](#the-prometheus-rules)), once deployed                                               |
 | `rpc-stalled`             | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:33:26, OK 13:47:26 UTC                                         |
 | `rpc-on-fallback`         | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:43:00, OK 13:48:00 UTC                                         |
 | `balance-stale`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:38, OK 13:47:38 UTC                                         |
