@@ -5,7 +5,7 @@ import { MODEL_ID } from "./model.js";
 
 /**
  * The search model's HTTP server (ADR 0014): `POST /embed` with `{"text": "...", "kind": "query"}`
- * (`kind` is `"listing"` when left out) answers
+ * (`kind` is `"listing"` or `"query"`, required) answers
  * `{"model", "vector"}`; `GET /health` answers 200 once the model is loaded. It reaches nothing
  * and holds no secret: the facilitator calls it over the environment's internal network.
  */
@@ -28,7 +28,8 @@ export async function startServer(options: { modelDir: string; port: number }) {
     } catch {
       return answer(400, { error: "body_not_json" });
     }
-    const { text, kind = "listing" } = (body ?? {}) as { text?: unknown; kind?: unknown };
+    // `kind` is required: a query left without it would be read to 512 tokens, not 256.
+    const { text, kind } = (body ?? {}) as { text?: unknown; kind?: unknown };
     if (typeof text !== "string") return answer(400, { error: "text_not_a_string" });
     if (kind !== "listing" && kind !== "query") return answer(400, { error: "unknown_kind" });
     try {
