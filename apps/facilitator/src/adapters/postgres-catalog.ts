@@ -193,7 +193,7 @@ export class PostgresCatalogStore implements CatalogStore {
   async waitingForVector(query: CatalogSearch, model: string): Promise<boolean> {
     const { rows } = await this.listPool.query<{ waiting: boolean }>(
       `SELECT EXISTS (
-         SELECT 1 FROM catalog JOIN catalog_search USING (seq)
+         SELECT 1 FROM catalog LEFT JOIN catalog_search USING (seq)
           WHERE model IS DISTINCT FROM $4
             AND ($1::text IS NULL OR type = $1)
             AND ($2::text IS NULL OR pay_to = $2)

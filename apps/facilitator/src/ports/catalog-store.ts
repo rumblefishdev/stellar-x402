@@ -105,8 +105,8 @@ export interface CatalogStore {
    */
   search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
   /**
-   * Whether a listing that passes `query`'s filters has no vector of `model` yet (ADR 0014): search
-   * by meaning can't find it, so an answer by meaning is partial.
+   * Whether a listing that passes `query`'s filters has no vector of `model` yet, or no card at all
+   * (ADR 0014): search by meaning can't find it, so an answer by meaning is partial.
    */
   waitingForVector(query: CatalogSearch, model: string): Promise<boolean>;
 }

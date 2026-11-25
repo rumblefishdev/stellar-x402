@@ -1250,6 +1250,18 @@ describe("PostgreSQL stores", () => {
     ).rejects.toThrow(/dimensions/);
   });
 
+  it("counts a listing without a card as waiting for its vector (ADR 0014)", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    await setVector(pool, entry.key, "m", unitVector(0.8));
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 }, "m")).toBe(false);
+    // As after a rewrite that could not read the listings: the listing stands, its card is gone.
+    await pool.query("DELETE FROM catalog_search");
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 }, "m")).toBe(true);
+  });
+
   it("clears a card's vector when the start's rewrite changes its text, and keeps it otherwise", async () => {
     await db.empty();
     const { catalog, searchCards } = db.stores();
