@@ -42,7 +42,7 @@ Add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
       "command": "node",
       "args": ["/absolute/path/to/stellar-x402/apps/mcp-local/dist/index.js"],
       "env": {
-        "STELLAR_X402_DISCOVERY_URL": "https://your-catalog.example.com",
+        "STELLAR_X402_DISCOVERY_URL": "https://x402-facilitator.sorobanscan.com",
         "STELLAR_X402_SECRET_KEY": "S... (a testnet-only key)",
         "STELLAR_X402_MAX_PER_CALL": "10000",
         "STELLAR_X402_DAILY_BUDGET": "100000"
