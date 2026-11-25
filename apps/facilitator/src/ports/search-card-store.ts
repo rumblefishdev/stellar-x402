@@ -22,8 +22,9 @@ export interface SearchCard {
 }
 
 /**
- * The search cards, one per catalog listing (ADR 0014). The catalog's write keeps each card in
- * step with its listing; this store lets a starting release rewrite every card with its own rules.
+ * The search cards, one per catalog listing, and their vectors (ADR 0014). The catalog's write
+ * keeps each card in step with its listing; this store lets a starting release rewrite every card
+ * with its own rules, and the vector pass and the catalog's write store the vectors.
  */
 export interface SearchCardStore {
   /** Up to `limit` listings after `after` (a `seq`; `"0"` from the start), in catalog order. */
@@ -34,10 +35,6 @@ export interface SearchCardStore {
    * already holds this text. True when written.
    */
   write(listing: CardListing): Promise<boolean>;
-}
-
-/** The cards' vectors (ADR 0014), which the vector pass and the catalog's write store. */
-export interface SearchVectorStore {
   /** Up to `limit` cards without a vector after `after` (a `seq`; `"0"` from the start), in order. */
   cards(after: string, limit: number): Promise<SearchCard[]>;
   /** The card of the listing at `key`; undefined when the catalog holds no such listing. */

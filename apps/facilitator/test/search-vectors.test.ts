@@ -137,16 +137,13 @@ describe("the vector pass at start (0120 F)", () => {
     expect(state.calls[1]).toBe(`${plain!.name}\n${plain!.description}`);
   });
 
-  it("cuts the text at 2,000 characters before embedding it (B)", async () => {
+  it("sends the whole text, which the model cuts at 2,000 characters (B)", async () => {
     await list("long", { description: "lorem ipsum ".repeat(400) });
     const { embedder, state } = fakeEmbedder();
     await vectors(embedder).start();
     const [card] = await readCards(db.pool);
-    const whole = [card!.name, card!.tags, card!.description, card!.parameters]
-      .filter((field) => field !== "")
-      .join("\n");
-    expect(whole.length).toBeGreaterThan(2_000);
-    expect(state.calls).toEqual([whole.slice(0, 2_000)]);
+    expect(state.calls).toEqual([meaningText(card!)]);
+    expect(state.calls[0]!.length).toBeGreaterThan(2_000);
   });
 
   it("asks the model for one listing at a time (F)", async () => {

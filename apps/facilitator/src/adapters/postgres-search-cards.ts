@@ -6,10 +6,9 @@ import type {
   Embedding,
   SearchCard,
   SearchCardStore,
-  SearchVectorStore,
 } from "../ports/index.js";
 
-export class PostgresSearchCardStore implements SearchCardStore, SearchVectorStore {
+export class PostgresSearchCardStore implements SearchCardStore {
   constructor(private readonly pool: pg.Pool) {}
 
   async listings(after: string, limit: number): Promise<CardListing[]> {

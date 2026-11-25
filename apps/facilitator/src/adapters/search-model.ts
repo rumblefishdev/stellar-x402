@@ -7,7 +7,7 @@ const DIMS = 384;
 /** What the search model container answers to `POST /embed` (`apps/search-model`). */
 const ANSWER = z.object({
   model: z.string(),
-  vector: z.array(z.number().finite()).length(DIMS),
+  vector: z.array(z.number()).length(DIMS),
 });
 
 /**

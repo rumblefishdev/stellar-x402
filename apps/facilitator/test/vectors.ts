@@ -26,12 +26,11 @@ export interface CardFields {
   parameters: string;
 }
 
-/** The meaning text of a card (0120 point B): its fields joined with "\n", empty ones skipped, cut at 2,000. */
+/** The meaning text of a card (0120 point B): its fields joined with "\n", empty ones skipped. */
 export function meaningText(card: CardFields): string {
   return [card.name, card.tags, card.description, card.parameters]
     .filter((field) => field !== "")
-    .join("\n")
-    .slice(0, 2_000);
+    .join("\n");
 }
 
 /** pgvector's text form of a vector. */

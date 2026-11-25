@@ -73,7 +73,7 @@ const CURSOR = z.discriminatedUnion("ranking", [
 ]);
 
 /** How the page a cursor came from was ranked: fused, with its model, or words alone. */
-export interface Ranking {
+interface Ranking {
   ranking: "words" | "fused";
   model?: string;
 }

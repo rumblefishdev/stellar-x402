@@ -1,26 +1,22 @@
 import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
-import type { CatalogKey, Embedder, SearchCard, SearchVectorStore } from "../ports/index.js";
+import type { CatalogKey, Embedder, SearchCard, SearchCardStore } from "../ports/index.js";
 
 /** Cards read at a time, as the card rewrite reads listings. */
 const PAGE = 100;
-/** ADR 0014: the meaning part reads the card's fields joined, cut at 2,000 characters. */
-const MAX_TEXT_CHARS = 2_000;
 
 /**
  * The text a card's vector is made from: its fields joined with a line break, empty ones left
- * out, cut at 2,000 characters counted as code points, as the search model cuts it, so a cut never
- * splits one.
+ * out. The search model reads its first 2,000 characters (ADR 0014).
  */
 export function meaningText(card: SearchCard): string {
-  const joined = [card.name, card.tags, card.description, card.parameters]
+  return [card.name, card.tags, card.description, card.parameters]
     .filter((field) => field !== "")
     .join("\n");
-  return Array.from(joined).slice(0, MAX_TEXT_CHARS).join("");
 }
 
 export interface SearchVectorsDeps {
-  store: SearchVectorStore;
+  store: SearchCardStore;
   embedder: Embedder;
   logger: Logger;
   metrics: ProcessMetrics;
