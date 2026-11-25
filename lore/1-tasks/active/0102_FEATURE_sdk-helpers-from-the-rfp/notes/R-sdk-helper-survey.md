@@ -161,8 +161,11 @@ All decided by akot on 2026-11-25; the owner's agreement to the resulting list i
    - The trustline check of decision 8, for `payTo` at start. It answers `ok`, `missing` or
      `unknown` and doesn't throw; `unknown` is a `payTo` that is a contract, or a token that is
      not a classic asset. The seller decides whether to stop.
-   - The catalog's answer, read for the seller after each settlement: listed, or refused with one
-     of the eight reasons the facilitator sends in `EXTENSION-RESPONSES`. The Rust crate gives it
+   - The catalog's answer, read for the seller after each settlement: taken for cataloging
+     (`processing`), or refused with one of the eight reasons the facilitator sends in
+     `EXTENSION-RESPONSES`. The answer comes from the synchronous check only: cataloging runs after
+     the `/settle` answer and can still leave the route out (`other_pay_to`, `too_large`,
+     `no_listing`, over budget), and that outcome isn't sent back today. The Rust crate gives it
      through `on_event`; in TypeScript it is in the settle response and `examples/http-api` reads
      it nowhere, so a seller can sell without knowing it isn't listed. This is the M2 answer to
      "seller-side helpers for discovery metadata" (`07:68`) and needs nothing from the private
@@ -190,8 +193,9 @@ All decided by akot on 2026-11-25; the owner's agreement to the resulting list i
      `unsupported_payment`, `asset_not_allowed`, `over_price_limit`, `over_budget`,
      `insufficient_funds`, `payment_failed`, `payment_rejected`, `payment_unknown`. Two are new,
      named as the facilitator's refusals in `trustline.ts`: `payer_trustline_missing` and
-     `payto_trustline_missing`. The other five stay MCP's: without a payment, a 404 or a 500 is a
-     plain `Response` here.
+     `payto_trustline_missing`. The other six stay MCP's (`upstream_error`, `invalid_input`,
+     `invalid_cursor`, `resource_not_found`, `unsafe_url`, `response_too_large`): without a
+     payment, a 404 or a 500 is a plain `Response` here.
    - `paid` on the error: `none` (nothing signed or sent, the amount goes back), `not_settled`
      (`payment_rejected`: sent, and the seller says it did not settle) and `unknown`
      (`payment_unknown`). `not_settled` still counts as spent: the signed authorization stays valid
@@ -228,10 +232,11 @@ All decided by akot on 2026-11-25; the owner's agreement to the resulting list i
      seller's check at start (decision 3) needs it anyway; a buyer's setup and MCP's start can use
      it, so an agent isn't stopped at its first payment.
    - 0092's MCP part (the type of `signingError`, not the `#10|#13` regex) goes before this
-     task's first PR, so that PR stays a move.
+     task's first PR, so that PR starts from the codes in place.
 
 Seen while deciding 7 and 8: the MCP server is in Tranche #2 and this task moves code on its money
-path during M2. The first PR is early and a move only, with the testnet e2e run before and after.
+path during M2. The first PR is early: the round trip moves behind the SDK's new API under the same
+`pay.test.ts`, with the testnet e2e run before and after.
 
 9. **Agent**, decided (akot, 2026-11-25):
    - `createBazaarClient({ url?, timeoutMs? })` with `list` and `search`, moved from `catalog.ts`.
