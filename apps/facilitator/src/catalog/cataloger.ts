@@ -430,9 +430,8 @@ export function createCataloger({
       // Not awaited: the listing is stored, and a slow or failing model must not hold up the
       // check. `drain()` still waits for it, so it ends before the pools do.
       if (vectors && outcome !== "stale") {
-        const vectored = vectors
-          .listed(entry.key)
-          .catch((error: unknown) => internalError("vector", fields, origin, error));
+        // Never rejects: `listed()` logs and counts its own failure.
+        const vectored = vectors.listed(entry.key);
         inFlight.add(vectored);
         void vectored.finally(() => inFlight.delete(vectored));
       }

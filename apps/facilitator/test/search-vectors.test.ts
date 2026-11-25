@@ -257,6 +257,18 @@ describe("a listing's vector after the catalog writes it (0120 E)", () => {
     expect(two!.embedding).toBeNull();
   });
 
+  it("asks the model for one listing at a time, with the pass and several writes at once (ADR 0014)", async () => {
+    for (const host of ["a", "b", "c", "d", "e"]) await list(host, { description: host });
+    const { embedder, state } = fakeEmbedder();
+    const searchVectors = vectors(embedder);
+    await Promise.all([
+      searchVectors.start(),
+      ...["a", "b", "c"].map((host) => searchVectors.listed(key(host))),
+    ]);
+    expect(state.calls.length).toBeGreaterThanOrEqual(5);
+    expect(state.maxInFlight).toBe(1);
+  });
+
   it("logs and counts a failure, and resolves: the listing stays stored", async () => {
     await list("one", { description: "Weather one" });
     const { embedder } = fakeEmbedder(() => true);

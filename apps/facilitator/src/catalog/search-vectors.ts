@@ -53,6 +53,15 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
   const { store, embedder, logger, metrics } = deps;
   let closed = false;
   let running: Promise<void> | undefined;
+  // The model's queue: the pass and every catalog write wait their turn, so the model embeds one
+  // listing at a time and a query's vector waits behind one listing at most.
+  let turn: Promise<unknown> = Promise.resolve();
+  const embed = (text: string) => {
+    const answer = turn.then(() => embedder.embed(text));
+    // The next one waits for this one to end, failed or not; its caller still gets the failure.
+    turn = answer.catch(() => {});
+    return answer;
+  };
 
   const run = async () => {
     let written = 0;
@@ -76,7 +85,7 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
         const textHash = sha256(text);
         if (card.model === model && card.textHash === textHash) continue;
         try {
-          const embedding = await embedder.embed(text);
+          const embedding = await embed(text);
           model = embedding.model;
           if (await store.writeVector(card, embedding, textHash)) written++;
         } catch (error) {
@@ -105,7 +114,7 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
         if (card === undefined)
           throw new Error("the catalog holds no card for the listing written");
         const text = meaningText(card);
-        await store.writeVector(card, await embedder.embed(text), sha256(text));
+        await store.writeVector(card, await embed(text), sha256(text));
       } catch (error) {
         logger.warn("search_vector_failed", { resourceUrl: key.resourceUrl, error });
         metrics.increment("search_vector_failures_total");

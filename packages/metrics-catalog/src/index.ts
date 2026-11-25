@@ -403,7 +403,6 @@ export const CATALOG = [
         "not_success",
         "no_ledger",
         "header",
-        "vector",
         "other",
       ],
       origin: ["settle", "resolved", "other"],
