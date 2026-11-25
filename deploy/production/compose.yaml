@@ -74,7 +74,7 @@ services:
 
   # The search model (ADR 0014), from the facilitator's image: it turns a listing's or a query's
   # text into its vector. It holds no secret and reaches nothing; the facilitator calls it over
-  # `db`.
+  # `search`.
   search-model:
     image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}
     command: [node, /search-model/dist/main.js]

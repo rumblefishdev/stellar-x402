@@ -124,16 +124,18 @@ a whole zone, to Cloudflare on the Free plan.
   110 GiB, and ours used 181 MiB.
 - **Testnet and mainnet share the facilitator process and OpenBao,** never a database, a key or a
   channel set (AD-12).
-- **No container publishes a port on the host,** and each environment gets two Docker networks
-  of its own, both part of its compose project:
+- **No container publishes a port on the host,** and each environment gets three Docker networks
+  of its own, all part of its compose project:
   - `x402-<environment>-edge`: `cloudflared` and the facilitator only. Both reach the internet
     through it: `cloudflared` to Cloudflare, the facilitator to its RPC URLs;
-  - `x402-<environment>-db`: `internal: true`, the facilitator, the search model, Postgres and the
-    migration services only, with no route out. Only the facilitator and a network's migration
+  - `x402-<environment>-db`: `internal: true`, the facilitator, Postgres and the migration
+    services only, with no route out. Only the facilitator and a network's migration
     service hold that network's database password. Once mainnet joins, every migration service
     reaches every Postgres, and only the password keeps `migrate-mainnet` out of testnet's
     database; a network per database would close that, at one more network per database
-    (0077 decision 3).
+    (0077 decision 3);
+  - `x402-<environment>-search`: `internal: true`, the facilitator and the search model only
+    (ADR 0014), so the model reaches no database and nothing outside.
   - The facilitator never joins the ClickHouse project's `app` network, so it can't reach
     ClickHouse. OpenBao is reached over unix sockets (ADR 0013), not a network.
   - Each network has a fixed /28 from `172.31.200.0/24`, set in the compose file, since the

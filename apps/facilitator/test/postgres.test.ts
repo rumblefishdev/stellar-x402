@@ -1250,6 +1250,25 @@ describe("PostgreSQL stores", () => {
     ).rejects.toThrow(/dimensions/);
   });
 
+  it("clears a card's vector when the start's rewrite changes its text, and keeps it otherwise", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    await setVector(pool, entry.key, "m", unitVector(0.8));
+    // A card written under older rules: the rewrite writes this release's text over it.
+    await pool.query("UPDATE catalog_search SET name = 'old rules'");
+    const [listing] = await searchCards.listings("0", 10);
+    expect(await searchCards.write(listing!)).toBe(true);
+    expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
+      [null, null],
+    ]);
+    // The same text again: nothing is written, the vector stays.
+    await setVector(pool, entry.key, "m", unitVector(0.6));
+    expect(await searchCards.write(listing!)).toBe(false);
+    expect((await readCards(pool))[0]!.model).toBe("m");
+  });
+
   it("clears a card's vector when a catalog write changes its text, and keeps it when the text stays", async () => {
     await db.empty();
     const { catalog } = db.stores();
