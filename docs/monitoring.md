@@ -12,6 +12,9 @@ when the VM goes quiet (ADR 0011, tasks 0027 and 0139). Both reach the Slack cha
 - Every alarm, with its shape and missing-data rule:
   [the alarm list](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md).
 - The stacks and the alarm groups: [infra/README.md](../infra/README.md).
+- The dashboard: https://monitoring.sorobanscan.com, folder x402, for every @rumblefish.pl
+  address (Cloudflare Access, a one-time PIN), from
+  [`deploy/metrics/dashboards/`](../deploy/metrics/dashboards/); edited there, never in Grafana.
 
 This page has every alarm: a section for each one that is on, and the [alarms that are off](#the-alarms-that-are-off)
 with the task that turns each on. [Every metric](#every-metric) lists the catalog's metrics and
@@ -19,53 +22,54 @@ the alarms that read them. The [uptime figure](#the-uptime-figure) is under Upti
 
 ## The alarms that are on
 
-| Alarm                     | Group         | On since             | Fired on purpose                                                                                                                        |
-| ------------------------- | ------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `emf-validation`          | `telemetry`   | 2026-11-06           | `make fire-test` after each Alarms deploy (delivery test, seen): 2026-11-06 08:39:50 and 11:18:30, 2026-11-09 12:22:01 and 15:13:28 UTC |
-| `emf-parsing`             | `telemetry`   | 2026-11-06           | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                   |
-| `uptime`                  | `uptime`      | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:34:24, OK 13:48:24 UTC                                                        |
-| `uptime-flapping`         | `uptime`      | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:37:34, OK 14:08:34 UTC                                                        |
-| `balance-low`             | `watch`       | 2026-11-06 11:16 UTC | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack                                       |
-| `balance-critical`        | `watch`       | 2026-11-06 11:16 UTC | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack                                                    |
-| `watch-errors`            | `watch`       | 2026-11-06 11:16 UTC | Not fired: `AWS/Lambda` takes no hand-written point ([Drills](#drills))                                                                 |
-| `watch-no-invocations`    | `watch`       | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                                        |
-| `protocol-changed`        | `protocol`    | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                          |
-| `protocol-upgrade-coming` | `protocol`    | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                        |
-| `facilitator-silent`      | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:49, OK 13:47:49 UTC                                                        |
-| `gauges-silent`           | `facilitator` | 2026-11-09 12:19 UTC | Not fired: it needs gauges missing while sweeps run ([Drills](#drills))                                                                 |
-| `http-500`                | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:00, OK 14:09:00 UTC                                                           |
-| `rpc-stalled`             | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:33:26, OK 13:47:26 UTC                                         |
-| `rpc-on-fallback`         | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:43:00, OK 13:48:00 UTC                                         |
-| `balance-stale`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:38, OK 13:47:38 UTC                                         |
-| `pending`                 | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:12, OK 13:47:12 UTC                                         |
-| `sweeps-stopped`          | `facilitator` | 2026-11-09 12:19 UTC | Not fired: it needs sweeps that run but list nothing ([Drills](#drills))                                                                |
-| `settlement-expired`      | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:29, OK 14:09:29 UTC                                                           |
-| `landed-after-expired`    | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:15, OK 14:09:15 UTC                                                           |
-| `history-gone`            | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:33, OK 14:09:33 UTC                                                           |
-| `submit-failed`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:43, OK 14:09:43 UTC                                                           |
-| `refused-after-verify`    | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:58, OK 14:09:58 UTC                                                           |
-| `failure-ours`            | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:42, OK 14:09:42 UTC                                                           |
-| `signer-failures`         | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:34, OK 14:09:34 UTC                                                           |
-| `store-outage`            | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:05, OK 14:04:05 UTC                                                           |
-| `hook-failures`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:37, OK 14:09:37 UTC                                                           |
-| `queue-waiting`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:42, OK 13:47:42 UTC                                         |
-| `channel-quarantined`     | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:22, OK 13:47:22 UTC                                         |
-| `pool-health`             | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:30, OK 14:14:30 UTC                                                           |
-| `breaker-opened`          | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point for each kind ([Drills](#drills)): ALARM 13:49:05–13:49:17, OK 14:09:05–14:09:17 UTC                           |
-| `budget-nearing`          | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:31, OK 14:19:31 UTC                                                           |
-| `commit-unmatched`        | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:50, OK 14:09:50 UTC                                                           |
-| `openbao-down`            | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:24, OK 13:46:24 UTC                                         |
-| `disk`                    | `disk`        | 2026-11-09 15:11 UTC | 2026-11-09, fake points at 85% ([Drills](#drills)): ALARM 15:26:16, OK 15:36:16 UTC; `audit-disk` (90%) stayed OK                       |
-| `audit-disk`              | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                         |
-| `facilitator-failed`      | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, for real: the stop window's own stop (exit 130, fixed by #163), ALARM 13:46:53; then a fake point; OK 14:09:53 UTC          |
-| `watchdog-restart`        | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:09, OK 14:09:09 UTC                                                           |
-| `probe-silent`            | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:31, OK 13:46:31 UTC                                                        |
-| `telemetry-silent`        | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                        |
-| `credentials-stale`       | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                         |
-| `certificate`             | `host`        | 2026-11-09 12:19 UTC | Not fired: every hour holds the real days left ([Drills](#drills))                                                                      |
-| `log-volume`              | `logVolume`   | 2026-11-09 12:19 UTC | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                   |
-| `memory`                  | `memory`      | 2026-11-09 15:11 UTC | Not fired: a `Minimum` alarm can't be faked while the agent writes real samples ([Drills](#drills))                                     |
-| `monitoring-heartbeat`    | `heartbeat`   | 2026-11-24 12:48 UTC | 2026-11-24, Alertmanager stopped ([Drills](#drills)): ALARM 13:11:33, OK 13:13:33 UTC; `make fire-test` at 12:49:29                     |
+Since 0139's switch (2026-11-25 13:43 UTC) most checks are Prometheus rules on the monitoring VM, and CloudWatch keeps the alarms below.
+
+### In CloudWatch
+
+| Alarm                     | Group       | On since             | Fired on purpose                                                                                                                                                                          |
+| ------------------------- | ----------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `emf-validation`          | `telemetry` | 2026-11-06           | `make fire-test` after each Alarms deploy (delivery test, seen): 2026-11-06 08:39:50 and 11:18:30, 2026-11-09 12:22:01 and 15:13:28 UTC, 2026-11-25 13:56:05 UTC (after the switch, seen) |
+| `emf-parsing`             | `telemetry` | 2026-11-06           | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                                                                     |
+| `uptime`                  | `uptime`    | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:34:24, OK 13:48:24 UTC; 2026-11-25, the stop window ([Drills](#2026-11-25-the-switchs-drill)): ALARM 14:36:48 UTC               |
+| `uptime-flapping`         | `uptime`    | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:37:34, OK 14:08:34 UTC                                                                                                          |
+| `balance-low`             | `watch`     | 2026-11-06 11:16 UTC | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack                                                                                         |
+| `balance-critical`        | `watch`     | 2026-11-06 11:16 UTC | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack                                                                                                      |
+| `watch-errors`            | `watch`     | 2026-11-06 11:16 UTC | Not fired: `AWS/Lambda` takes no hand-written point ([Drills](#drills))                                                                                                                   |
+| `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                                                                                          |
+| `protocol-changed`        | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                                                                            |
+| `protocol-upgrade-coming` | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                                                                          |
+| `audit-disk`              | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                                                                           |
+| `telemetry-silent`        | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                                                                          |
+| `credentials-stale`       | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                                                                           |
+| `certificate`             | `host`      | 2026-11-09 12:19 UTC | Not fired: every hour holds the real days left ([Drills](#drills))                                                                                                                        |
+| `log-volume`              | `logVolume` | 2026-11-09 12:19 UTC | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                                                                     |
+| `monitoring-heartbeat`    | `heartbeat` | 2026-11-24 12:48 UTC | 2026-11-25, Alertmanager stopped ([Drills](#2026-11-25-the-heartbeat-again)): ALARM 14:20:33, OK 14:22:33 UTC, both seen in Slack. 2026-11-24 fired but never reached Slack               |
+
+### As Prometheus rules
+
+On since 2026-11-25 13:43 UTC ([The Prometheus rules](#the-prometheus-rules)). Their CloudWatch alarms, drilled on 2026-11-09, were deleted at 13:45 UTC.
+
+| Rule                              | Group               | Fired on purpose                                                                                                                         |
+| --------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `x402-event`                      | `facilitator, host` | 2026-11-25, the drill textfile ([Drills](#2026-11-25-the-switchs-drill)): all 19 checks, 14:22:00 to 14:41:15 UTC, seen in Slack         |
+| `x402-rpc-stalled`                | `facilitator`       | 2026-11-25, the drill textfile: 14:25:15 to 14:42:00 UTC                                                                                 |
+| `x402-balance-stale`              | `facilitator`       | 2026-11-25, the drill textfile: 14:21:15 to 14:42:00 UTC                                                                                 |
+| `x402-pending`                    | `facilitator`       | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
+| `x402-queue-waiting`              | `facilitator`       | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
+| `x402-channel-quarantined`        | `facilitator`       | 2026-11-25, the drill textfile: 14:21:15 to 14:42:00 UTC                                                                                 |
+| `x402-rpc-on-fallback`            | `facilitator`       | 2026-11-25, the drill textfile: 14:35:15 to 14:42:00 UTC                                                                                 |
+| `x402-sweeps-stopped`             | `facilitator`       | 2026-11-25, a flat counter in the drill textfile: 14:21:30 to 14:45:45 UTC                                                               |
+| `x402-openbao-down`               | `host`              | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
+| `x402-facilitator-silent`         | `facilitator`       | 2026-11-25, the stop window: 14:39:15 to 14:39:45 UTC (10 minutes after the stop)                                                        |
+| `x402-gauge-stale`                | `facilitator`       | 2026-11-25, a stale stamp in the drill textfile while the process ran: 14:46:45 to 14:54:30 UTC                                          |
+| `x402-target-down`                | `server`            | 2026-11-25, the stop window (`job` facilitator): 14:34:15 to 14:39:45 UTC                                                                |
+| `x402-textfile-stale`             | `server`            | 2026-11-25, the probe timer stopped: 14:33:45 to 14:39:45 UTC, each of its 3 files                                                       |
+| `x402-server-silent`              | `server`            | 2026-11-25, the agent stopped: 15:24:00 to 15:24:30 UTC                                                                                  |
+| `x402-agent-behind`               | `server`            | Not fired live: its series reach the VM through the sends they measure; `agent-behind.test.yml`                                          |
+| `x402-disk-root`                  | `disk`              | Not fired: no scenario or live fill of the root disk yet; CloudWatch's `disk` on the same node_exporter-side reading fired on 2026-11-09 |
+| `x402-memory`                     | `memory`            | Not fired live: a fake point can't hold a minimum over 5 minutes against the real ones                                                   |
+| `x402-agent-certificate`          | `server`            | Not fired: every probe run writes the real days left                                                                                     |
+| `Watchdog`, `NotificationsFailed` | the VM's own        | 2026-11-24: the heartbeat ([Drills](#2026-11-25-the-heartbeat-again)) and a broken credential (soroban-infrastructure#19)                |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
 `breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). `log-volume` ends in
@@ -558,8 +562,8 @@ channels.
 1. The pool takes a channel out only when the RPC still answers, at the end of the read's
    timeout, that the channel's account doesn't exist; a read that fails or times out keeps the
    channel. So the usual cause is a channel account that is gone, such as after a testnet reset,
-   or an RPC behind on a new account. `pool_quarantined` in `x402-facilitator` says how many are
-   out.
+   or an RPC behind on a new account. `pool_quarantined` in Prometheus on the VM says how many
+   are out.
 2. The `settlement_submit_failed` event names the channel: its error reads
    `Account not found: <channel>`, and [submit-failed](#submit-failed) fires beside this alarm.
    In Logs Insights on `/x402/production/app`:
@@ -899,10 +903,11 @@ The metrics agent's client certificate has under 30 days left. Renew it as the
 Every metric in [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts), then
 the AWS metrics the alarms read. What each one measures and where it comes from is in
 [G-metrics](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
-set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Logs Insights or in
-the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
-lacks. The Dimensions column is CloudWatch's. In Prometheus (0139) a series also carries each field
-the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_total`'s `replay`.
+set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Prometheus on the VM or in the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
+lacks. Since 0139's switch the `x402-facilitator` metrics are Prometheus series on the VM, where the
+Dimensions column's names are labels, and each field the catalog closes in `fieldValues` is one
+too, such as `settlement_outcomes_total`'s `replay`; the `x402-host` ones also still reach
+CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are CloudWatch's alone.
 
 | Metric                                      | Namespace          | Kind, unit     | Dimensions                                               | Alarms                                                                                                        |
 | ------------------------------------------- | ------------------ | -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -1095,11 +1100,12 @@ reset-failed x402@production`, the agent, the credentials timer and the probe ti
 - **What happened:** ALARM at 13:11:33, 20 minutes 39 seconds after the stop, not the 10 to 15
   that two empty 5-minute periods suggest: CloudWatch waits for late data before it reads a
   period as missing. Alertmanager started at 13:11:50; OK at 13:13:33.
-- **Shown once:** the ALARM went out as one publish to `x402-production-alarms` at 13:11:33,
-  delivered once to its one subscription, the Slack channel's Amazon Q endpoint
-  (`NumberOfNotificationsDelivered` 1, `NumberOfNotificationsFailed` 0), and the OK as one more
-  at 13:13:33. The alarm sends nothing while it stays in ALARM, so a longer outage is still one
-  message.
+- **Not seen in Slack.** SNS delivered the ALARM once to its one subscription, Amazon Q
+  (`NumberOfNotificationsDelivered` 1, `NumberOfNotificationsFailed` 0 at 13:11), and the OK once
+  at 13:13:33. Amazon Q's Slack token had been inactive since 2026-11-20 or before, so Slack
+  refused both (`account_inactive` in `/aws/chatbot/x402-production-alarms`, us-east-1), as it
+  did the fire-test at 12:49:29. Nothing in AWS showed it. Found on 2026-11-25 and the drill run
+  again ([2026-11-25: the heartbeat, again](#2026-11-25-the-heartbeat-again)).
 - **Why stopping Alertmanager covers the VM and Prometheus:** the alarm reads only the heartbeat
   topic's `NumberOfMessagesPublished`. Prometheus evaluates the `Watchdog` and Alertmanager
   publishes it, so a stopped Prometheus (no alert to send), a stopped Alertmanager (nobody to
@@ -1108,3 +1114,53 @@ reset-failed x402@production`, the agent, the credentials timer and the probe ti
 - **What it shows:** the topic's count, the alarm's missing-data rule and its path to Slack. A
   broken credential, the other cause, was seen for real at 11:43–11:46 before the helper's
   `HOME` fix: `NotificationsFailed` posted it to Slack (soroban-infrastructure#19).
+
+### 2026-11-25: the heartbeat, again
+
+- **Why again:** the 2026-11-24 drill never reached Slack. Amazon Q's Slack token was inactive
+  (`account_inactive` since 2026-11-20 or before, in `/aws/chatbot/<configuration>` in
+  `us-east-1`), so no CloudWatch alarm of x402, prices-api or the explorer reached Slack in that
+  time, while SNS reported every delivery. Fixed at 13:53 UTC by authorizing the Amazon Q app in
+  Slack again, then inviting its bot to each channel; the fire-test at 13:56:05 was seen.
+- **How:** `ssh monitoring 'sudo docker stop monitoring-alertmanager-1'` at 14:00:08 UTC, started
+  again at 14:20:40.
+- **What happened:** ALARM at 14:20:33, 20 minutes 25 seconds after the stop, and OK at 14:22:33,
+  each delivered once by SNS and each seen once in `#stellar-x402-bot` (the OK as a reply in the
+  ALARM's thread). No error in Amazon Q's log.
+
+### 2026-11-25: the switch's drill
+
+Every rule fired once the same day as the switch (0139, G-switch-plan), in Slack through
+Alertmanager, with its `check`, `severity` and description, and resolved. The times are the
+VM's `ALERTS{alertstate="firing"}`, UTC.
+
+- **The drill textfile,** `/var/lib/x402/textfile/drill.prom` on ch-prod-01, rewritten every
+  minute from 14:20:53 to 14:41, then removed. Every series carried `drill="1"` and, where a rule
+  aggregates by network, `network="drill"`: the gauges past their thresholds, `openbao_up 0`, a
+  flat `settlement_sweeps_total`, and each Event counter at 0, then 1 from 14:21:39
+  (`pool_events_total{type="sequence-resync"}` 5). The Event rule sent 19 messages, one per
+  check; `http-500`, `verify-rpc-unavailable`, `facilitator-failed` and `watchdog-restart` sum
+  across networks, so they carry none. `store-outage`'s next step names
+  `x402-db-drill@production`, the drill network's name.
+- **`gauge-stale`:** a stamp 1000 s old (`settlement_oldest_open_seconds_last_read_timestamp_seconds`,
+  `network="drill"`) in the drill textfile from 14:42 to 14:49, while the process ran. The rule
+  is gated on the liveness series, so a stopped process never fires it (that is
+  `facilitator-silent`'s); G-switch-plan had expected the stop window to.
+- **The stop window,** 14:28:50 to 14:39:31, announced in the team's channel: `x402@production`
+  and `x402-host-probe.timer` stopped, then started. `target-down` (`job` facilitator),
+  `textfile-stale` for each of the probe's 3 files, `facilitator-silent` 10 minutes after the
+  stop, and CloudWatch's `uptime` (14:36:48, seen) fired. `/health` read `ready` at 14:40.
+- **The agent,** `x402-metrics` stopped 15:18:44 to 15:24:08: `server-silent` fired at 15:24:00.
+  `facilitator-silent` went pending at 15:23:40 and resolved with the agent.
+- **Found:**
+  - Stopping the agent's node-exporter alone can't fire `target-down` for `job` node:
+    `x402-metrics.service` runs Compose with `--abort-on-container-exit` and `Restart=on-failure`,
+    so the whole agent came back in 5 seconds (14:49:29 to 14:49:34). `target-down` fired for the
+    facilitator's target instead.
+  - Removing a textfile fires `textfile-stale` once for it (`drill.prom`, 14:54:30): its last
+    mtime is read for 5 more minutes and grows past 300 s. One message, resolved at once.
+  - `breaker-opened-asset`'s text read "A asset spend breaker"; it reads "The … spend breaker" now.
+- **Not fired live:** `agent-behind` (`agent-behind.test.yml`), `disk-root`, `memory` and
+  `agent-certificate` (the on-table says why).
+- **In the metrics' history:** every series with `drill="1"` between 14:20 and 14:55 on
+  2026-11-25 is the drill's, and the facilitator's and the agent's gaps are the windows above.
