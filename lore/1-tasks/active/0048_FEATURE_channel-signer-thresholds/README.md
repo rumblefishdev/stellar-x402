@@ -230,6 +230,26 @@ local PostgreSQL and the public testnet RPCs, 2 channels instead of 20. Key v1 w
      `.env` exists, it stops before copying the compose files unless all four names are there
      (code review, D1).
 
+6. **Stan's review of #234, #235 and #238, all 12 points accepted** (okarcz, 2026-11-25):
+   - **#234:** A and B0 don't answer the `upto` trigger: they set the fee account, the receiver
+     authorizer, to medium 2, which `require_auth` checks, so `upto` stops; at medium 1 nothing
+     changes for it. ADR 0015 says so, and the `upto` re-check is an acceptance criterion of 0133.
+     ADR 0013's weekly review checks the 500 XLM line from the first deploy. A planned rotation
+     under the status quo keeps only the channels and needs ADR 0013's exception and 0099's tool,
+     as B0 does. The research note's "a few hours" is now "about an hour, to be confirmed by the
+     drill", and the threat model's B0 is the 2-of-2.
+   - **#235:** the playbook reads `.env` the way Compose does (`export`, leading blanks, an empty
+     value counts as missing). The runbook's `.env` template takes the key's name and version as
+     placeholders, and `channel-quarantined` edits only the `CHANNELS_TESTNET` line, so a channel
+     repair after a rebuild doesn't reset the version to 1. The `.env` criterion closes on a start
+     after the playbook copied the new `compose.yaml`.
+   - **#238:** a credential seen outside the server can't sign (OpenBao has no network), so it is
+     not this section unless the audit log shows a signature the facilitator didn't make, which
+     means someone was on the server. The OpenBao-disk row updates the backup secret with
+     `put-secret-value` and sets up the snapshots' AppRole again. Step 7 redeploys the Alarms
+     stack as well as Watch. Step 6 says what to do when a malformed version or a wrong address
+     stops the start.
+
 ## Open Gaps
 
 Found on 2026-11-24 while walking through a theft of the hot key with today's setup
