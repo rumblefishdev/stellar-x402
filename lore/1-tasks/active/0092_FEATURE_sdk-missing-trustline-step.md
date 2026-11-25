@@ -84,18 +84,20 @@ is the one missing.
 
 ## Acceptance Criteria
 
-- [ ] Given a payer with no trustline to a classic asset, when the SDK builds the payment, then its
-      error names the account and the asset, and a test covers it
-- [ ] Given a `payTo` with no trustline, when the SDK builds the payment, then its error names that
-      account and the asset, and a test covers it
+- [x] Given a payer with no trustline to a classic asset, when the SDK builds the payment, then its
+      error names the account and the asset, and a test covers it (`packages/sdk/test/buyer.test.ts`,
+      "names the account and the asset of a missing trustline, the payer's")
+- [x] Given a `payTo` with no trustline, when the SDK builds the payment, then its error names that
+      account and the asset, and a test covers it (the same test, "the seller's")
 - [x] Given a missing trustline, the payer's or `payTo`'s, when MCP's `pay` fails, then its result
       names that account and the asset, not `insufficient_funds`, and a test covers it
       (`pay.test.ts`, "when signing fails for a payer without the trustline" and "a seller without
       the trustline"; on testnet E-14, E-14d and E-14e)
 - [x] Given a balance too low (`#10`), when MCP's `pay` fails, then it still answers
       `insufficient_funds` (`pay.test.ts`, "a payer with too little"; on testnet E-14b)
-- [ ] Given any other simulation failure, when the SDK builds the payment, then the error is
-      unchanged
+- [x] Given any other simulation failure, when the SDK builds the payment, then the error is
+      unchanged: upstream's error is the `PaymentError`'s `cause` as it was thrown, under
+      `payment_failed` (`buyer.test.ts`, "keeps upstream's error as it is, as the cause")
 
 ## Implementation Notes
 
@@ -122,7 +124,13 @@ the account and the asset in the tool's text. After the review of #247, on commi
 scenarios, 132 rows, none failed; E-14 named both in its second call too, and E-14d and the new
 E-14e (a `payTo` that doesn't exist) kept the RPC's text in the log only, as E-14 did.
 
-The SDK criteria (1, 2 and 5) are built with 0102's buyer helper, which moves this code.
+The SDK part, in 0102's buyer helper (#248), which moves this code to `packages/sdk/src/buyer`:
+
+- `call.ts`: the same `signingFailure`, answering a `PaymentError` with `account` and `asset` on
+  the two trustline codes and upstream's error as its `cause`.
+- `test/buyer.test.ts`: the two trustline codes with the account and the asset named; a simulation
+  upstream could not name, a trustline on neither's account and fields in no address's shape are
+  `payment_failed`, with upstream's error as the `cause` unchanged and nothing sent.
 
 ## Design Decisions
 
