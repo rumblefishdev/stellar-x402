@@ -10,14 +10,15 @@ describe("catalog", () => {
   it("E-04 lists with filters and paging, passing each filter on, one request per call", async () => {
     const server = await startServer(base());
     const resources = (items: DiscoveryResource[]) => items.map((i) => i.resource);
+    // Without a network, only the one the server pays on: testnet, so never H3 (0155).
     const cases: [Record<string, unknown>, DiscoveryResource[], number][] = [
-      [{}, CATALOG, 5],
-      [{ type: "http" }, [H1, H2, H3], 3],
+      [{}, [H1, H2, M1, M2], 4],
+      [{ type: "http" }, [H1, H2], 2],
       [{ type: "mcp", payTo: "GPAYEE1" }, [M1], 1],
       [{ network: "stellar:pubnet" }, [H3], 1],
       [{ extensions: "bazaar" }, [H1, M1], 2],
-      [{ limit: 2, offset: 0 }, [H1, H2], 5],
-      [{ limit: 2, offset: 4 }, [M2], 5],
+      [{ limit: 2, offset: 0 }, [H1, H2], 4],
+      [{ limit: 2, offset: 3 }, [M2], 4],
       [{ type: "http", network: "stellar:testnet", payTo: "GPAYEE2" }, [H2], 1],
     ];
     for (const [args, items, total] of cases) {

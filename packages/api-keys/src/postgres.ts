@@ -86,7 +86,7 @@ export class PostgresApiKeyStore implements ApiKeyStore {
 }
 
 /**
- * Account plans on PostgreSQL, in the table the facilitator's migration `0017_account_plans`
+ * Account plans on PostgreSQL, in the table the facilitator's migration `0018_account_plans`
  * makes. `planOf` reads that table alone, so the portal's role needs only `SELECT` on it.
  */
 export class PostgresAccountPlanStore implements AccountPlanStore {
@@ -144,7 +144,7 @@ export class PostgresAccountPlanStore implements AccountPlanStore {
 
 /**
  * Accounts' payments on PostgreSQL, through the view `account_usage` the facilitator's migration
- * `0017_account_plans` makes over the spend store's scope rows. It reads the view alone, so the
+ * `0018_account_plans` makes over the spend store's scope rows. It reads the view alone, so the
  * portal's role needs only `SELECT` on it.
  */
 export class PostgresAccountUsageReader implements AccountUsageReader {

@@ -80,6 +80,13 @@ jobs:
           -v "$PWD/deploy/metrics/rules:/rules:ro"
           prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
           check rules /rules/x402-production.yml
+      # When the rules fire, not only whether they parse: a scenario fails when a change to the
+      # generator makes a rule fire later, earlier, for longer or not at all. Every *.test.yml.
+      - run: >-
+          docker run --rm --entrypoint sh
+          -v "$PWD/deploy/metrics/rules:/rules:ro" -w /rules
+          prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+          -c 'promtool test rules *.test.yml'
 
   # The Rust SDK (task 0136), apart from contracts/, which builds WASM with its own profile.
   sdk-rust:

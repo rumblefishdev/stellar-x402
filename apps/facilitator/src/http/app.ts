@@ -27,6 +27,7 @@ import { admit, callerOf } from "./admit.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 import { rateLimit, rateLimiter, type RateLimit } from "./rate-limit.js";
+import { discoverySearch } from "./search.js";
 
 /** What the composition root hands to the HTTP adapter. Lanes add their services here. */
 export interface AppDeps {
@@ -363,6 +364,7 @@ export function createApp({
   });
   app.use("/discovery", rateLimit(budget("discovery", config.http.rateLimit.discovery)));
   app.get("/discovery/resources", discoveryResources(stores.catalog, logger, metrics));
+  app.get("/discovery/search", discoverySearch(stores.catalog, logger, metrics));
 
   app.use((_req, res) => {
     res.status(404).json({ error: "not_found" });

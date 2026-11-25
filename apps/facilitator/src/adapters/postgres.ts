@@ -39,6 +39,7 @@ import {
   windowEnd,
 } from "./rules.js";
 import { PostgresCatalogAttemptStore, PostgresCatalogStore } from "./postgres-catalog.js";
+import { PostgresSearchCardStore } from "./postgres-search-cards.js";
 
 /**
  * PostgreSQL adapters of the ports (AD-7, ADR 0012), on the schema in `postgres-schema.ts`.
@@ -80,6 +81,7 @@ export function postgresStores(
     settlements: new PostgresSettlementStore(pool),
     catalog: new PostgresCatalogStore(pool, pools.discovery ?? pool),
     catalogAttempts: new PostgresCatalogAttemptStore(pool),
+    searchCards: new PostgresSearchCardStore(pool),
     rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
     apiKeys: new PostgresApiKeyStore(pools.apiKeys ?? pool, pool),

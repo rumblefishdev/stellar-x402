@@ -260,7 +260,7 @@ amendment of 2026-11-23). Its limits, narrowest first:
   `SPEND_WINDOW_MS` (24 h by default), as for every budget. Each plan's fee budget is at least
   `MAX_FEE_STROOPS`, as every budget is. The portal reads the same setting to show an account its
   quota ([its README](../portal/README.md)): give both services the same text.
-- **An account's plan is a row** in `account_plans` (migration `0017_account_plans`), set by the
+- **An account's plan is a row** in `account_plans` (migration `0018_account_plans`), set by the
   operator's `keys plan` after the seller writes to us. An account without one is on `free`. A row
   naming a plan the config no longer has counts as `free`, logged as `account_plan_unknown`
   (error). The plan and the count are the account's, not the key's, so both survive a revoke and
@@ -452,7 +452,7 @@ Labels come from closed sets; addresses are in log lines only.
   for one scan of it, and a group past its 1.5 s fails the run, unretried. The release before never writes `refused`, and
   reads such a record as not final: during the deploy, an old process answers a repeat of a
   refused payment `settlement_pending` until its budget ends, and never settles it.
-  `0017_account_plans` (0107) adds each account's plan and the view `account_usage` the portal
+  `0018_account_plans` (0107) adds each account's plan and the view `account_usage` the portal
   reads an account's payments through; the release before reads neither.
 - An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
   failed run continues from the next step. It logs `migration_step` after each step and

@@ -1222,7 +1222,7 @@ doesn't start.
    `x402-portal@production` after it whenever the backend runs: it reads the credential when it
    starts, and its new connections fail until it has read the new one. The last `GRANT` (0107) is
    for the account's use the backend shows the hub: run this step again on the existing role once
-   the facilitator has applied `0017_account_plans`, or `account` answers `usage: null` (logged as
+   the facilitator has applied `0018_account_plans`, or `account` answers `usage: null` (logged as
    `hub_usage_unavailable`). `deploy/scripts/check-production-portal.sh` makes its role from these
    `GRANT` lines. A migration that replaces one of the four objects (the view `account_usage`
    included, by `DROP VIEW` and `CREATE VIEW`) must grant again: the grants are the object's, not

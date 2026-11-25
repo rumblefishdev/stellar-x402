@@ -821,7 +821,15 @@ threshold and this page's section. Until the switch nothing on the VM loads it.
 
 - `network` is a label, not part of the name: pubnet adds alert instances, not rules.
 - Every Event alarm is one branch of the single rule `x402-event`; its `check` label is the
-  alarm's name.
+  alarm's name. A branch fires on any increase in its window, or for a threshold above 1, on that
+  many in one period at any 15-second step. A branch with a threshold of 1 on one of the
+  facilitator's own counters also fires on a count above 0 in a process started within the
+  window: the process reports again at its start what the last one counted, as `history-gone`
+  does, and `increase()` sees no step when the value is the same. `pool-health` (5 in one period)
+  doesn't take this, nor do `facilitator-failed` and `watchdog-restart`, the host probe's
+  counters, which keep their totals across restarts.
+  `deploy/metrics/rules/event-restart-and-pool-health.test.yml` shows when a branch fires, ends
+  and stays quiet, in `promtool`.
 - Every alert has `severity`: `critical` for what would page on mainnet (`pending`, the
   `breaker-opened-*` alarms, `budget-nearing`, `sweeps-stopped`, `landed-after-expired`,
   `commit-unmatched`, `facilitator-silent`, `gauge-stale`), `warning` for the rest (lore 0139,
@@ -896,6 +904,7 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `settlement_nonce_reuse_total`              | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
 | `lease_changes_total`                       | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
 | `store_prune_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `search_card_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_internal_errors_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_attempts_total`                    | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_upsert_failures_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |

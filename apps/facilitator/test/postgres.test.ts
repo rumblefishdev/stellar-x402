@@ -9,14 +9,16 @@ import {
   apiKeyStoreContract,
   sealedKeyStoreContract,
 } from "@stellar-x402/api-keys/testing";
-import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
+import { CATALOG_KEY_VERSION, searchFields } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
+import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PostgresSpendStore, postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
+import { createSearchCardRewrite } from "../src/catalog/search-cards.js";
 import { main, migrateMain } from "../src/main.js";
 import {
   HashConflictError,
@@ -35,6 +37,8 @@ import { transferPayload } from "./payment.js";
 import {
   catalogAttemptStoreContract,
   catalogStoreContract,
+  searchCardStoreContract,
+  catalogSearchContract,
   rateLimitStoreContract,
   settlement,
   holdLease,
@@ -210,6 +214,11 @@ describe("PostgreSQL stores", () => {
   rateLimitStoreContract(async () => (await stores()).rateLimits);
   catalogStoreContract(async () => (await stores()).catalog);
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
+  catalogSearchContract(async () => (await stores()).catalog);
+  searchCardStoreContract(async () => {
+    const all = await stores();
+    return { catalog: all.catalog, cards: all.searchCards };
+  });
   apiKeyStoreContract(async () => (await stores()).apiKeys);
   sealedKeyStoreContract(async () => ({
     registry: (await stores()).apiKeys,
@@ -830,8 +839,10 @@ describe("PostgreSQL stores", () => {
     const pools = app.pools;
     expect(pools).toBeDefined();
     try {
-      // The startup sweep reads the settlements on the main pool, and only there.
+      // The startup sweep reads the settlements on the main pool, and only there; so does the
+      // search card rewrite.
       await app.reconciled;
+      await app.searchCardsRewritten;
       const main = pools?.main.totalCount;
       expect(main).toBeGreaterThan(0);
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
@@ -1068,6 +1079,146 @@ describe("PostgreSQL stores", () => {
     await expect(copy("a".repeat(64), Buffer.from("x"))).rejects.toThrow(/api_key_copies_pkey/);
   });
 
+  it("0017_catalog_search: weights a card's four fields A to D, and drops it with its listing (0120)", async () => {
+    await db.empty();
+    const { rows: listing } = await pool.query<{ seq: string }>(
+      `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+         resource, type, extension_keys)
+       VALUES ('stellar:testnet', 'G', 'GET', 'https://a.example/x', 1, NULL, 1, '{}', 'http', '{}')
+       RETURNING seq`,
+    );
+    const seq = listing[0]!.seq;
+    await pool.query(
+      `INSERT INTO catalog_search (seq, name, tags, description, parameters)
+       VALUES ($1, 'Tides', 'ocean', 'Weather', 'city')`,
+      [seq],
+    );
+    const words = await pool.query("SELECT words::text FROM catalog_search WHERE seq = $1", [seq]);
+    expect(words.rows[0].words).toBe("'citi':4 'ocean':2B 'tide':1A 'weather':3C");
+    const index = await pool.query(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'catalog_search_words'",
+    );
+    expect(index.rows[0].indexdef).toContain("USING gin (words)");
+    // A card for a listing the catalog doesn't hold is refused.
+    await expect(
+      pool.query(
+        `INSERT INTO catalog_search (seq, name, tags, description, parameters)
+         VALUES (-1, '', '', '', '')`,
+      ),
+    ).rejects.toThrow(/foreign key/);
+    // The store writes each field of the listing's card to its column.
+    await db.stores().searchCards.write({ seq, resource: {} as DiscoveryResource });
+    const card = await pool.query(
+      "SELECT name, tags, description, parameters FROM catalog_search WHERE seq = $1",
+      [seq],
+    );
+    expect(card.rows).toEqual([searchFields({} as DiscoveryResource)]);
+    await pool.query("DELETE FROM catalog WHERE seq = $1", [seq]);
+    const left = await pool.query("SELECT count(*)::int AS n FROM catalog_search");
+    expect(left.rows).toEqual([{ n: 0 }]);
+  });
+
+  it("writes a listing's search card in the catalog's own write, and only when the listing changes (0120)", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const card = async () =>
+      (await pool.query("SELECT name, tags, description, parameters FROM catalog_search")).rows;
+    const listing = (checkedAt: number, description: string) => {
+      const entry = catalogEntry();
+      return { ...entry, checkedAt, resource: { ...entry.resource, description } };
+    };
+    const fieldsOf = (description: string) => searchFields(listing(1, description).resource);
+    expect(await catalog.upsert(listing(1, "Weather"))).toBe("inserted");
+    expect(await card()).toEqual([fieldsOf("Weather")]);
+    expect(await catalog.upsert(listing(2, "Tides"))).toBe("updated");
+    expect(await card()).toEqual([fieldsOf("Tides")]);
+    // A check that started earlier writes neither the listing nor its card.
+    expect(await catalog.upsert(listing(1, "Stocks"))).toBe("stale");
+    expect(await card()).toEqual([fieldsOf("Tides")]);
+    // A listing stored before cards existed gets its card with its next write.
+    await pool.query("DELETE FROM catalog_search");
+    expect(await catalog.upsert(listing(3, "Waves"))).toBe("updated");
+    expect(await card()).toEqual([fieldsOf("Waves")]);
+  });
+
+  it("rewrites every card at start: a missing one, an out-of-date one, a rich listing's exactly (0120)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const rich = {
+      ...catalogEntry(),
+      resource: {
+        ...catalogEntry().resource,
+        description: "Météo ☀ for 2.5e-7 BTC",
+        tags: ["weather", "kraków"],
+        extensions: {
+          bazaar: {
+            info: { input: { type: "http", method: "GET", queryParams: { city: "Gdańsk" } } },
+            schema: {
+              properties: {
+                input: {
+                  properties: {
+                    queryParams: {
+                      properties: { city: { description: "City name", maxLength: 1e3 } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    await catalog.upsert(rich);
+    // A card left behind by older rules, and a listing stored before cards existed.
+    await pool.query("UPDATE catalog_search SET name = 'old'");
+    await pool.query(
+      `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+         resource, type, extension_keys)
+       VALUES ('stellar:testnet', 'G', 'GET', 'https://b.example/tides', 1, NULL, 1,
+         '{"resource":"https://b.example/tides","description":"Tides"}', 'http', '{}')`,
+    );
+    const rewrite = async () => {
+      const lines: string[] = [];
+      await createSearchCardRewrite({
+        store: searchCards,
+        logger: jsonLogger("info", (line) => lines.push(line)),
+        metrics: memoryMetrics(),
+      }).start();
+      return lines.map((line) => JSON.parse(line));
+    };
+    expect(await rewrite()).toContainEqual(expect.objectContaining({ written: 2 }));
+    const { rows } = await pool.query(
+      `SELECT c.resource, s.name, s.tags, s.description, s.parameters
+         FROM catalog c JOIN catalog_search s USING (seq) ORDER BY c.seq`,
+    );
+    expect(rows).toHaveLength(2);
+    for (const { resource, ...card } of rows) expect(card).toEqual(searchFields(resource));
+    // The next start finds every card already holding its text, and writes none.
+    expect(await rewrite()).toContainEqual(expect.objectContaining({ written: 0 }));
+  });
+
+  it("waits for a listing write under way, and then writes no card over the newer one (0120)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    await catalog.upsert(catalogEntry());
+    const [read] = await searchCards.listings("0", 10);
+    const writer = await pool.connect();
+    try {
+      // A catalog write under way: the listing has changed but is not yet committed.
+      await writer.query("BEGIN");
+      await writer.query(
+        `UPDATE catalog SET resource = jsonb_set(resource, '{description}', '"Tides"') WHERE seq = $1`,
+        [read!.seq],
+      );
+      const rewrite = searchCards.write(read!);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await writer.query("COMMIT");
+      expect(await rewrite).toBe(false);
+    } finally {
+      writer.release();
+    }
+  });
+
   it("applies the migrations once when two runs race", async () => {
     const fresh = `${schema}_m`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -1203,7 +1354,8 @@ describe("PostgreSQL stores", () => {
           "0014_api_key_copies",
           "0015_settlement_refused",
           "0016_catalog_seed",
-          "0017_account_plans",
+          "0017_catalog_search",
+          "0018_account_plans",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1239,7 +1391,8 @@ describe("PostgreSQL stores", () => {
         "0014_api_key_copies",
         "0015_settlement_refused",
         "0016_catalog_seed",
-        "0017_account_plans",
+        "0017_catalog_search",
+        "0018_account_plans",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
