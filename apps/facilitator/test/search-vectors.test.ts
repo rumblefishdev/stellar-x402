@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Keypair } from "@stellar/stellar-sdk";
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
+import { SEARCH_MODEL_ID } from "@stellar-x402/config";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSearchVectors } from "../src/catalog/search-vectors.js";
@@ -18,7 +19,8 @@ import { meaningText, readCards, sameVector, setVector, unitVector } from "./vec
 
 // Every case here needs the `vector` extension (pgvector) in the test database.
 
-const MODEL = "granite-test";
+// The facilitator's own model: main() refuses an answer of any other (ADR 0014).
+const MODEL = SEARCH_MODEL_ID;
 
 /** A vector of its own for each text, so a stored vector names the text it was made from. */
 function vectorFor(text: string): number[] {

@@ -368,7 +368,7 @@ export function compose(
   const metrics = root.for({ network: config.network });
   // The search model (ADR 0014): the route asks it for each query's vector, the vectors for each
   // listing's. The cards serve every network, so they write through the root.
-  const embedder = createSearchModelClient(config.searchModel);
+  const embedder = createSearchModelClient({ ...config.searchModel, model: SEARCH_MODEL_ID });
   const vectors = createSearchVectors({
     store: stores.searchCards,
     model: SEARCH_MODEL_ID,
@@ -893,7 +893,7 @@ export async function seedMain(
       vectors: createSearchVectors({
         store: stores.searchCards,
         model: SEARCH_MODEL_ID,
-        embedder: createSearchModelClient(searchModel),
+        embedder: createSearchModelClient({ ...searchModel, model: SEARCH_MODEL_ID }),
         logger,
         metrics,
       }),

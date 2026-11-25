@@ -51,7 +51,11 @@ describe("search model client (0120 D)", () => {
     const model = await stub((_request, _body, response) =>
       json(response, 200, { model: "granite-test", vector: VECTOR }),
     );
-    const client = createSearchModelClient({ url: model.url, timeoutMs: 2_000 });
+    const client = createSearchModelClient({
+      url: model.url,
+      timeoutMs: 2_000,
+      model: "granite-test",
+    });
     await expect(client.embed("weather in Kraków", "query")).resolves.toEqual({
       model: "granite-test",
       vector: VECTOR,
@@ -69,7 +73,11 @@ describe("search model client (0120 D)", () => {
     const model = await stub((_request, _body, response) => {
       setTimeout(() => json(response, 200, { model: "granite-test", vector: VECTOR }), 1_500);
     });
-    const client = createSearchModelClient({ url: model.url, timeoutMs: 100 });
+    const client = createSearchModelClient({
+      url: model.url,
+      timeoutMs: 100,
+      model: "granite-test",
+    });
     const started = Date.now();
     await expect(client.embed("weather", "listing")).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(1_000);
@@ -81,7 +89,11 @@ describe("search model client (0120 D)", () => {
       response.write('{"model":"granite-test","vector":[');
       // The rest never comes.
     });
-    const client = createSearchModelClient({ url: model.url, timeoutMs: 100 });
+    const client = createSearchModelClient({
+      url: model.url,
+      timeoutMs: 100,
+      model: "granite-test",
+    });
     const started = Date.now();
     await expect(client.embed("weather", "listing")).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(1_000);
@@ -94,7 +106,11 @@ describe("search model client (0120 D)", () => {
     [404, {}],
   ])("rejects an answer of %i", async (status, body) => {
     const model = await stub((_request, _body, response) => json(response, status, body));
-    const client = createSearchModelClient({ url: model.url, timeoutMs: 2_000 });
+    const client = createSearchModelClient({
+      url: model.url,
+      timeoutMs: 2_000,
+      model: "granite-test",
+    });
     await expect(client.embed("weather", "listing")).rejects.toThrow();
   });
 
@@ -102,7 +118,7 @@ describe("search model client (0120 D)", () => {
     const model = await stub(() => {});
     const url = model.url;
     for (const server of servers.splice(0)) await new Promise((resolve) => server.close(resolve));
-    const client = createSearchModelClient({ url, timeoutMs: 2_000 });
+    const client = createSearchModelClient({ url, timeoutMs: 2_000, model: "granite-test" });
     await expect(client.embed("weather", "listing")).rejects.toThrow();
   });
 
@@ -112,6 +128,8 @@ describe("search model client (0120 D)", () => {
     ["a body that isn't JSON", "not json"],
     ["no vector", JSON.stringify({ model: "granite-test" })],
     ["no model", JSON.stringify({ vector: VECTOR })],
+    // Another model's vectors don't compare with the cards' (its name is the facilitator's own).
+    ["another model's name", JSON.stringify({ model: "granite-other", vector: VECTOR })],
     ["a vector of 3 numbers", JSON.stringify({ model: "granite-test", vector: [1, 0, 0] })],
     [
       "a vector with a non-number",
@@ -122,7 +140,11 @@ describe("search model client (0120 D)", () => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(body);
     });
-    const client = createSearchModelClient({ url: model.url, timeoutMs: 2_000 });
+    const client = createSearchModelClient({
+      url: model.url,
+      timeoutMs: 2_000,
+      model: "granite-test",
+    });
     await expect(client.embed("weather", "listing")).rejects.toThrow();
   });
 });

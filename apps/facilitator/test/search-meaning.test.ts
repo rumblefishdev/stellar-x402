@@ -294,7 +294,7 @@ describe("GET /discovery/search with a search model that hangs (0120 D, H)", () 
     const url = `http://127.0.0.1:${(hung.address() as AddressInfo).port}`;
     // Imported here, so the cases above run while the adapter does not exist yet.
     const { createSearchModelClient } = await import("../src/adapters/search-model.js");
-    return createSearchModelClient({ url, timeoutMs: 100 });
+    return createSearchModelClient({ url, timeoutMs: 100, model: "granite-test" });
   });
   afterAll(async () => {
     if (!hung) return;
