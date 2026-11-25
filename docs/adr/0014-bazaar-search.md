@@ -106,8 +106,9 @@ The measurements are in
     tokenizer read by `@huggingface/tokenizers`: no LGPL dependency
     (`docs/scf/milestone-1-license-audit.md`).
   - It holds no database password. The facilitator computes a listing's vector right after the
-    catalog writes the listing, and once at each start for every card whose vector is missing or
-    stale (another model, another text hash), with no retry loop in between. It asks the
+    catalog writes the listing, and once at each start for every card without one, with no retry
+    loop in between. The write that changes a card's text clears its vector, so a card holds a
+    vector only of its current text. It asks the
     container for each vector without holding a lock, and writes it only `WHERE` the card's fields
     are still the ones it embedded, so a vector never lands on a newer text.
   - The facilitator sends the container one listing at a time, so a backlog never takes the CPU
@@ -124,7 +125,8 @@ The measurements are in
   evaluation set, which only scores the ranking, so its nDCG@10 is not fitted to it.
 - **When a listing has no vector yet.** A new listing joins search only once its vector is stored,
   so a search never mixes listings that were scored two ways. `/discovery/resources` lists it at
-  once. A listing whose text changes keeps its old vector until the new one is written.
+  once. A listing whose text changes leaves search by meaning until its new vector is written,
+  right after the write.
 - **When the model can't be used.** The facilitator ranks by words alone, in the same response
   shape, when the container doesn't answer within 2,000 ms or answers an error. The timeout stays
   until a measurement on the server sets it. Every listing is then scored one way, so the answer

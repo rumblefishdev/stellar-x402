@@ -47,7 +47,7 @@ import {
   spendStoreContract,
 } from "./port-contracts.js";
 import { hardened, rpcStub } from "./rpc-stub.js";
-import { meaningText, readCards, setVector, sha256, unitVector, vectorLiteral } from "./vectors.js";
+import { readCards, setVector, unitVector, vectorLiteral } from "./vectors.js";
 import { signerEnv } from "./fake-openbao.js";
 
 // `main()` checks its channel at startup, on the RPC it builds from `RPC_URLS`.
@@ -1220,7 +1220,7 @@ describe("PostgreSQL stores", () => {
   });
 
   // 0120 point A. Needs the `vector` extension (pgvector) in the test database.
-  it("gives each search card a model, a text hash and a 384-number vector, one per listing (0120 A)", async () => {
+  it("gives each search card a model and a 384-number vector, one per listing (0120 A)", async () => {
     await db.empty();
     const { rows: columns } = await pool.query(
       `SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute
@@ -1230,20 +1230,18 @@ describe("PostgreSQL stores", () => {
     expect(columns).toEqual([
       { attname: "embedding", type: "public.vector(384)" },
       { attname: "model", type: "text" },
-      { attname: "text_hash", type: "text" },
     ]);
     const { catalog } = db.stores();
     await catalog.upsert(catalogEntry());
     // A new listing's card has no vector yet.
-    expect(
-      (await readCards(pool)).map((card) => [card.model, card.text_hash, card.embedding]),
-    ).toEqual([[null, null, null]]);
+    expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
+      [null, null],
+    ]);
     const key = catalogEntry().key;
     await setVector(pool, key, "m", unitVector(0.8));
     await setVector(pool, key, "m", unitVector(0.6));
     const cards = await readCards(pool);
     expect(cards).toHaveLength(1);
-    expect(cards[0]!.text_hash).toBe(sha256(meaningText(cards[0]!)));
     // A vector of another size is refused.
     await expect(
       pool.query("UPDATE catalog_search SET embedding = $1::public.vector", [
@@ -1252,7 +1250,7 @@ describe("PostgreSQL stores", () => {
     ).rejects.toThrow(/dimensions/);
   });
 
-  it("keeps a card's vector through a catalog write that changes the listing (0120 A, ADR 0014)", async () => {
+  it("clears a card's vector when a catalog write changes its text, and keeps it when the text stays", async () => {
     await db.empty();
     const { catalog } = db.stores();
     const entry = catalogEntry();
@@ -1266,13 +1264,18 @@ describe("PostgreSQL stores", () => {
     });
     const after = (await readCards(pool))[0]!;
     expect(after.description).not.toBe(before.description);
-    // The old vector stays, now stale: its hash is the old text's (0120 B).
-    expect([after.model, after.text_hash, after.embedding]).toEqual([
-      before.model,
-      before.text_hash,
-      before.embedding,
-    ]);
-    expect(after.text_hash).not.toBe(sha256(meaningText(after)));
+    // A card holds a vector only of its current text (ADR 0014).
+    expect([after.model, after.embedding]).toEqual([null, null]);
+    await setVector(pool, entry.key, "m", unitVector(0.6));
+    const vectored = (await readCards(pool))[0]!;
+    // The same text written again, as a re-seed does: the vector stays.
+    await catalog.upsert({
+      ...entry,
+      checkedAt: 3,
+      resource: { ...entry.resource, description: "Waves" },
+    });
+    const same = (await readCards(pool))[0]!;
+    expect([same.model, same.embedding]).toEqual([vectored.model, vectored.embedding]);
   });
 
   it("applies the migrations once when two runs race", async () => {

@@ -2610,12 +2610,10 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
       expect(hosts(await fused("zebra", { network: "eip155:8453" }))).toEqual([]);
     });
 
-    it("keeps a listing's vector after its text changes, until a new one is written (G, ADR 0014)", async () => {
+    it("leaves out a listing whose text changed until its new vector is written (G, ADR 0014)", async () => {
       await listing(key("a"), { description: "Tides" }, 0.9);
       await listing(key("a"), { description: "Waves" }, null, MODEL, 2);
-      const hits = await fused("zebra");
-      expect(hosts(hits)).toEqual(["a"]);
-      expect(Number(hits[0]!.rank)).toBeCloseTo(score(1), 6);
+      expect(hosts(await fused("zebra"))).toEqual([]);
     });
 
     it("ranks by words alone without a query vector, listings without a vector included (H)", async () => {

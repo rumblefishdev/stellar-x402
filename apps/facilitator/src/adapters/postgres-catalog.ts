@@ -91,7 +91,14 @@ export class PostgresCatalogStore implements CatalogStore {
          RETURNING seq)
        INSERT INTO catalog_search (seq, name, tags, description, parameters)
        SELECT seq, $11, $12, $13, $14 FROM listing
-       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14`,
+       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14,
+         -- A changed text clears its vector, which the vector pass or this write's own embeds anew.
+         model = CASE WHEN (catalog_search.name, catalog_search.tags, catalog_search.description,
+                            catalog_search.parameters) IS DISTINCT FROM ($11, $12, $13, $14)
+                      THEN NULL ELSE catalog_search.model END,
+         embedding = CASE WHEN (catalog_search.name, catalog_search.tags, catalog_search.description,
+                                catalog_search.parameters) IS DISTINCT FROM ($11, $12, $13, $14)
+                          THEN NULL ELSE catalog_search.embedding END`,
       values,
     );
     return updated.rowCount === 1 ? "updated" : "stale";

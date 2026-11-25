@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
 import type { CatalogKey, Embedder, SearchCard, SearchVectorStore } from "../ports/index.js";
@@ -19,8 +18,6 @@ export function meaningText(card: SearchCard): string {
     .join("\n");
   return Array.from(joined).slice(0, MAX_TEXT_CHARS).join("");
 }
-
-const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
 export interface SearchVectorsDeps {
   store: SearchVectorStore;
@@ -44,10 +41,9 @@ export interface SearchVectors {
 /**
  * Each search card's vector (ADR 0014), asked of the search model one listing at a time, so a
  * backlog never takes the CPU queries need. The catalog's write asks for the vector of the listing
- * it wrote; once per start, after the card rewrite, a pass embeds every card whose vector is
- * missing or stale: made by another model, or from another text. The pass knows the model once
- * the first answer names it, so until then a card with a vector is embedded again. A listing the
- * model fails on is logged and counted, and waits for the next start.
+ * it wrote; once per start, after the card rewrite, a pass embeds every card without a vector. A
+ * card holds a vector only of its current text: the write that changes its text clears it. A
+ * listing the model fails on is logged and counted, and waits for the next start.
  */
 export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
   const { store, embedder, logger, metrics } = deps;
@@ -65,7 +61,6 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
 
   const run = async () => {
     let written = 0;
-    let model: string | undefined;
     let after = "0";
     while (!closed) {
       let page;
@@ -81,13 +76,8 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
       for (const card of page) {
         // A shutdown waits for the pass, so it stops between cards.
         if (closed) break;
-        const text = meaningText(card);
-        const textHash = sha256(text);
-        if (card.model === model && card.textHash === textHash) continue;
         try {
-          const embedding = await embed(text);
-          model = embedding.model;
-          if (await store.writeVector(card, embedding, textHash)) written++;
+          if (await store.writeVector(card, await embed(meaningText(card)))) written++;
         } catch (error) {
           logger.warn("search_vector_failed", { seq: card.seq, error });
           metrics.increment("search_vector_failures_total");
@@ -113,12 +103,9 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
         const card = await store.card(key);
         if (card === undefined)
           throw new Error("the catalog holds no card for the listing written");
-        const text = meaningText(card);
-        const textHash = sha256(text);
-        // A write that left the card's text as it was keeps its vector; a vector of another
-        // model waits for the next start's pass, which knows the model.
-        if (card.model !== null && card.textHash === textHash) return;
-        await store.writeVector(card, await embed(text), textHash);
+        // A write that left the card's text as it was kept its vector.
+        if (card.model !== null) return;
+        await store.writeVector(card, await embed(meaningText(card)));
       } catch (error) {
         logger.warn("search_vector_failed", { resourceUrl: key.resourceUrl, error });
         metrics.increment("search_vector_failures_total");

@@ -9,7 +9,7 @@ export interface CardListing {
   resource: DiscoveryResource;
 }
 
-/** A listing's search card as the vector pass reads it: its four fields and its vector's origin. */
+/** A listing's search card as the vector pass reads it: its four fields and its vector's model. */
 export interface SearchCard {
   /** The catalog row's `seq`, as PostgreSQL's text for a bigint. */
   seq: string;
@@ -19,8 +19,6 @@ export interface SearchCard {
   parameters: string;
   /** The model that made the stored vector; null while the card has none. */
   model: string | null;
-  /** SHA-256 of the text the stored vector was made from, hex; null while the card has none. */
-  textHash: string | null;
 }
 
 /**
@@ -40,13 +38,13 @@ export interface SearchCardStore {
 
 /** The cards' vectors (ADR 0014), which the vector pass and the catalog's write store. */
 export interface SearchVectorStore {
-  /** Up to `limit` cards after `after` (a `seq`; `"0"` from the start), in catalog order. */
+  /** Up to `limit` cards without a vector after `after` (a `seq`; `"0"` from the start), in order. */
   cards(after: string, limit: number): Promise<SearchCard[]>;
   /** The card of the listing at `key`; undefined when the catalog holds no such listing. */
   card(key: CatalogKey): Promise<SearchCard | undefined>;
   /**
-   * Stores `embedding`, made from the text hashed as `textHash`, on this card, unless its fields
-   * have changed since it was read: the vector would then be of an older text. True when written.
+   * Stores `embedding` on this card, unless its fields have changed since it was read: the vector
+   * would then be of an older text. True when written.
    */
-  writeVector(card: SearchCard, embedding: Embedding, textHash: string): Promise<boolean>;
+  writeVector(card: SearchCard, embedding: Embedding): Promise<boolean>;
 }

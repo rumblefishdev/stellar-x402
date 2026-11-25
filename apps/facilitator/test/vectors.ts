@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type pg from "pg";
 import type { CatalogKey, Embedder } from "../src/ports/index.js";
 
@@ -35,14 +34,12 @@ export function meaningText(card: CardFields): string {
     .slice(0, 2_000);
 }
 
-export const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
-
 /** pgvector's text form of a vector. */
 export const vectorLiteral = (vector: number[]) => `[${vector.join(",")}]`;
 
 /**
- * Stores `vector` of `model` on the card of the listing at `key`, hashed from the card's text as it
- * is now, as the vector pass would (0120 points A, B). Needs the `vector` extension, which ADR
+ * Stores `vector` of `model` on the card of the listing at `key`, as the vector pass would (0120
+ * point A). Needs the `vector` extension, which ADR
  * 0014 creates in `public`: the tests' connections search their own schema only.
  */
 export async function setVector(
@@ -53,11 +50,7 @@ export async function setVector(
 ): Promise<void> {
   const { rowCount } = await pool.query(
     `UPDATE catalog_search s
-        SET model = $5,
-            text_hash = encode(sha256(convert_to(left(concat_ws(E'\\n',
-              NULLIF(s.name, ''), NULLIF(s.tags, ''), NULLIF(s.description, ''),
-              NULLIF(s.parameters, '')), 2000), 'UTF8')), 'hex'),
-            embedding = $6::public.vector
+        SET model = $5, embedding = $6::public.vector
        FROM catalog c
       WHERE c.seq = s.seq AND c.network = $1 AND c.pay_to = $2 AND c.method = $3
         AND c.resource_url = $4`,
@@ -72,11 +65,10 @@ export async function readCards(pool: pg.Pool) {
     CardFields & {
       resource_url: string;
       model: string | null;
-      text_hash: string | null;
       embedding: string | null;
     }
   >(
-    `SELECT c.resource_url, s.name, s.tags, s.description, s.parameters, s.model, s.text_hash,
+    `SELECT c.resource_url, s.name, s.tags, s.description, s.parameters, s.model,
             s.embedding::text AS embedding
        FROM catalog c JOIN catalog_search s USING (seq) ORDER BY c.seq`,
   );

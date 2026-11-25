@@ -24,7 +24,8 @@ export class PostgresSearchCardStore implements SearchCardStore, SearchVectorSto
    * `FOR SHARE` waits for a catalog write of the listing under way and then re-reads the row, so
    * a listing changed meanwhile writes no card; one this write holds waits for it, and then writes
    * its own card over this one. A card whose text is already this one is not written again: on
-   * CDP's 39,577 listings that cut a restart's WAL from 48 MiB to 15 MiB.
+   * CDP's 39,577 listings that cut a restart's WAL from 48 MiB to 15 MiB. A card written anew
+   * loses its vector, which was of the old text.
    */
   async write(listing: CardListing): Promise<boolean> {
     const fields = searchFields(listing.resource);
@@ -33,7 +34,8 @@ export class PostgresSearchCardStore implements SearchCardStore, SearchVectorSto
          SELECT seq FROM catalog WHERE seq = $1 AND resource = $2::jsonb FOR SHARE)
        INSERT INTO catalog_search (seq, name, tags, description, parameters)
        SELECT seq, $3, $4, $5, $6 FROM listing
-       ON CONFLICT (seq) DO UPDATE SET name = $3, tags = $4, description = $5, parameters = $6
+       ON CONFLICT (seq) DO UPDATE SET name = $3, tags = $4, description = $5, parameters = $6,
+         model = NULL, embedding = NULL
        WHERE (catalog_search.name, catalog_search.tags, catalog_search.description,
               catalog_search.parameters) IS DISTINCT FROM ($3, $4, $5, $6)`,
       [
@@ -50,8 +52,8 @@ export class PostgresSearchCardStore implements SearchCardStore, SearchVectorSto
 
   async cards(after: string, limit: number): Promise<SearchCard[]> {
     const { rows } = await this.pool.query<SearchCard>(
-      `SELECT seq, name, tags, description, parameters, model, text_hash AS "textHash"
-         FROM catalog_search WHERE seq > $1 ORDER BY seq LIMIT $2`,
+      `SELECT seq, name, tags, description, parameters, model
+         FROM catalog_search WHERE seq > $1 AND embedding IS NULL ORDER BY seq LIMIT $2`,
       [after, limit],
     );
     return rows;
@@ -59,8 +61,7 @@ export class PostgresSearchCardStore implements SearchCardStore, SearchVectorSto
 
   async card(key: CatalogKey): Promise<SearchCard | undefined> {
     const { rows } = await this.pool.query<SearchCard>(
-      `SELECT s.seq, s.name, s.tags, s.description, s.parameters, s.model,
-              s.text_hash AS "textHash"
+      `SELECT s.seq, s.name, s.tags, s.description, s.parameters, s.model
          FROM catalog c JOIN catalog_search s USING (seq)
         WHERE c.network = $1 AND c.pay_to = $2 AND c.method = $3 AND c.resource_url = $4`,
       [key.network, key.payTo, key.method, key.resourceUrl],
@@ -74,14 +75,13 @@ export class PostgresSearchCardStore implements SearchCardStore, SearchVectorSto
    * whose fields are no longer the ones embedded keeps what it holds, and the next pass embeds
    * its new text. pgvector reads a vector from its text form, `[1,2,3]`.
    */
-  async writeVector(card: SearchCard, embedding: Embedding, textHash: string): Promise<boolean> {
+  async writeVector(card: SearchCard, embedding: Embedding): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      `UPDATE catalog_search SET model = $2, text_hash = $3, embedding = $4::public.vector
-        WHERE seq = $1 AND (name, tags, description, parameters) = ($5, $6, $7, $8)`,
+      `UPDATE catalog_search SET model = $2, embedding = $3::public.vector
+        WHERE seq = $1 AND (name, tags, description, parameters) = ($4, $5, $6, $7)`,
       [
         card.seq,
         embedding.model,
-        textHash,
         `[${embedding.vector.join(",")}]`,
         card.name,
         card.tags,

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Keypair } from "@stellar/stellar-sdk";
@@ -13,7 +14,7 @@ import type { Embedder } from "../src/ports/embedder.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
 import { hardened, rpcStub } from "./rpc-stub.js";
-import { meaningText, readCards, sameVector, setVector, sha256, unitVector } from "./vectors.js";
+import { meaningText, readCards, sameVector, setVector, unitVector } from "./vectors.js";
 
 // Every case here needs the `vector` extension (pgvector) in the test database.
 
@@ -21,7 +22,7 @@ const MODEL = "granite-test";
 
 /** A vector of its own for each text, so a stored vector names the text it was made from. */
 function vectorFor(text: string): number[] {
-  const byte = Buffer.from(sha256(text), "hex")[0]!;
+  const byte = createHash("sha256").update(text, "utf8").digest()[0]!;
   return unitVector(0.5 + (byte / 255) * 0.45);
 }
 
@@ -92,39 +93,30 @@ function vectors(embedder: Embedder, lines: string[] = [], metrics = memoryMetri
 
 const parsed = (lines: string[]) => lines.map((line) => JSON.parse(line));
 
-/** A card holds a current vector: of the model, of its text as it is now, from that text. */
+/** A card holds a current vector: of the model, made from its text as it is now. */
 const current = (card: Awaited<ReturnType<typeof readCards>>[number]) =>
-  card.model === MODEL &&
-  card.text_hash === sha256(meaningText(card)) &&
-  sameVector(card.embedding, vectorFor(meaningText(card)));
+  card.model === MODEL && sameVector(card.embedding, vectorFor(meaningText(card)));
 
 describe("the vector pass at start (0120 F)", () => {
   beforeEach(() => db.empty());
 
-  it("embeds every card whose vector is missing or stale, and no current one (F, B)", async () => {
+  it("embeds every card without a vector, and no card that has one (F)", async () => {
     await list("one", { description: "Weather one" });
     await list("two", { description: "Tides two" });
     await list("three", { description: "Stocks three" });
-    await list("four", { description: "Bonds four" });
-    // two: a vector of another model; three: of another text; four: current.
-    await setVector(db.pool, key("two"), "old-model", unitVector(0.9));
+    // three: its text changed after its vector was stored, so the write cleared it (ADR 0014).
+    await setVector(db.pool, key("two"), MODEL, unitVector(0.7));
     await setVector(db.pool, key("three"), MODEL, unitVector(0.9));
-    await db.pool.query(
-      `UPDATE catalog_search s SET text_hash = 'stale' FROM catalog c
-        WHERE c.seq = s.seq AND c.resource_url = $1`,
-      [key("three").resourceUrl],
-    );
-    await setVector(db.pool, key("four"), MODEL, unitVector(0.7));
+    await list("three", { description: "Stocks three, daily" }, 2);
     const { embedder, state } = fakeEmbedder();
     await vectors(embedder).start();
-    const cards = await readCards(db.pool);
-    expect(state.calls).toEqual(cards.slice(0, 3).map(meaningText));
-    expect(cards.slice(0, 3).every(current)).toBe(true);
-    // The current one keeps its vector.
-    expect(sameVector(cards[3]!.embedding, unitVector(0.7))).toBe(true);
+    const [one, two, three] = await readCards(db.pool);
+    expect(state.calls).toEqual([meaningText(one!), meaningText(three!)]);
+    expect([current(one!), current(three!)]).toEqual([true, true]);
+    expect(sameVector(two!.embedding, unitVector(0.7))).toBe(true);
   });
 
-  it("embeds a card's fields joined with a line break, empty ones skipped, hashed with SHA-256 (B)", async () => {
+  it("embeds a card's fields joined with a line break, empty ones skipped (B)", async () => {
     await list("rich", {
       serviceName: "Weather",
       tags: ["forecast", "rain"],
@@ -143,12 +135,9 @@ describe("the vector pass at start (0120 F)", () => {
     // No tags and no parameters: nothing of them, not even their line breaks.
     expect([plain!.tags, plain!.parameters]).toEqual(["", ""]);
     expect(state.calls[1]).toBe(`${plain!.name}\n${plain!.description}`);
-    expect(rich!.text_hash).toBe(sha256(state.calls[0]!));
-    expect(plain!.text_hash).toBe(sha256(state.calls[1]!));
-    expect(rich!.text_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("cuts the text at 2,000 characters before embedding and hashing it (B)", async () => {
+  it("cuts the text at 2,000 characters before embedding it (B)", async () => {
     await list("long", { description: "lorem ipsum ".repeat(400) });
     const { embedder, state } = fakeEmbedder();
     await vectors(embedder).start();
@@ -158,7 +147,6 @@ describe("the vector pass at start (0120 F)", () => {
       .join("\n");
     expect(whole.length).toBeGreaterThan(2_000);
     expect(state.calls).toEqual([whole.slice(0, 2_000)]);
-    expect(card!.text_hash).toBe(sha256(whole.slice(0, 2_000)));
   });
 
   it("asks the model for one listing at a time (F)", async () => {
@@ -179,7 +167,7 @@ describe("the vector pass at start (0120 F)", () => {
     await vectors(embedder, lines, metrics).start();
     const [one, two, three] = await readCards(db.pool);
     expect([current(one!), current(three!)]).toEqual([true, true]);
-    expect([two!.model, two!.text_hash, two!.embedding]).toEqual([null, null, null]);
+    expect([two!.model, two!.embedding]).toEqual([null, null]);
     expect(metrics.value("search_vector_failures_total")).toBe(1);
     expect(parsed(lines)).toContainEqual(
       expect.objectContaining({
@@ -228,7 +216,6 @@ describe("the vector pass at start (0120 F)", () => {
     release();
     await pass;
     const [after] = await readCards(db.pool);
-    expect(after!.text_hash).not.toBe(sha256(old));
     expect(sameVector(after!.embedding, vectorFor(old))).toBe(false);
   });
 });
