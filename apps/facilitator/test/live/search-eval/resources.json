@@ -1,0 +1,242 @@
+[
+  {
+    "id": "r01",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://dexprice.example/v1/price",
+    "serviceName": "Stellar DEX Price",
+    "tags": ["price", "stellar", "dex"],
+    "description": "Current spot price for a Stellar trading pair, taken from the SDEX order book and liquidity pools.",
+    "parameters": "Params: `pair` — asset pair, e.g. `XLM-USDC`."
+  },
+  {
+    "id": "r02",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://candles.example/v1/candles",
+    "serviceName": "Crypto Candles",
+    "tags": ["market-data", "crypto", "history"],
+    "description": "Historical OHLCV candles for major crypto assets from centralized exchanges.",
+    "parameters": "Params: `symbol` — e.g. `BTCUSDT`; `interval` — `1m`, `1h`, `1d`; `from`, `to` — ISO dates."
+  },
+  {
+    "id": "r03",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://tokenscan.example/v1/token-risk",
+    "serviceName": "Token Risk Scan",
+    "tags": ["security", "defi", "tokens"],
+    "description": "Checks a token contract for honeypot patterns, unlimited mint authority and unlocked liquidity before you buy.",
+    "parameters": "Params: `contract` — token contract address; `chain` — e.g. `stellar`, `ethereum`."
+  },
+  {
+    "id": "r04",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://ledgerlens.example/v1/account",
+    "serviceName": "Stellar Account Summary",
+    "tags": ["stellar", "account", "explorer"],
+    "description": "Balances, trustlines and the last 20 payments of a Stellar account.",
+    "parameters": "Params: `address` — a `G...` account ID."
+  },
+  {
+    "id": "r05",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://registry.example/v1/company",
+    "serviceName": "Company Registry Lookup",
+    "tags": ["business", "kyb", "registry"],
+    "description": "Legal name, registration number, status and directors of a company from public registries in the UK and the EU.",
+    "parameters": "Params: `name` — company name; `country` — ISO country code."
+  },
+  {
+    "id": "r06",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://sitecheck.example/v1/check",
+    "serviceName": "Site Check",
+    "tags": ["monitoring", "web", "tls"],
+    "description": "Checks whether a website is up, how fast it answers and when its TLS certificate expires.",
+    "parameters": "Params: `url` — page to check."
+  },
+  {
+    "id": "r07",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://domaininfo.example/v1/domain",
+    "serviceName": "Domain Info",
+    "tags": ["domain", "dns", "whois"],
+    "description": "WHOIS registrar and creation date, plus the A, MX and TXT DNS records of a domain.",
+    "parameters": "Params: `name` — domain name."
+  },
+  {
+    "id": "r08",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://forecast.example/v1/forecast",
+    "serviceName": "Weather Forecast",
+    "tags": ["weather", "forecast"],
+    "description": "Hourly weather forecast for the next 7 days: temperature, rain and wind.",
+    "parameters": "Params: `lat`, `lon` — coordinates; `days` — 1 to 7."
+  },
+  {
+    "id": "r09",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://airwatch.example/v1/air",
+    "serviceName": "Air Quality",
+    "tags": ["environment", "air-quality"],
+    "description": "Current air quality index, PM2.5, PM10 and ozone for a city.",
+    "parameters": "Params: `city` — city name."
+  },
+  {
+    "id": "r10",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://jobboard.example/v1/jobs",
+    "serviceName": "Tech Jobs Search",
+    "tags": ["jobs", "hiring"],
+    "description": "Search open software and data jobs aggregated from company career pages, remote or on site.",
+    "parameters": "Params: `query` — role or skill; `location` — city or `remote`."
+  },
+  {
+    "id": "r11",
+    "type": "http",
+    "method": "POST",
+    "resource": "https://rentcalc.example/v1/rent-estimate",
+    "serviceName": "Rent Estimate",
+    "tags": ["real-estate", "rent"],
+    "description": "Estimates the monthly rent of a flat from its address and size, with comparable listings nearby.",
+    "parameters": "Body (json): `address`; `bedrooms`; `area_m2`."
+  },
+  {
+    "id": "r12",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://fares.example/v1/flights",
+    "serviceName": "Flight Fares",
+    "tags": ["travel", "flights"],
+    "description": "Cheapest flight fares between two airports on a date, with airline and number of stops.",
+    "parameters": "Params: `from`, `to` — IATA airport codes; `date` — ISO date."
+  },
+  {
+    "id": "r13",
+    "type": "http",
+    "method": "GET",
+    "resource": "https://gridprice.example/v1/power-price",
+    "serviceName": "Power Spot Price",
+    "tags": ["energy", "electricity"],
+    "description": "Day-ahead electricity spot prices per hour for European bidding zones.",
+    "parameters": "Params: `zone` — bidding zone, e.g. `DE-LU`; `date` — ISO date."
+  },
+  {
+    "id": "r14",
+    "type": "http",
+    "method": "POST",
+    "resource": "https://translate.example/v1/translate",
+    "serviceName": "Text Translate",
+    "tags": ["language", "translation"],
+    "description": "Translates text between 40 languages.",
+    "parameters": "Body (json): `text`; `target` — language code; `source` — optional."
+  },
+  {
+    "id": "r15",
+    "type": "http",
+    "method": "POST",
+    "resource": "https://invoicer.example/v1/invoice",
+    "serviceName": "Invoice PDF",
+    "tags": ["documents", "billing"],
+    "description": "Generates an invoice PDF from seller, buyer and line items, in any currency.",
+    "parameters": "Body (json): `seller`; `buyer`; `items` — name, quantity, price; `currency`."
+  },
+  {
+    "id": "r16",
+    "type": "mcp",
+    "resource": "https://mcp.stellarswap.example/mcp",
+    "toolName": "get_swap_quote",
+    "tags": ["stellar", "dex", "swap"],
+    "description": "Finds the best path payment route and quote for swapping one Stellar asset into another.",
+    "parameters": "Input: `sell_asset`, `buy_asset` — e.g. `USDC:G...`, `native`; `amount`."
+  },
+  {
+    "id": "r17",
+    "type": "mcp",
+    "resource": "https://mcp.x402tools.example/mcp",
+    "toolName": "x402_check_endpoint",
+    "tags": ["x402", "developer", "payments"],
+    "description": "Calls a URL and reports whether its 402 response is a valid x402 payment requirement, listing every problem found.",
+    "parameters": "Input: `url`; `method` — default `GET`."
+  },
+  {
+    "id": "r18",
+    "type": "mcp",
+    "resource": "https://mcp.reader.example/mcp",
+    "toolName": "summarize_url",
+    "tags": ["web", "summarization"],
+    "description": "Fetches a web page and returns a short summary of its main text.",
+    "parameters": "Input: `url`; `max_words` — default 120."
+  },
+  {
+    "id": "r19",
+    "type": "mcp",
+    "resource": "https://mcp.filings.example/mcp",
+    "toolName": "sec_filings_search",
+    "tags": ["finance", "filings", "stocks"],
+    "description": "Searches US SEC filings by ticker and form type and returns links and key figures.",
+    "parameters": "Input: `ticker`; `form` — e.g. `10-K`, `8-K`; `year`."
+  },
+  {
+    "id": "r20",
+    "type": "mcp",
+    "resource": "https://mcp.signals.example/mcp",
+    "toolName": "trading_signal",
+    "tags": ["trading", "signals", "crypto"],
+    "description": "Buy, sell or hold signal for a crypto pair from Ichimoku, RSI and moving averages.",
+    "parameters": "Input: `pair` — e.g. `BTC-USDT`; `timeframe` — `15m`, `1h`, `4h`, `1d`."
+  },
+  {
+    "id": "r21",
+    "type": "mcp",
+    "resource": "https://mcp.geo.example/mcp",
+    "toolName": "geocode_address",
+    "tags": ["maps", "geocoding"],
+    "description": "Turns a street address into latitude and longitude, with the normalized address.",
+    "parameters": "Input: `address`; `country` — optional."
+  },
+  {
+    "id": "r22",
+    "type": "mcp",
+    "resource": "https://mcp.screening.example/mcp",
+    "toolName": "sanctions_screen",
+    "tags": ["compliance", "aml", "sanctions"],
+    "description": "Screens a person, company or wallet address against the OFAC, EU and UN sanctions lists.",
+    "parameters": "Input: `query` — name or address; `type` — `person`, `company` or `wallet`."
+  },
+  {
+    "id": "r23",
+    "type": "mcp",
+    "resource": "https://mcp.vision.example/mcp",
+    "toolName": "image_caption",
+    "tags": ["vision", "images", "accessibility"],
+    "description": "Describes the content of an image from its URL, for alt text or search.",
+    "parameters": "Input: `image_url`; `style` — `short` or `detailed`."
+  },
+  {
+    "id": "r24",
+    "type": "mcp",
+    "resource": "https://mcp.yields.example/mcp",
+    "toolName": "defi_yield_rates",
+    "tags": ["defi", "yield", "stellar"],
+    "description": "Current supply and borrow interest rates of lending pools on Stellar, per asset.",
+    "parameters": "Input: `asset` — e.g. `USDC`; `side` — `supply` or `borrow`."
+  },
+  {
+    "id": "r25",
+    "type": "mcp",
+    "resource": "https://mcp.mailcheck.example/mcp",
+    "toolName": "email_verify",
+    "tags": ["email", "validation"],
+    "description": "Checks whether an email address can receive mail: syntax, MX records and disposable domains.",
+    "parameters": "Input: `email`."
+  }
+]

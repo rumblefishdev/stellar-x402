@@ -5,7 +5,7 @@ import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import { LIMITS, type BazaarRejectReason } from "./limits.js";
 import { normalize, type NormalizedEntry } from "./normalize.js";
 import { sellerOffers, type OffersResult } from "./offers.js";
-import { serializedBytes, validate, type ValidateOptions } from "./validate.js";
+import { serializedBytes, validate, type Discovered, type ValidateOptions } from "./validate.js";
 
 /** Methods whose request carries a body, as upstream's `BodyDiscoveryInfo` names them. */
 const BODY_METHODS = ["POST", "PUT", "PATCH"];
@@ -47,7 +47,14 @@ export function toolCall(input: { toolName: string; example?: unknown }): {
 }
 
 export type SellerListing =
-  | { ok: true; entry: NormalizedEntry; droppedFields: number; routeTemplateIgnored: boolean }
+  | {
+      ok: true;
+      entry: NormalizedEntry;
+      /** The listing's input: the method and example a check asks the seller with (0155). */
+      input: Discovered["discoveryInfo"]["input"];
+      droppedFields: number;
+      routeTemplateIgnored: boolean;
+    }
   | {
       ok: false;
       reason: BazaarRejectReason | Extract<OffersResult, { ok: false }>["reason"] | "no_listing";
@@ -84,6 +91,7 @@ export function listingFromSeller(
   return {
     ok: true,
     entry: { key, keyVersion, resource: listed },
+    input: result.discovered.discoveryInfo.input,
     droppedFields: offers.droppedFields,
     routeTemplateIgnored: result.routeTemplateIgnored,
   };

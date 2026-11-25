@@ -100,6 +100,7 @@ export const CATALOG = [
         "settle_exact_stellar_fee_exceeds_maximum",
         "settle_exact_stellar_signature_expiration_too_soon",
         "invalid_exact_stellar_payload_fee_exceeds_maximum",
+        "invalid_exact_stellar_pay_to_balance_missing",
         "other",
       ],
     },
@@ -338,7 +339,6 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
     fields: ["table"],
-    // `settlements_refused` is #205's (0086): listed ahead, so it isn't `other` once that lands.
     fieldValues: {
       table: [
         "spend_reservations",
@@ -349,6 +349,16 @@ export const CATALOG = [
         "other",
       ],
     },
+    emit: "aggregated",
+  },
+  // The search card rewrite (0120) fills one table shared by both networks, so process-scoped.
+  {
+    namespace: FAC,
+    name: "search_card_failures_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
     emit: "aggregated",
   },
   {
@@ -465,14 +475,16 @@ export const CATALOG = [
     emit: "eager-first",
   },
   // `payer` and `pay_to` write no metric: one buyer or seller near its budget is the budget
-  // working (G-alarm-list). `budget` matches the set but is never a dimension.
+  // working (G-alarm-list), as is an account near its own (0107, which logs no nearing for it
+  // either). `free`, the free plan's accounts together, does: filled, it refuses every one of them.
+  // `budget` matches the set but is never a dimension.
   {
     namespace: FAC,
     name: "spend_budget_nearing_total",
     kind: "counter",
     unit: "Count",
     scope: "network",
-    sets: [{ dims: [], when: { budget: ["asset", "other", "global"] } }],
+    sets: [{ dims: [], when: { budget: ["asset", "other", "free", "global"] } }],
     emit: "eager-first",
   },
   {
@@ -505,7 +517,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["op"],
-    fieldValues: { op: ["breaker", "reserve", "release", "other"] },
+    fieldValues: { op: ["breaker", "reserve", "release", "plan", "other"] },
     emit: "eager-first",
   },
   {
@@ -529,6 +541,9 @@ export const CATALOG = [
         "settle_exact_stellar_spend_limit_asset",
         "settle_exact_stellar_spend_limit_other",
         "settle_exact_stellar_spend_limit_global",
+        "settle_exact_stellar_quota_exhausted",
+        "settle_exact_stellar_spend_limit_account",
+        "settle_exact_stellar_spend_limit_free",
         "other",
       ],
     },
@@ -811,10 +826,30 @@ export const CATALOG = [
     emit: "aggregated",
   },
 
-  // ---- x402-watch: PutMetricData from the uptime probe and the off-server check (#115) ----
+  // ---- x402-watch: PutMetricData from the uptime probes and the off-server check (#115) ----
   {
     namespace: WATCH,
     name: "ready",
+    kind: "gauge",
+    unit: "None",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
+  // The same probe on the portal's backend (`/health`) and on the API hub's backend through the
+  // explorer's CloudFront (`/api/hub/me`), one metric each (0106 decision 21).
+  {
+    namespace: WATCH,
+    name: "portal_ready",
+    kind: "gauge",
+    unit: "None",
+    scope: "process",
+    sets: PLAIN,
+    emit: "aggregated",
+  },
+  {
+    namespace: WATCH,
+    name: "hub_ready",
     kind: "gauge",
     unit: "None",
     scope: "process",

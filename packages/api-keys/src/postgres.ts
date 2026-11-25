@@ -1,5 +1,6 @@
 import type pg from "pg";
-import { assertApiKey, assertSealedKey } from "./rules.js";
+import type { AccountPlanRecord, AccountPlanStore, AccountUsageReader } from "./plans.js";
+import { assertApiKey, assertApiKeyOwner, assertSealedKey } from "./rules.js";
 import type { ApiKeyRecord, ApiKeyStore, OwnerKeys, SealedKeyStore } from "./store.js";
 
 /** What a store runs its statements on: a pool, or one client inside a transaction. */
@@ -85,6 +86,80 @@ export class PostgresApiKeyStore implements ApiKeyStore {
 }
 
 /**
+ * Account plans on PostgreSQL, in the table the facilitator's migration `0018_account_plans`
+ * makes. `planOf` reads that table alone, so the portal's role needs only `SELECT` on it.
+ */
+export class PostgresAccountPlanStore implements AccountPlanStore {
+  constructor(private readonly pool: Queryable) {}
+
+  async planOf(owner: string): Promise<string | undefined> {
+    const { rows } = await this.pool.query<{ plan: string }>(
+      "SELECT plan FROM account_plans WHERE owner = $1",
+      [owner],
+    );
+    return rows[0]?.plan;
+  }
+
+  async setPlan({
+    owner,
+    plan,
+    now,
+    setBy,
+    note,
+  }: {
+    owner: string;
+    plan: string;
+    now: number;
+    setBy: string;
+    note?: string;
+  }): Promise<void> {
+    assertApiKeyOwner(owner);
+    await this.pool.query(
+      `INSERT INTO account_plans (owner, plan, set_at, set_by, note) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (owner) DO UPDATE SET plan = excluded.plan, set_at = excluded.set_at,
+         set_by = excluded.set_by, note = excluded.note`,
+      [owner, plan, now, setBy, note ?? null],
+    );
+  }
+
+  async listPlans(): Promise<AccountPlanRecord[]> {
+    // Byte order, as the in-memory store's: the database's collation would order `:` and `_`
+    // by other rules.
+    const { rows } = await this.pool.query<{
+      owner: string;
+      plan: string;
+      set_at: string;
+      set_by: string;
+      note: string | null;
+    }>('SELECT owner, plan, set_at, set_by, note FROM account_plans ORDER BY owner COLLATE "C"');
+    return rows.map((row) => ({
+      owner: row.owner,
+      plan: row.plan,
+      setAt: Number(row.set_at),
+      setBy: row.set_by,
+      ...(row.note !== null && { note: row.note }),
+    }));
+  }
+}
+
+/**
+ * Accounts' payments on PostgreSQL, through the view `account_usage` the facilitator's migration
+ * `0018_account_plans` makes over the spend store's scope rows. It reads the view alone, so the
+ * portal's role needs only `SELECT` on it.
+ */
+export class PostgresAccountUsageReader implements AccountUsageReader {
+  constructor(private readonly pool: Queryable) {}
+
+  async paymentsSince(owner: string, since: number): Promise<number> {
+    const { rows } = await this.pool.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM account_usage WHERE owner = $1 AND at >= $2",
+      [owner, since],
+    );
+    return Number(rows[0]!.count);
+  }
+}
+
+/**
  * {@link SealedKeyStore} on PostgreSQL: the registry's table and `api_key_copies`, which the
  * facilitator's migration `0014_api_key_copies` makes. A write runs in one transaction, and its
  * registry half is {@link PostgresApiKeyStore}'s own statement, so the registry's rules stay in
@@ -119,11 +194,14 @@ export class PostgresSealedKeyStore implements SealedKeyStore {
   async revoke(owner: string, now: number): Promise<boolean> {
     return this.transaction(async (client) => {
       const revoked = await new PostgresApiKeyStore(client).revoke(owner, now);
-      // Every copy of the owner's keys, not the revoked key's alone: a key the operator's script
-      // revoked left its copy behind, and this is where it goes.
+      // The copy of every revoked key of the owner, not this one's alone: a key the operator's
+      // script revoked left its copy behind, and this is where it goes. Never an active key's: in
+      // READ COMMITTED this statement sees an issue that committed after the UPDATE above, whose
+      // fresh copy would go, leaving its key active and unshowable. Such an issue finds no lock
+      // when the UPDATE revoked nothing (0106 decision 34).
       await client.query(
         `DELETE FROM api_key_copies
-         WHERE key_hash IN (SELECT key_hash FROM api_keys WHERE owner = $1)`,
+         WHERE key_hash IN (SELECT key_hash FROM api_keys WHERE owner = $1 AND state = 'revoked')`,
         [owner],
       );
       return revoked;

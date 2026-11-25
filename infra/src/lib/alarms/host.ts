@@ -2,7 +2,7 @@
 // `x402-host`. A failed check, or a job that never ran, writes a value past its threshold, so a
 // broken check alarms rather than reading as healthy (decision 10).
 import type { EnvironmentConfig } from "../config.js";
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
 const PROBE_SILENT = "Keeps its state; probe-silent covers a stopped host probe.";
 const AGENT_SILENT = "Keeps its state; telemetry-silent covers a stopped agent.";
@@ -16,7 +16,7 @@ export function mountSlug(mount: string): string {
   return slug === "" ? "root" : slug;
 }
 
-export function addHostAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
+export function addHostAlarms(f: Alarms, c: EnvironmentConfig): void {
   const t = c.thresholds;
   const hours = (s: number) => `${Math.round(s / 3600)} hours`;
 

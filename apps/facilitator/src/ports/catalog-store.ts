@@ -15,8 +15,8 @@ export interface CatalogEntry {
   key: CatalogKey;
   /** `CATALOG_KEY_VERSION` of the rules that built `key`; stored so a rule change can be migrated. */
   keyVersion: number;
-  /** Ledger of the settlement whose check wrote the entry. */
-  ledger: number;
+  /** Ledger of the settlement whose check wrote the entry; `null` when the seed wrote it (0155). */
+  ledger: number | null;
   /**
    * When the check that read the entry from the seller started, app clock in ms: it orders writes,
    * so of two checks of one key the one that started later is kept (0063).
@@ -33,7 +33,8 @@ export interface CatalogEntry {
 export interface CatalogQuery {
   type?: string;
   payTo?: string;
-  network?: StellarNetwork;
+  /** A CAIP-2 id; one that isn't Stellar's matches nothing. */
+  network?: string;
   /** An extension key the resource must carry, e.g. `bazaar`. */
   extensions?: string;
   limit: number;
@@ -46,6 +47,29 @@ export interface CatalogPage {
   total: number;
 }
 
+/** `GET /discovery/search`'s words and filters (0120); the route resolves `limit` and the cursor. */
+export interface CatalogSearch {
+  /** The query as the agent wrote it. */
+  text: string;
+  type?: string;
+  payTo?: string;
+  /** A CAIP-2 id; without one, both networks are searched (0155). */
+  network?: string;
+  limit: number;
+  /** The last result of the page before; this page starts after it. */
+  after?: CatalogSearchPosition;
+}
+
+/** Where a result sits: its rank by words, as PostgreSQL writes it, and its key for ties. */
+export interface CatalogSearchPosition {
+  rank: string;
+  key: CatalogKey;
+}
+
+export interface CatalogSearchHit extends CatalogSearchPosition {
+  resource: DiscoveryResource;
+}
+
 /** `stale`: the stored entry came from a check that started later; nothing was written. */
 export type UpsertOutcome = "inserted" | "updated" | "stale";
 
@@ -56,8 +80,8 @@ export interface CatalogStore {
   /**
    * Idempotent by key. Replaces the stored entry, `accepts` included, unless the stored one came
    * from a check that started later (`checkedAt`). Rejects an offer the upstream
-   * `PaymentRequirements` schema refuses, and a `ledger` or `checkedAt` that isn't a non-negative
-   * integer.
+   * `PaymentRequirements` schema refuses, and a `ledger` (unless `null`) or `checkedAt` that isn't a
+   * non-negative integer.
    */
   upsert(entry: CatalogEntry): Promise<UpsertOutcome>;
   /**
@@ -65,6 +89,13 @@ export interface CatalogStore {
    * place, so offset paging doesn't shift each time a resource settles again.
    */
   list(query: CatalogQuery): Promise<CatalogPage>;
+  /**
+   * Entries that hold a word of `text`, ranked by words (ADR 0014): a word in the name counts
+   * most, then tags, description and parameters, and each repeat counts again (threat model,
+   * "Ranking by repeated words"). Equal ranks go by key, so a page that starts `after` a result
+   * goes on exactly where the page before stopped.
+   */
+  search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
 }
 
 /** Where a listing attempt ended: the payment's copy, or the check of the seller's 402. */
@@ -100,7 +131,8 @@ export interface CatalogAttempt {
   at: number;
   network: string;
   payTo: string;
-  payer: string;
+  /** Who paid; absent on a seed's check (0155). */
+  payer?: string;
   /** The settlement's last transaction hash. */
   transaction?: string;
   /** The payment's `resource.url`, as sent. */

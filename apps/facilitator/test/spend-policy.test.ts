@@ -1,12 +1,23 @@
 import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import {
+  DEFAULT_ACCOUNT_PLANS,
+  parseAccountPlans,
+  type AccountPlan,
+  type AccountPlanStore,
+} from "@stellar-x402/api-keys";
 import type { FailureCause } from "@stellar-x402/signer-pool";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
-import type { SettlementRecord, SpendScope, SpendStore } from "../src/ports/index.js";
+import type {
+  SettlementRecord,
+  SpendReservation,
+  SpendScope,
+  SpendStore,
+} from "../src/ports/index.js";
 import type { BeforeSubmitContext } from "../src/settlement/hooks.js";
-import { SETTLE_REASONS } from "../src/settlement/reasons.js";
+import { SETTLE_REASONS, UNSENT_REASONS } from "../src/settlement/reasons.js";
 import type { AssetKind, AssetKinds } from "../src/spend/asset-kinds.js";
 import { budgetKind, spendLimits, type SpendBudgets } from "../src/spend/limits.js";
 import {
@@ -32,6 +43,7 @@ const backoff = { baseMs: 3_600_000, factor: 4, maxMs: 86_400_000, strikeResetMs
 const budgets: SpendBudgets = {
   windowMs: WINDOW_MS,
   globalStroops: 500_000_000n,
+  freeStroops: 250_000_000n,
   perPayerStroops: 20_000_000n,
   perPayToStroops: 100_000_000n,
   perKnownAssetStroops: 250_000_000n,
@@ -81,6 +93,9 @@ function setup(
     assets?: AssetKinds;
     floor?: BalanceFloor;
     budgets?: SpendBudgets;
+    plans?: Pick<AccountPlanStore, "planOf">;
+    accountPlans?: Map<string, AccountPlan>;
+    keyed?: boolean;
   } = {},
 ) {
   const store = overrides.store ?? db.stores().spend;
@@ -93,6 +108,10 @@ function setup(
     assets: overrides.assets ?? fakeAssets(),
     floor: overrides.floor ?? { below: () => false },
     budgets: overrides.budgets ?? budgets,
+    // No row for any account: every one is on the free plan.
+    plans: overrides.plans ?? { planOf: async () => undefined },
+    accountPlans: overrides.accountPlans ?? parseAccountPlans(DEFAULT_ACCOUNT_PLANS),
+    keyed: overrides.keyed ?? false,
     logger: jsonLogger("debug", (line) => lines.push(line)),
     metrics,
     now: () => clock.now,
@@ -129,6 +148,19 @@ function failingStore(failures: number, lands = false) {
     },
   });
   return { store, ids, real };
+}
+
+/** `setup` on the real store, noting every reservation the policy asks it for. */
+function recorded(overrides: Omit<NonNullable<Parameters<typeof setup>[0]>, "store"> = {}) {
+  const real = db.stores().spend;
+  const reservations: SpendReservation[] = [];
+  const store = overriding(real, {
+    reserve: (reservation) => {
+      reservations.push(reservation);
+      return real.reserve(reservation);
+    },
+  });
+  return { ...setup({ ...overrides, store }), reservations };
 }
 
 const used = (store: SpendStore, scope: SpendScope) => store.used(scope, WINDOW_MS, 1_000_000 + 1);
@@ -169,6 +201,7 @@ describe("spendLimits", () => {
         ] as const
       ).map(budgetKind),
     ).toEqual(["global", "other", "payer", "payer", "pay_to", "pay_to", "asset"]);
+    expect((["account:discord:1", "free"] as const).map(budgetKind)).toEqual(["account", "free"]);
   });
 });
 
@@ -189,19 +222,22 @@ describe("createSpendPolicy beforeSubmit", () => {
     expect(await used(store, `payer:${ctx.payer}/${USDC}`)).toBe(0n);
   });
 
-  it("takes a context with an API key's owner and budgets it like any other, until 0107 (0105)", async () => {
-    const { policy, store } = setup();
-    const ctx = context({ caller: { owner: "operator:acme" } });
+  it("a settlement without a caller keeps today's scopes", async () => {
+    const planOf = vi.fn(async () => "basic");
+    const { policy, reservations } = recorded({ plans: { planOf } });
+    const ctx = context();
 
     expect(await policy.beforeSubmit(ctx)).toEqual({ allow: true });
-    // The owner travels in the context; a budget of its own is 0107's, so the scopes are 0024's.
-    for (const scope of [
-      `payer:${ctx.payer}`,
-      `payTo:${ctx.payTo}`,
-      `asset:${USDC}`,
-      "global",
-    ] as const)
-      expect(await used(store, scope)).toBe(CEILING);
+    // Testnet takes no API key: 0024's scopes, and no account is read.
+    expect(reservations.map((reservation) => reservation.limits)).toEqual([
+      [
+        { scope: `payer:${ctx.payer}`, maxStroops: 20_000_000n, windowMs: WINDOW_MS },
+        { scope: `payTo:${ctx.payTo}`, maxStroops: 100_000_000n, windowMs: WINDOW_MS },
+        { scope: `asset:${USDC}`, maxStroops: 250_000_000n, windowMs: WINDOW_MS },
+        { scope: "global", maxStroops: 500_000_000n, windowMs: WINDOW_MS },
+      ],
+    ]);
+    expect(planOf).not.toHaveBeenCalled();
   });
 
   it("adds tier:other and keys the payer and payTo by asset for another token", async () => {
@@ -439,6 +475,62 @@ describe("createSpendPolicy beforeSubmit", () => {
     expect(metrics.value("spend_commit_unmatched_total", { state: "success" })).toBe(0);
   });
 
+  it("a reopened claim gives up the earlier claim's reservation, so the payment counts once", async () => {
+    // `global` holds one ceiling: a reopen counted beside the earlier claim would be refused.
+    const { policy, store } = setup({ budgets: { ...budgets, globalStroops: CEILING } });
+    const first = context();
+    const reopened = { ...first, reopened: 1 };
+    expect(await policy.beforeSubmit(first)).toEqual({ allow: true });
+    // Before the first claim's `onFinal`, which may come late or never (0073 decision 26).
+    expect(await policy.beforeSubmit(reopened)).toEqual({ allow: true });
+    expect(await used(store, "global")).toBe(CEILING);
+
+    // That claim's late `onFinal` and late reserve change nothing.
+    await policy.onFinal(finalRecord(first, "rejected"), "settle");
+    expect(await policy.beforeSubmit(first)).toEqual({
+      allow: false,
+      errorReason: SETTLE_REASONS.refused,
+    });
+    expect(await used(store, "global")).toBe(CEILING);
+  });
+
+  it("a reopen keeps out the late reserve of a claim that never reserved", async () => {
+    const { policy, store } = setup();
+    const first = context();
+    // The first claim ended before its reserve reached the store, which is still on its way.
+    expect(await policy.beforeSubmit({ ...first, reopened: 1 })).toEqual({ allow: true });
+    expect(await policy.beforeSubmit(first)).toEqual({
+      allow: false,
+      errorReason: SETTLE_REASONS.refused,
+    });
+    expect(await used(store, "global")).toBe(CEILING);
+  });
+
+  it("refuses a reopen as a store failure when the earlier claim's release fails", async () => {
+    const real = db.stores().spend;
+    const { policy, metrics, events } = setup({
+      store: overriding(real, {
+        release: async () => {
+          throw new Error("connection timeout");
+        },
+      }),
+    });
+    const first = context();
+    expect(await policy.beforeSubmit(first)).toEqual({ allow: true });
+
+    // Fail closed, with a reason the payment reopens on: nothing new was reserved.
+    expect(await policy.beforeSubmit({ ...first, reopened: 1 })).toEqual({
+      allow: false,
+      errorReason: SETTLE_REASONS.spendStoreUnavailable,
+    });
+    expect(UNSENT_REASONS).toContain(SETTLE_REASONS.spendStoreUnavailable);
+    expect(metrics.value("spend_store_failures_total", { op: "release" })).toBe(1);
+    expect(events("spend_store_failed")).toEqual([
+      expect.objectContaining({ op: "release", key: first.key }),
+    ]);
+    expect(await used(real, "global")).toBe(CEILING);
+  });
+
   it("refuses an id that was released, as the record is already final", async () => {
     const { policy, store } = setup();
     const ctx = context();
@@ -492,13 +584,26 @@ describe("createSpendPolicy beforeSubmit", () => {
     expect(metrics.value("spend_budget_nearing_total", { budget: "payer" })).toBe(3);
   });
 
+  it("reports nearing with the limit's own window", async () => {
+    const store = overriding(db.stores().spend, {
+      breakersOpen: async () => new Set<SpendScope>(),
+      reserve: async () => ({
+        reserved: true,
+        usage: [{ scope: "global", usedStroops: 8n, maxStroops: 10n, windowMs: 123 }],
+      }),
+    });
+    const { policy, events } = setup({ store });
+    await policy.beforeSubmit(context());
+    expect(events("spend_budget_nearing")).toEqual([expect.objectContaining({ windowMs: 123 })]);
+  });
+
   it("forgets the oldest scope's report past 10,000 scopes", async () => {
     let next: SpendScope = "global";
     const store = overriding(db.stores().spend, {
       breakersOpen: async () => new Set<SpendScope>(),
       reserve: async () => ({
         reserved: true,
-        usage: [{ scope: next, usedStroops: 8n, maxStroops: 10n }],
+        usage: [{ scope: next, usedStroops: 8n, maxStroops: 10n, windowMs: WINDOW_MS }],
       }),
     });
     const { policy, metrics } = setup({ store });
@@ -515,6 +620,257 @@ describe("createSpendPolicy beforeSubmit", () => {
     expect(metrics.value("spend_budget_nearing_total", { budget: "payer" })).toBe(10_002);
     await report("payer:G2");
     expect(metrics.value("spend_budget_nearing_total", { budget: "payer" })).toBe(10_002);
+  });
+});
+
+describe("createSpendPolicy beforeSubmit for an account (0107)", () => {
+  const OWNER = "discord:412345678901234567";
+  /** A keyed settlement's time: late in November 2026, UTC. */
+  const NOW = Date.UTC(2026, 10, 24, 12);
+  const MONTH_START = Date.UTC(2026, 10, 1);
+  const keyed = (overrides: Partial<BeforeSubmitContext> = {}) =>
+    context({ caller: { owner: OWNER }, now: NOW, deadline: NOW + 5_000, ...overrides });
+  const usedNow = (store: SpendStore, scope: SpendScope) => store.used(scope, WINDOW_MS, NOW + 1);
+  /**
+   * A free-plan account's limits: the month's payments, then the day's fees, then the budgets
+   * accounts share. No payer, payTo, asset or tier scope, which another key's payments could fill.
+   */
+  const FREE_PLAN_LIMITS = [
+    { scope: `account:${OWNER}`, maxCount: 1_000, since: MONTH_START },
+    { scope: `account:${OWNER}`, maxStroops: 20_000_000n, windowMs: WINDOW_MS },
+    { scope: "free", maxStroops: 250_000_000n, windowMs: WINDOW_MS },
+    { scope: "global", maxStroops: 500_000_000n, windowMs: WINDOW_MS },
+  ];
+
+  it("a keyed settlement on the free plan reserves account, free and global", async () => {
+    const planOf = vi.fn(async () => undefined);
+    const { policy, reservations } = recorded({ keyed: true, plans: { planOf } });
+    const ctx = keyed();
+
+    expect(await policy.beforeSubmit(ctx)).toEqual({ allow: true });
+    // Criterion 1: the account's scopes, `free` and `global` alone.
+    expect(reservations).toEqual([
+      { id: `${ctx.key}#0`, amount: CEILING, now: NOW, limits: FREE_PLAN_LIMITS },
+    ]);
+    expect(planOf).toHaveBeenCalledWith(OWNER);
+  });
+
+  it("a caller picks the account's scopes on a network that requires no key too", async () => {
+    // `keyed` only refuses a settlement without a caller; the caller alone picks the scopes.
+    const { policy, reservations } = recorded({ keyed: false });
+
+    expect(await policy.beforeSubmit(keyed())).toEqual({ allow: true });
+    expect(reservations.map((reservation) => reservation.limits)).toEqual([FREE_PLAN_LIMITS]);
+  });
+
+  it("a raised account doesn't count in free", async () => {
+    const { policy, reservations } = recorded({
+      keyed: true,
+      plans: { planOf: async () => "basic" },
+    });
+
+    expect(await policy.beforeSubmit(keyed())).toEqual({ allow: true });
+    expect(reservations.map((reservation) => reservation.limits)).toEqual([
+      [
+        { scope: `account:${OWNER}`, maxCount: 10_000, since: MONTH_START },
+        { scope: `account:${OWNER}`, maxStroops: 25_000_000n, windowMs: WINDOW_MS },
+        { scope: "global", maxStroops: 500_000_000n, windowMs: WINDOW_MS },
+      ],
+    ]);
+  });
+
+  it("a keyed network refuses a settlement without a caller", async () => {
+    const planOf = vi.fn(async () => undefined);
+    const { policy, reservations, metrics, events } = recorded({ keyed: true, plans: { planOf } });
+    const ctx = context({ now: NOW });
+
+    // A bug in the wiring: refused as a hook's bug is, never counted in no account.
+    expect(await policy.beforeSubmit(ctx)).toEqual({
+      allow: false,
+      errorReason: SETTLE_REASONS.refused,
+    });
+    expect(reservations).toEqual([]);
+    expect(planOf).not.toHaveBeenCalled();
+    expect(events("spend_caller_missing")).toEqual([
+      expect.objectContaining({ level: "error", key: ctx.key }),
+    ]);
+    expect(metrics.value("spend_refused_total", { reason: SETTLE_REASONS.refused })).toBe(1);
+  });
+
+  it("an unknown plan name counts as free and is logged", async () => {
+    const { policy, reservations, events } = recorded({
+      keyed: true,
+      plans: { planOf: async () => "gold" },
+    });
+
+    expect(await policy.beforeSubmit(keyed())).toEqual({ allow: true });
+    expect(reservations.map((reservation) => reservation.limits)).toEqual([FREE_PLAN_LIMITS]);
+    expect(events("account_plan_unknown")).toEqual([
+      expect.objectContaining({ level: "error", owner: OWNER, plan: "gold" }),
+    ]);
+  });
+
+  it("a plan read that fails refuses, as a store failure does", async () => {
+    const { policy, reservations, metrics, events } = recorded({
+      keyed: true,
+      plans: { planOf: () => Promise.reject(new Error("registry down")) },
+    });
+
+    expect(await policy.beforeSubmit(keyed())).toEqual({
+      allow: false,
+      errorReason: SETTLE_REASONS.spendStoreUnavailable,
+    });
+    expect(reservations).toEqual([]);
+    expect(metrics.value("spend_store_failures_total", { op: "plan" })).toBe(1);
+    expect(events("spend_store_failed")).toEqual([expect.objectContaining({ op: "plan" })]);
+    // Fail closed, with nothing sent: the identical payload reopens once the read works.
+    expect(UNSENT_REASONS).toContain(SETTLE_REASONS.spendStoreUnavailable);
+  });
+
+  it.each([
+    {
+      name: "the month's payments",
+      plans: "free:2:20000000",
+      owners: [OWNER, OWNER, OWNER],
+      reason: SETTLE_REASONS.quotaExhausted,
+      message:
+        "the account's monthly quota of 2 payments is used up until 2026-12-01T00:00:00Z; " +
+        "contact us for a higher plan",
+    },
+    {
+      name: "the day's fees",
+      plans: `free:1000:${2n * CEILING}`,
+      owners: [OWNER, OWNER, OWNER],
+      reason: SETTLE_REASONS.spendLimitAccount,
+      message:
+        "the account's fee allowance is used up for now: its payments cost more than usual; " +
+        "try again later",
+    },
+    {
+      name: "the free plan's shared budget",
+      budgets: { freeStroops: 2n * CEILING },
+      owners: ["discord:1", "discord:2", "discord:3"],
+      reason: SETTLE_REASONS.spendLimitFree,
+      message:
+        "the free plan's shared allowance is used up for now; try again later, or contact us " +
+        "for a higher plan",
+    },
+    {
+      name: "global, as before 0107",
+      budgets: { globalStroops: 2n * CEILING },
+      owners: ["discord:1", "discord:2", "discord:3"],
+      reason: SETTLE_REASONS.spendLimitGlobal,
+    },
+  ])("refuses past $name with its reason and message", async (c) => {
+    const { policy, store, metrics } = setup({
+      keyed: true,
+      accountPlans: parseAccountPlans(c.plans ?? DEFAULT_ACCOUNT_PLANS),
+      budgets: { ...budgets, ...c.budgets },
+    });
+    const [first, second, third] = c.owners.map((owner) => keyed({ caller: { owner } }));
+
+    expect(await policy.beforeSubmit(first!)).toEqual({ allow: true });
+    expect(await policy.beforeSubmit(second!)).toEqual({ allow: true });
+    expect(await policy.beforeSubmit(third!)).toStrictEqual({
+      allow: false,
+      errorReason: c.reason,
+      ...(c.message !== undefined && { errorMessage: c.message }),
+    });
+    expect(await usedNow(store, "global")).toBe(2n * CEILING);
+    expect(metrics.value("spend_refused_total", { reason: c.reason })).toBe(1);
+  });
+
+  it("nearing is reported for free and global, not for an account", async () => {
+    // All three fill to 80 % together: the account's day is its own, so only the budgets
+    // accounts share report it (S-design §9).
+    const { policy, metrics, events } = setup({
+      keyed: true,
+      accountPlans: parseAccountPlans(`free:1000:${10n * CEILING}`),
+      budgets: { ...budgets, freeStroops: 10n * CEILING, globalStroops: 10n * CEILING },
+    });
+
+    for (let i = 0; i < 8; i++) expect(await policy.beforeSubmit(keyed())).toEqual({ allow: true });
+    expect(events("spend_budget_nearing").map((event) => event.scope)).toEqual(["free", "global"]);
+    expect(metrics.value("spend_budget_nearing_total", { budget: "free" })).toBe(1);
+    expect(metrics.value("spend_budget_nearing_total", { budget: "global" })).toBe(1);
+    expect(metrics.value("spend_budget_nearing_total", { budget: "account" })).toBe(0);
+  });
+
+  it("a reopen reserves under the reopening caller", async () => {
+    const { policy, store, reservations } = recorded({ keyed: true });
+    const first = keyed({ caller: { owner: "discord:1" } });
+    expect(await policy.beforeSubmit(first)).toEqual({ allow: true });
+
+    // Whoever's request sends the payment pays for it (decision 9): the repeat's own caller. The
+    // first claim ended with nothing sent, and the reopen gives its reservation up without
+    // waiting for that claim's `onFinal`, so the first caller's account is charged nothing.
+    const reopened = { ...first, caller: { owner: "discord:2" }, reopened: 1 };
+    expect(await policy.beforeSubmit(reopened)).toEqual({ allow: true });
+    expect(reservations.map(({ id, limits }) => [id, limits.map((limit) => limit.scope)])).toEqual([
+      [`${first.key}#0`, ["account:discord:1", "account:discord:1", "free", "global"]],
+      [`${first.key}#1`, ["account:discord:2", "account:discord:2", "free", "global"]],
+    ]);
+    expect(await usedNow(store, "account:discord:1")).toBe(0n);
+    expect(await usedNow(store, "account:discord:2")).toBe(CEILING);
+  });
+
+  describe("a reopened payment counts once in the account's month (review of #236)", () => {
+    /** The free plan allows 2 payments a month, and one is already used. */
+    async function oneUsed() {
+      const made = setup({ keyed: true, accountPlans: parseAccountPlans("free:2:20000000") });
+      expect(await made.policy.beforeSubmit(keyed())).toEqual({ allow: true });
+      return made;
+    }
+    const quotaSpent = { allow: false, errorReason: SETTLE_REASONS.quotaExhausted };
+
+    it("before the earlier claim's onFinal, at the month's last payment", async () => {
+      const { policy, store } = await oneUsed();
+      const first = keyed();
+      expect(await policy.beforeSubmit(first)).toEqual({ allow: true });
+
+      // The first claim ended with nothing sent, and its `onFinal` hasn't released it yet, or
+      // never will (0073 decision 26). The reopen is the same payment, not a third one.
+      expect(await policy.beforeSubmit({ ...first, reopened: 1 })).toEqual({ allow: true });
+      expect(await usedNow(store, `account:${OWNER}`)).toBe(2n * CEILING);
+      // The month is spent all the same: a new payment is refused.
+      expect(await policy.beforeSubmit(keyed())).toMatchObject(quotaSpent);
+
+      // The first claim's late `onFinal` takes nothing from the reopened claim.
+      await policy.onFinal(finalRecord(first, "rejected"), "settle");
+      expect(await usedNow(store, `account:${OWNER}`)).toBe(2n * CEILING);
+      expect(await policy.beforeSubmit(keyed())).toMatchObject(quotaSpent);
+    });
+
+    it("while the earlier claim's reserve still waits on a slow store", async () => {
+      const { policy, store } = await oneUsed();
+      const first = keyed();
+      const wait = () => new Promise((resolve) => setTimeout(resolve, 50));
+      // Something holds the account's scope row, so the first claim's reserve waits on it; the
+      // settle budget ends meanwhile, and the repeat reopens the payment.
+      const locker = await db.pool.connect();
+      let answers: Awaited<ReturnType<typeof policy.beforeSubmit>>[];
+      try {
+        await locker.query("BEGIN");
+        await locker.query("SELECT 1 FROM spend_scopes WHERE scope = $1 FOR UPDATE", [
+          `account:${OWNER}`,
+        ]);
+        const waiting = policy.beforeSubmit(first);
+        await wait();
+        const reopening = policy.beforeSubmit({ ...first, reopened: 1 });
+        await wait();
+        await locker.query("COMMIT");
+        answers = await Promise.all([waiting, reopening]);
+      } finally {
+        await locker.query("ROLLBACK").catch(() => {});
+        locker.release();
+      }
+
+      // Whichever of the two the store served first, the reopened claim holds the payment's one
+      // reservation: the month has 2 payments, not 3, and the reopen wasn't refused for a third.
+      expect(answers[1]).toEqual({ allow: true });
+      expect(await usedNow(store, `account:${OWNER}`)).toBe(2n * CEILING);
+      expect(await policy.beforeSubmit(keyed())).toMatchObject(quotaSpent);
+    });
   });
 });
 

@@ -71,8 +71,9 @@ export interface SealedKeyStore {
    */
   issue(key: { hash: string; owner: string; sealed: Buffer; now: number }): Promise<boolean>;
   /**
-   * Revokes the owner's active key and deletes every copy of the owner's keys, both or neither.
-   * Resolves `false` when it has no active key.
+   * Revokes the owner's active key and deletes the copy of each of the owner's revoked keys, both
+   * or neither. Never deletes an active key's copy, not even one an issue stored while the revoke
+   * ran. Resolves `false` when it has no active key.
    */
   revoke(owner: string, now: number): Promise<boolean>;
   /** The owner's active key and its last revocation; `{}` for an owner the registry never saw. */

@@ -6,9 +6,10 @@ import { createServer } from "node:http";
 import { text } from "node:stream/consumers";
 
 const target = process.env.GATE_FACILITATOR_URL;
-const port = Number(process.env.PORT);
-if (!target || !port) {
-  console.error("GATE_FACILITATOR_URL and PORT must be set");
+// 0 lets the system pick a free port; the "listening" line names the one bound.
+const port = /^\d+$/.test(process.env.PORT ?? "") ? Number(process.env.PORT) : NaN;
+if (!target || !(port <= 65535)) {
+  console.error("GATE_FACILITATOR_URL and PORT (0-65535) must be set");
   process.exit(1);
 }
 
@@ -58,5 +59,5 @@ const server = createServer(async (req, res) => {
 
 // Only this machine: the suite and its servers call http://localhost:<PORT>.
 server.listen(port, "localhost", () => {
-  console.log(`Facilitator listening on port ${port}, forwarding to ${target}`);
+  console.log(`Facilitator listening on port ${server.address().port}, forwarding to ${target}`);
 });

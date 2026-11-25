@@ -1,7 +1,7 @@
 // G-alarm-list, "Settlement": the facilitator's EMF lines (#112), which reach CloudWatch with #113.
 import type { EnvironmentConfig } from "../config.js";
 import { networkSuffix } from "../names.js";
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
 const SILENT_LEVEL = "Keeps its state; facilitator-silent covers a stopped process.";
 const SILENT_EVENT = "Nothing happened; facilitator-silent covers a stopped process.";
@@ -13,7 +13,7 @@ const BREAKERS = [
   ["asset", "one wasm token's transfers"],
 ] as const;
 
-export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
+export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
   const t = c.thresholds;
 
   // On the first one (Karol's review of #114, point 3): `onError` takes anything unknown as ours,
@@ -44,6 +44,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.level("pending", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "settlement_oldest_open_seconds", dims: on },
       statistic: "Maximum",
       periodMinutes: 1,
@@ -111,6 +112,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
       f.event("breaker-opened", {
         group: "facilitator",
         network,
+        severity: "critical",
         qualifier: breaker.replace("_", "-"),
         signal: { catalog: "spend_breaker_opened_total", dims: { network, breaker } },
         description: {
@@ -123,11 +125,12 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.event("budget-nearing", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "spend_budget_nearing_total", dims: on },
       periodMinutes: 5,
       periods: 4,
       description: {
-        what: `A fee budget on ${network} (asset, other or global) passed its nearing level: at its limit, settlement for that scope stops until the window rolls (0024). The 4 five-minute periods match its 15-minute repeat.`,
+        what: `A fee budget on ${network} (asset, other, free or global) passed its nearing level: at its limit, settlement for that scope stops until the window rolls (0024; free, every account on the free plan, 0107). The 4 five-minute periods match its 15-minute repeat.`,
         next: "Read spend_budget_nearing in the app logs for the scope, the used and max stroops; raise the budget only if the traffic is real.",
         noData: SILENT_EVENT,
       },
@@ -146,7 +149,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
         },
       },
       description: {
-        what: `A write to Postgres failed on ${network}: a settlement record or the spend store. Settle answers may be lost from the records, and the spend policy may be blind.`,
+        what: `A read or write to Postgres failed on ${network}: a settlement record or the spend store, an account's plan among its reads. Settle answers may be lost from the records, and the spend policy may be blind.`,
         next: `Check x402-db-${networkSuffix(network)}@${c.envName} and its log, then settlement_record_failed and spend_store_failed in the app logs for the operation.`,
         noData: SILENT_EVENT,
       },
@@ -180,6 +183,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.event("landed-after-expired", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "settlement_landed_after_expired_total", dims: on },
       description: {
         what: `A transaction on ${network} landed after its record was marked expired: the payer may have been told the payment failed while it settled.`,
@@ -191,6 +195,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.level("sweeps-stopped", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "settlement_sweeps_total", dims: { network, outcome: "listed" } },
       statistic: "Sum",
       periodMinutes: 1,
@@ -294,6 +299,7 @@ export function addSettlementAlarms(f: AlarmFactory, c: EnvironmentConfig): void
     f.event("commit-unmatched", {
       group: "facilitator",
       network,
+      severity: "critical",
       signal: { catalog: "spend_commit_unmatched_total", dims: on },
       description: {
         what: `A settled fee on ${network} counts against no budget: its reservation was never made or was pruned meanwhile, so the fee budgets undercount.`,

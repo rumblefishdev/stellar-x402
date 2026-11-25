@@ -49,6 +49,10 @@ history:
     status: developing
     who: akot
     note: "Karol's review of #114 (decisions 60-67): settlement-expired, submit-failed, hook-failures, uptime-flapping, http-500 at 1, breaker-opened per kind, theft findings straight to SNS from #115, the log-volume ceiling with host, the Count shape folded into Event."
+  - date: "2026-11-20"
+    status: developing
+    who: claude
+    note: "Task 0106, decision 21: portal-uptime and hub-uptime, the uptime probe on the portal's backend and the API hub's, in groups of their own."
 ---
 
 # The alarms 0027 builds
@@ -97,6 +101,16 @@ aggregates an array as samples is unverified: verify it at the first deploy.
 | `uptime-flapping` | The uptime probe's `ready` | Level, `Minimum` below 1, 10 of 30 one-minute periods | Not 1 in 10 of the last 30 minutes, none of them 7 in a row needed: a crash loop that comes up between restarts (`0 0 0 0 0 0 1` repeating never fires `uptime`), a lease that moves, a tunnel that drops. One deploy stays under 10. In the `uptime` group | Breaching: as `uptime` |
 | `rpc-stalled` | `rpc_stalled_seconds` | Level, `Maximum`, 5 of 5 one-minute periods | Above 120 s for 5 minutes. `ready` doesn't show a frozen endpoint until 0049. A failover resets the age, by design; a frozen endpoint that still answers never does. Endpoint swaps faster than every 2 minutes can keep the age under 120 s: they show in `rpc_on_fallback` and the `rpc_failover` logs instead | Ignore: `facilitator-silent` |
 | `balance-stale` | `balance_reading_age_seconds` | Level, `Maximum`, 1 of 1 one-minute period | Above 300 s, the floor's `maxStaleMs` at the default interval: `/settle` refuses every payment with `facilitator_underfunded`, while `ready` stays 1 and the balance off the server looks fine. The floor reads on a timer, so it fires on a quiet server too. The threshold is tied to `maxStaleMs`: startup logs `balance_stale_threshold_mismatch` when the configured bound isn't 300 s, since the alarm then fires before `/settle` refuses, or after | Ignore: `facilitator-silent` |
+
+The same probe, one function per target, reads the portal's backend and the API hub's backend
+(task 0106, its decision 21), each into a metric and a group of its own: `portalUptime`, on once
+its probe has published, as `uptime`; `hubUptime`, on once the hub's backend is in the explorer's
+CloudFront distribution and its probe reads 1. Neither has a flapping alarm yet.
+
+| Alarm | Signal | Shape | Fires when | Missing data |
+| --- | --- | --- | --- | --- |
+| `portal-uptime` | The portal's probe's `portal_ready`: its `/health`'s `ready` | Level, `Minimum` below 1, 7 of 7 one-minute periods | Not 1 for 7 minutes in a row, `uptime`'s run: the hub's x402 tab can't show, issue or revoke a key | Breaching: a missing point counts as down |
+| `hub-uptime` | The hub's probe's `hub_ready`: 1 for a 200 from `https://sorobanscan.com/api/hub/me` whose JSON says `"authenticated": false` | Level, `Minimum` below 1, 7 of 7 one-minute periods | Not 1 for 7 minutes in a row, read through the explorer's CloudFront: no member can sign in or use a tab. The distribution answers a path it doesn't route with a redirect or its HTML, so a status alone proves nothing | Breaching: as `portal-uptime` |
 
 ## Money and security
 

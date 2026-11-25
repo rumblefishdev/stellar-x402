@@ -23,7 +23,7 @@ describe("envs/production.json", () => {
     expect(production().networks).toEqual(["stellar:testnet"]);
   });
 
-  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, disk, memory, log volume, the balance, the protocol (26, 37, 72, 73)", () => {
+  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, disk, memory, log volume, the balance, the protocol, the heartbeat (26, 37, 72, 73; 0139)", () => {
     const on = Object.entries(production().alarmGroups)
       .filter(([, v]) => v)
       .map(([g]) => g);
@@ -37,7 +37,20 @@ describe("envs/production.json", () => {
       "logVolume",
       "watch",
       "protocol",
+      "heartbeat",
     ]);
+  });
+
+  test("probes the facilitator, the portal's backend and the API hub's backend (0106 decision 21)", () => {
+    expect(production().uptime).toEqual({
+      url: "https://x402-facilitator.sorobanscan.com/health",
+      portalUrl: "https://x402-portal.sorobanscan.com/health",
+      // Through the explorer's CloudFront, as a member's browser reaches the hub.
+      hubUrl: "https://sorobanscan.com/api/hub/me",
+    });
+    // Off until their probes have published (decision 26); the hub's until its backend is in the
+    // explorer's distribution, which today answers /api/hub/me with a redirect to /api/.
+    expect(production().alarmGroups).toMatchObject({ portalUptime: false, hubUptime: false });
   });
 
   test("names the fee account /supported shows as the signer", () => {
@@ -86,7 +99,23 @@ describe("validateConfig", () => {
       (c) => (m(c).logging.sessionHours = 13),
       /sessionHours/,
     ],
+    [
+      "a bad monitoring VM CN",
+      (c) => (m(c).monitoringVm.certificateCn = "X402 VM"),
+      /monitoringVm\.certificateCn/,
+    ],
+    [
+      "a relative monitoring VM SSM name",
+      (c) => (m(c).monitoringVm.ipSsmParam = "x402/vm-ip"),
+      /monitoringVm\.ipSsmParam/,
+    ],
     ["an http uptime URL", (c) => (m(c).uptime.url = "http://example.com/health"), /uptime.url/],
+    [
+      "an http portal URL",
+      (c) => (m(c).uptime.portalUrl = "http://x402-portal.sorobanscan.com/health"),
+      /uptime.portalUrl/,
+    ],
+    ["no hub URL", (c) => delete (m(c).uptime as { hubUrl?: string }).hubUrl, /uptime.hubUrl/],
     [
       "a Slack ID in place of its SSM name",
       (c) => (m(c).slack.channelIdSsmParam = "C012345"),

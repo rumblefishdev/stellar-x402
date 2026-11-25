@@ -926,6 +926,81 @@ testnet's reset, Friendbot creates it again (OpenBao, step 6).
 **Mainnet.** A withdrawal from the company's exchange account to the fee account. Who makes it,
 and a backup person, are named before mainnet (ADR 0013, 0026).
 
+## Account plans
+
+On pubnet each API key holder's account has a plan: payments a calendar month and a fee budget
+per 24 h (task 0107). An account without a plan is on `free`, and every free account shares
+`free`'s budget. The plans, the limits and what each refusal means are in the
+[facilitator README](../apps/facilitator/README.md), "Accounts and plans". A seller who needs
+more writes to us; until charging past the quota exists (0108), the operator raises its plan by
+hand.
+
+**Granting a plan.**
+
+1. **Check that `global` holds it.** `SPEND_GLOBAL_STROOPS` must be at least `SPEND_FREE_STROOPS`
+   plus the fee budget of every account on a raised plan, this one included: then no account,
+   attacked or with a leaked key, takes more than its own day's budget from the others, and
+   `global` never fills. `keys plans` (below) lists the raised accounts. At the defaults `global`
+   (500,000,000) less `free` (250,000,000) leaves 250,000,000: ten `basic` accounts at 25,000,000,
+   or two `pro` at 100,000,000 and two `basic`. The facilitator checks only that `free` is at most
+   `global`; this sum is yours.
+2. **No room: raise `global`, and the float first.** `global` stays at most the float less its
+   25 XLM alarm (0024's rule, ADR 0007), so one window can't take the fee account to the alarm: a
+   `global` of 60 XLM needs a float of at least 85 XLM. Top up (Topping up the fee account), then
+   set `SPEND_GLOBAL_STROOPS` and restart the facilitator, which drains, so plan it like a deploy.
+   No compose file passes the variable yet: see "Changing the plans themselves" below.
+3. **Set the plan**, with why, in the facilitator's container of the account's network, so the
+   command reads that service's database and its own `ACCOUNT_PLANS`, and refuses a plan the
+   service doesn't have. Pass your login: `$USER` is unset under `docker exec`, and the row would
+   record `operator:unknown` as who set it.
+
+   ```sh
+   sudo /usr/local/libexec/x402/x402-compose production exec -T -e USER="$USER" facilitator \
+     node dist/keys.js plan discord:412345678901234567 basic asked on Discord
+   sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator node dist/keys.js plans
+   ```
+
+   It prints the row it wrote: owner, plan, when, by whom and the note. The plan holds from the
+   account's next settlement, with nothing restarted, and its month's count is kept. Lowering a
+   plan is the same command. Until pubnet has its database and services (0126) the only container
+   is testnet's, where no settlement carries a key: a plan set there shows only in the hub's tab,
+   which reads testnet's database until then.
+
+**Changing the plans themselves** is `ACCOUNT_PLANS`, in the facilitator's environment and the
+portal's, with the same text in both: the facilitator counts by it and the portal shows the hub
+the quota from it. Each takes it at its start. Today neither `deploy/production/compose.yaml` nor
+`portal.compose.yaml` passes it, nor `SPEND_FREE_STROOPS` or `SPEND_GLOBAL_STROOPS`: each lists
+its variables by name, so both services run on the defaults built into their images, which are
+the same. Until 0126 a change is a pull request that adds the variable to both files with the
+same value, deployed together. 0126 takes the three from the server's `.env` through `${…}`, as
+`FACILITATOR_ADDRESS` is today, so both services get one value and a change needs no pull
+request. Before removing a plan, move its accounts to another one: a row naming a plan the config
+lacks counts as `free`, and each of its settlements logs `account_plan_unknown`. The portal logs
+nothing for such a row and shows the hub the `free` quota.
+
+**Which accounts reach a limit.** Each refusal by a budget logs `spend_limit_reached` with the
+budget's `scope`, an account's as `account:<owner>`, and `limit`: `count` for its monthly quota,
+`stroops` for a fee budget. In Logs Insights on `/x402/production/app`:
+
+```
+filter event = "spend_limit_reached"
+| stats count() as refusals by scope, `limit`
+| sort refusals desc
+| limit 50
+```
+
+An account refused with `stroops` many times a day is paying more than usual per settlement,
+which a buyer's wallet can cause (threat model, "A buyer uses up a seller's quota"). `free` among
+the scopes, beside many free accounts each at its own fee budget, looks like the free tier used up
+by many accounts (threat model, "Shared budget exhaustion by Sybil self-payments"); the
+`budget-nearing` alarm fires for `free` before that.
+
+**The float on pubnet** is not decided yet: ADR 0013's 100 XLM, its alarm at 25 XLM and `global`
+at 50 XLM are the starting figures. A typical pubnet settlement is charged 12,203 stroops, so
+100 XLM is about 82,000 of them. Under a sustained attack on `free`, which costs up to 25 XLM a
+day, the float falls to its alarm in about 3 days; every raised plan's budget that `global` must
+hold raises the float with it (step 2).
+
 ## The CloudWatch agent
 
 The only process on the server that talks to AWS (0027, its server-side spine): it ships the
@@ -991,8 +1066,10 @@ agent's own log is `/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agen
 | `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`                                |
 | `metrics/agent.log`               | `x402-metrics`                                | `metrics-agent` in `app`                           |
 
-`x402-logrotate.timer` rotates a file past 100 MB every 10 minutes and keeps 10: `*.log.1` as it
-was, the older ones compressed. A rotation during an AWS outage loses the app lines the agent
+`x402-logrotate.timer` runs every 10 minutes and rotates each file once a day, empty or not, or
+sooner once past 100 MB; it keeps 10, `*.log.1` as it was and the older ones compressed, and
+deletes any older than 30 days. So no line stays on the server past the 30 days the hub's privacy
+policy states, the facilitator's (whose lines name a pubnet caller) and the portal's alike (0106). A rotation during an AWS outage loses the app lines the agent
 hadn't sent yet from CloudWatch, never from the server: they are in `*.log.1` (ADR 0011).
 
 **The units' first move to files** (0027), after the admin step, in the window of The playbook's
@@ -1096,12 +1173,15 @@ doesn't start.
    compose file, the units, `deploy-portal.sh`, the portal's deploy key and its sudo rule, enables
    `x402-portal@production`, which its condition skips until the first deploy, and restarts the
    CloudWatch agent, whose config gained two files. Nothing else restarts.
-3. **The database role.** The backend reads and writes the registry's two tables and nothing else
-   in the database: it can't read a settlement, change a key's owner or hash, or delete a key's
-   row. The two `SET`s keep the statements, with the password, out of Postgres's log if one
-   fails. The rest is one transaction, and the credential is written only once it has committed:
-   a failed run (a `GRANT` before `0014`, say) changes nothing, and the backend's password stays
-   the role's.
+3. **The database role.** The backend reads and writes the registry's two tables, and reads two
+   things for the usage the hub shows (0107): `account_plans`, every account's plan row with the
+   operator's note, and the view `account_usage`, the time of every account's payment the store
+   still keeps, with its owner but no amount, fee or address. A leaked `portal-database-url`
+   gives those too. Nothing else in the database: it can't read a settlement or the spend tables
+   themselves, change a key's owner or hash, or delete a key's row. The two `SET`s keep the
+   statements, with the password, out of Postgres's log if one fails. The rest is one
+   transaction, and the credential is written only once it has committed: a failed run (a `GRANT`
+   before `0014`, say) changes nothing, and the backend's password stays the role's.
 
    ```sh
    (
@@ -1118,6 +1198,7 @@ doesn't start.
    GRANT SELECT, INSERT ON api_keys TO x402_portal;
    GRANT UPDATE (state, revoked_at) ON api_keys TO x402_portal;
    GRANT SELECT, INSERT, DELETE ON api_key_copies TO x402_portal;
+   GRANT SELECT ON account_plans, account_usage TO x402_portal;
    COMMIT;
    SQL
      then
@@ -1133,16 +1214,20 @@ doesn't start.
    ```
 
    On success psql prints `SET`, `SET`, `BEGIN`, `CREATE ROLE` (the first time only),
-   `ALTER ROLE`, three `GRANT`s and `COMMIT`, and the step nothing more. A failed statement prints
+   `ALTER ROLE`, four `GRANT`s and `COMMIT`, and the step nothing more. A failed statement prints
    psql's `ERROR:`, then `stopped: the role was not made or changed; the credential is unchanged`,
    and the subshell exits 1. The subshell keeps `pw` and the `cd` out of your shell. Run again, it
-   converges: the role keeps its grants and takes a new password, and the credential follows.
-   That is also how the password changes later; restart the unit after it if the backend runs,
-   since it reads the credential when it starts.
-   `deploy/scripts/check-production-portal.sh` makes its role from these `GRANT` lines. A
-   migration that replaces either table with a new one must grant again: the grants are the
-   table's, not the name's. The grants don't keep anyone else from the copies: the facilitator
-   connects as the database's owner, so only the encryption does (0106 decision 18).
+   converges: the role keeps its grants and takes a new password, and the credential follows;
+   that is also how the password changes later. Every run sets a new password, so restart
+   `x402-portal@production` after it whenever the backend runs: it reads the credential when it
+   starts, and its new connections fail until it has read the new one. The last `GRANT` (0107) is
+   for the account's use the backend shows the hub: run this step again on the existing role once
+   the facilitator has applied `0018_account_plans`, or `account` answers `usage: null` (logged as
+   `hub_usage_unavailable`). `deploy/scripts/check-production-portal.sh` makes its role from these
+   `GRANT` lines. A migration that replaces one of the four objects (the view `account_usage`
+   included, by `DROP VIEW` and `CREATE VIEW`) must grant again: the grants are the object's, not
+   the name's. The grants don't keep anyone else from the copies: the facilitator connects as the
+   database's owner, so only the encryption does (0106 decision 18).
 
 4. **The key encryption key**, on the server. It seals the copies and is kept nowhere else; a
    second one would leave every copy sealed under the first unable to open (Its other secrets,
@@ -1555,21 +1640,22 @@ call.
 One JSON object per line in `/var/log/x402/production/portal.log`, shipped as `portal` in
 `/x402/production/app`. A call is named by its token's `jti` and `act`, a key by its `key_id`,
 the first 12 hex digits of its SHA-256; never a key, a token, a secret or a Discord id. No alarm
-watches them yet.
+reads them yet: what watches the backend is the uptime probe on its `/health` (Monitoring, below).
 
-| Event                                                           | Level | Means, and what to do                                                                                                                                                                     |
-| --------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `startup_failed`                                                | error | the process exits: `problems` names each bad setting, never its value, or `error` says the database is out of reach or lacks a table. **Act**                                             |
-| `hub_call_failed`, `pool_error`, `not_ready`                    | error | the database failed (`502 key_unavailable`, or `issue`'s `outcome: failed`), or something else in a call (`500 internal`). **Act** on a run of them                                       |
-| `hub_key_copy_unreadable`                                       | error | a copy exists and doesn't open: the wrong `KEY_ENCRYPTION_KEY`, or a damaged row. **Act**                                                                                                 |
-| `shutdown_failed`                                               | error | a stop didn't end cleanly, and the process exited 1                                                                                                                                       |
-| `hub_call_refused` with `invalid_token`                         | warn  | **expected from strangers**. Only a run of them while the hub's x402 tab fails means the two sides disagree: the secret changed on one side only, or the two clocks more than 5 s apart   |
-| `hub_call_refused` with `action_not_allowed`                    | warn  | the hub doesn't send one: a hub bug, or a captured token replayed. Look                                                                                                                   |
-| `hub_strangers_limited`                                         | warn  | one address (an IPv6 /56) is over 30 calls a minute with tokens that don't verify; once per window. Right after a change of the secret, the hub's own calls (Changing the token's secret) |
-| `hub_key_issued`, `hub_key_revealed`, `hub_key_revoked`         | info  | the key events, with `jti`, `act` and `key_id`                                                                                                                                            |
-| `hub_issue_refused`, `hub_reveal_refused`, `hub_revoke_refused` | info  | what a call came to, its `outcome` (`has_key`, `capped`, `too_young`, `no_key`, …): the account's state, not a fault                                                                      |
-| `hub_account_answered`                                          | info  | the `state` `account` gave                                                                                                                                                                |
-| `listening`                                                     | info  | started, with its port                                                                                                                                                                    |
+| Event                                                           | Level | Means, and what to do                                                                                                                                                                          |
+| --------------------------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `startup_failed`                                                | error | the process exits: `problems` names each bad setting, never its value, or `error` says the database is out of reach or lacks a table. **Act**                                                  |
+| `hub_call_failed`, `pool_error`, `not_ready`                    | error | the database failed (`502 key_unavailable`, or `issue`'s `outcome: failed`), or something else in a call (`500 internal`). **Act** on a run of them                                            |
+| `hub_usage_unavailable`                                         | error | the plan or the count couldn't be read, and `account` answers `usage: null` (the key is still answered): the role lacks the 0107 grant (**run the role's step again**), or the database failed |
+| `hub_key_copy_unreadable`                                       | error | a copy exists and doesn't open: the wrong `KEY_ENCRYPTION_KEY`, or a damaged row. **Act**                                                                                                      |
+| `shutdown_failed`                                               | error | a stop didn't end cleanly, and the process exited 1                                                                                                                                            |
+| `hub_call_refused` with `invalid_token`                         | warn  | **expected from strangers**. Only a run of them while the hub's x402 tab fails means the two sides disagree: the secret changed on one side only, or the two clocks more than 5 s apart        |
+| `hub_call_refused` with `action_not_allowed`                    | warn  | the hub doesn't send one: a hub bug, or a captured token replayed. Look                                                                                                                        |
+| `hub_strangers_limited`                                         | warn  | one address (an IPv6 /56) is over 30 calls a minute with tokens that don't verify; once per window. Right after a change of the secret, the hub's own calls (Changing the token's secret)      |
+| `hub_key_issued`, `hub_key_revealed`, `hub_key_revoked`         | info  | the key events, with `jti`, `act` and `key_id`                                                                                                                                                 |
+| `hub_issue_refused`, `hub_reveal_refused`, `hub_revoke_refused` | info  | what a call came to, its `outcome` (`has_key`, `capped`, `too_young`, `no_key`, …): the account's state, not a fault                                                                           |
+| `hub_account_answered`                                          | info  | the `state` `account` gave                                                                                                                                                                     |
+| `listening`                                                     | info  | started, with its port                                                                                                                                                                         |
 
 A call with no bearer at all is logged at `debug` only, which the backend doesn't write (its
 `LOG_LEVEL` is `info`). `startup_failed` repeats: the unit restarts the process after 5 s, up to 5
@@ -1635,10 +1721,42 @@ sudo FACILITATOR_IMAGE=unused docker compose exec -T postgres-testnet psql -U po
 Trying it touches real keys: a revoke holds back a new key until the next calendar month, so try
 revoke last, or with a second Discord account.
 
+### Monitoring
+
+An uptime probe in AWS, `x402-production-portal-uptime-probe`, reads
+`https://x402-portal.sorobanscan.com/health` through Cloudflare every minute and publishes
+`portal_ready` (1 for a 200 with `{"ready":true}`) to `x402-watch`; its alarm is `portal-uptime`
+(7 minutes in a row, a missing point counted as down), in the group `portalUptime`. A second probe,
+`x402-production-hub-uptime-probe`, reads the hub's `https://sorobanscan.com/api/hub/me` through
+the explorer's CloudFront, the whole path a member's browser takes, and publishes `hub_ready` (1
+for a 200 with `{"authenticated":false}`); its alarm is `hub-uptime`, in `hubUptime`. Both come
+with the Uptime stack (`infra/`, 0106 decision 21); what each alarm means and what to do is in
+[monitoring, Uptime](monitoring.md#uptime).
+
+Both groups are off when the probes are first deployed, since an alarm made before its probe has
+data pages at once:
+
+- **`portalUptime`**, once the portal's probe has published for a few minutes: from `infra/`,
+  `make deploy-production-uptime`, then `make check-series GROUP=portalUptime` until it passes,
+  then `"portalUptime": true` in `infra/envs/production.json`, `make deploy-production-alarms` and
+  `make fire-test` (infra/README.md, Alarm groups).
+- **`hubUptime`**, once the hub's backend is routed in the explorer's distribution (the hub's
+  runbook, step 4) and the probe reads 1: until then the distribution answers `/api/hub/me` with
+  a `302` to `/api/`, which the probe reads as down. The same steps, with `GROUP=hubUptime`; first
+  check the probe's last lines say `"ready":1` (`/aws/lambda/x402-production-hub-uptime-probe`).
+
+The hub's own alarms, on its Lambda's `Throttles` and `Url5xxCount`, are being added in its repo
+(`rumblefishdev/sorobanscan-api-portal`), publishing to this repo's `x402-production-alarms` topic,
+so they reach `#stellar-x402-bot` beside these. Later, not built: a watchdog for this backend,
+metric filters with alarms on its log lines (`startup_failed`, `hub_call_failed`,
+`hub_key_copy_unreadable`), and an alarm on the hub's Lambda nearing its concurrency
+(`ConcurrentExecutions`), which `Throttles` sees only once it is reached.
+
 ### What this backend lacks
 
-- A watchdog and an alarm: Docker marks a hung backend `unhealthy` and nothing restarts it, and
-  no probe watches its hostname. Its logs ship (`portal` in `app`).
+- A watchdog: Docker marks a hung backend `unhealthy` and nothing restarts it; the probe above
+  sees it, and a person restarts it. Its logs ship (`portal` in `app`), and no metric filter or
+  alarm reads them yet.
 - The page's own publish, `aws s3 sync` to the explorer's bucket, and the page's Basic Auth
   (0106 decisions 1 and 6): both are the explorer's distribution's.
 - A gate on the backend's hostname: there is none, on purpose. Every route but `/health` needs

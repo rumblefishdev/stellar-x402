@@ -1,10 +1,12 @@
 // G-alarm-list, "Availability".
 import type { EnvironmentConfig } from "../config.js";
-import type { AlarmFactory } from "./factory.js";
+import type { Alarms } from "./factory.js";
 
 const FACILITATOR_SILENT = "Keeps its state; facilitator-silent covers a stopped process.";
+const PROBE_STOPPED =
+  "A missing point counts as down, so a probe that stops publishing fires this too: the probe, its schedule or eu-central-1 may be the fault.";
 
-export function addAvailabilityAlarms(f: AlarmFactory, c: EnvironmentConfig): void {
+export function addAvailabilityAlarms(f: Alarms, c: EnvironmentConfig): void {
   const t = c.thresholds;
   f.level("uptime", {
     group: "uptime",
@@ -41,6 +43,41 @@ export function addAvailabilityAlarms(f: AlarmFactory, c: EnvironmentConfig): vo
       next: `On the server: the restarts and how each ended in /var/log/x402/host/metrics.log (facilitator_failures_total, watchdog_restarts_total) and facilitator-failed's messages; then /var/log/x402/${c.envName}/cloudflared.log.`,
       noData:
         "A missing point counts as down, as for uptime, which fires too when the probe stops.",
+    },
+  });
+
+  // The same probe on the portal's backend and on the API hub's backend (0106 decision 21), each
+  // with its own metric and group, at uptime's run: a deploy of either takes seconds, not a drain.
+  // No flapping alarm for them yet.
+  f.level("portal-uptime", {
+    group: "portalUptime",
+    signal: { catalog: "portal_ready" },
+    statistic: "Minimum",
+    periodMinutes: 1,
+    periods: t.uptimeFailingMinutes,
+    comparison: "<",
+    threshold: 1,
+    missing: "breaching",
+    description: {
+      what: `The portal's backend, which issues, shows and revokes x402's API keys for the API hub, was not ready for ${t.uptimeFailingMinutes} minutes in a row, as its probe reads ${c.uptime.portalUrl} through Cloudflare: the process is down, its database doesn't answer, or the tunnel or Cloudflare is failing. The hub's x402 tab fails meanwhile; the facilitator doesn't need it.`,
+      next: `Open the URL, then on the server check x402-portal@${c.envName} (systemctl status, then /var/log/x402/${c.envName}/portal.log) and cloudflared.log; the probe's log names what it read.`,
+      noData: PROBE_STOPPED,
+    },
+  });
+
+  f.level("hub-uptime", {
+    group: "hubUptime",
+    signal: { catalog: "hub_ready" },
+    statistic: "Minimum",
+    periodMinutes: 1,
+    periods: t.uptimeFailingMinutes,
+    comparison: "<",
+    threshold: 1,
+    missing: "breaching",
+    description: {
+      what: `The API hub's backend did not answer ${c.uptime.hubUrl} with a 200 and authenticated false for ${t.uptimeFailingMinutes} minutes in a row, read through the explorer's CloudFront as a browser reaches it: no member can sign in or use the x402 and Prices API tabs. The hub's Lambda, its URL or the distribution's route to it is failing.`,
+      next: "Open the URL: a redirect or HTML is the distribution's (soroban-block-explorer infra), anything else the hub's backend, whose own alarms and logs are sorobanscan-api-portal's. The probe's log names what it read.",
+      noData: PROBE_STOPPED,
     },
   });
 

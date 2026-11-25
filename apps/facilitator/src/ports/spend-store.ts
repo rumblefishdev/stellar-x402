@@ -1,23 +1,36 @@
 /**
- * What a budget or breaker counts against (AD-18): everything, one payer, recipient or asset, or
- * the tier of tokens no one vetted. Written as `global`, `payer:<address>`,
- * `payer:<address>/<asset>` (a payer's budget in one other token), `payTo:<address>`,
- * `payTo:<address>/<asset>` (likewise), `asset:<C…>` or `tier:other`. An address is a G or a C
- * account.
+ * What a budget or breaker counts against (AD-18): everything, one payer, recipient or asset, the
+ * tier of tokens no one vetted, one API key holder's account, or the accounts on the free plan
+ * together (0107). Written as `global`, `payer:<address>`, `payer:<address>/<asset>` (a payer's
+ * budget in one other token), `payTo:<address>`, `payTo:<address>/<asset>` (likewise),
+ * `asset:<C…>`, `tier:other`, `account:<owner>` or `free`. An address is a G or a C account; an
+ * owner is the key's, `discord:<id>` or `operator:<name>`.
  */
 export type SpendScope =
-  "global" | "tier:other" | `payer:${string}` | `payTo:${string}` | `asset:${string}`;
+  | "global"
+  | "tier:other"
+  | `payer:${string}`
+  | `payTo:${string}`
+  | `asset:${string}`
+  | "free"
+  | `account:${string}`;
 
-export interface SpendLimit {
-  scope: SpendScope;
+export type SpendLimit =
+  | {
+      scope: SpendScope;
+      /**
+       * Most stroops that can be reserved or spent in the rolling window: everything stamped
+       * after `now - windowMs`, including a reservation stamped after `now` (another task, or one
+       * that won the scope lock first).
+       */
+      maxStroops: bigint;
+      windowMs: number;
+    }
   /**
-   * Most stroops that can be reserved or spent in the rolling window: everything stamped after
-   * `now - windowMs`, including a reservation stamped after `now` (another task, or one that won
-   * the scope lock first).
+   * At most `maxCount` reservations of the scope stamped at or after `since`, this one included.
+   * A reserved or committed one counts, whatever its fee; a released one doesn't.
    */
-  maxStroops: bigint;
-  windowMs: number;
-}
+  | { scope: SpendScope; maxCount: number; since: number };
 
 export interface SpendReservation {
   /** The settlement key; one reservation per settlement. */
@@ -29,18 +42,26 @@ export interface SpendReservation {
   now: number;
 }
 
-/** One limit's window sum after a reservation, with the reservation itself counted. */
+/** One stroop limit's window sum after a reservation, with the reservation itself counted. */
 export interface ScopeUsage {
   scope: SpendScope;
   usedStroops: bigint;
   maxStroops: bigint;
+  /** The limit's own window, as passed in `SpendLimit`, so a report names the window it sums. */
+  windowMs: number;
 }
 
 export type ReserveResult =
-  /** `usage` has one entry per limit, in order; empty when `id` was reserved or committed. */
+  /**
+   * `usage` has one entry per stroop limit, in order, and none for a count limit; empty when `id`
+   * was reserved or committed.
+   */
   | { reserved: true; usage: ScopeUsage[] }
-  /** Nothing was reserved; `scope` is the first budget that would be exceeded. */
-  | { reserved: false; scope: SpendScope }
+  /**
+   * Nothing was reserved; `scope` and `limit` are the first limit, in order, that would be
+   * exceeded: its stroops or its count.
+   */
+  | { reserved: false; scope: SpendScope; limit: "stroops" | "count" }
   /** Nothing was reserved: `id` was released, so its settlement was given up. */
   | { reserved: false; released: true };
 
@@ -61,7 +82,8 @@ export interface SpendStore {
    * Rejects when the store is busy or unreachable (a lock wait or a connection that times out, a
    * lost answer to the commit): then nothing new is reserved, or the outcome is unknown. Retrying
    * with the same `id` is safe either way, so a caller answers it as "try again", not as a failure.
-   * Rejects an `amount` or `maxStroops` that isn't a non-negative int64, like `commit`'s fee.
+   * Rejects an `amount` or `maxStroops` that isn't a non-negative int64, like `commit`'s fee, and a
+   * count limit whose `maxCount` isn't a non-negative integer or whose `since` isn't an integer.
    */
   reserve(reservation: SpendReservation): Promise<ReserveResult>;
   /**

@@ -113,10 +113,11 @@ describe("CATALOG", () => {
     ]);
   });
 
-  test("spend_budget_nearing_total: one set without budget, when budget in asset/other/global", () => {
+  test("spend_budget_nearing_total: one set without budget, when budget in asset/other/free/global", () => {
+    // The shared budgets only: an account's is its holder's alone, nothing to act on (0107).
     const m = def("spend_budget_nearing_total");
     expect(m.scope).toBe("network");
-    expect(m.sets).toEqual([{ dims: [], when: { budget: ["asset", "other", "global"] } }]);
+    expect(m.sets).toEqual([{ dims: [], when: { budget: ["asset", "other", "free", "global"] } }]);
   });
 
   test("settlement outcomes and sweeps are billed by result and outcome", () => {
@@ -164,6 +165,8 @@ describe("CATALOG", () => {
     );
     expect(scopes).toEqual({
       ready: "process",
+      portal_ready: "process",
+      hub_ready: "process",
       spendable_stroops: "network",
       protocol_version: "network",
       protocol_supported_version: "network",
@@ -266,6 +269,7 @@ describe("CATALOG", () => {
     const facProcCounters = [
       "http_requests_total",
       "store_prune_failures_total",
+      "search_card_failures_total",
       "catalog_internal_errors_total",
       "catalog_attempts_total",
       "catalog_upsert_failures_total",
@@ -299,6 +303,8 @@ describe("CATALOG", () => {
       mem_used_percent: [g, "Percent", proc],
       disk_used_percent: [g, "Percent", proc],
       ready: [g, "None", proc],
+      portal_ready: [g, "None", proc],
+      hub_ready: [g, "None", proc],
       spendable_stroops: [g, "None", net],
       protocol_version: [g, "None", net],
       protocol_supported_version: [g, "None", net],
@@ -353,6 +359,7 @@ describe("scope-split name types", () => {
     expectTypeOf<ProcessCounterName>().toEqualTypeOf<
       | "http_requests_total"
       | "store_prune_failures_total"
+      | "search_card_failures_total"
       | "catalog_internal_errors_total"
       | "catalog_attempts_total"
       | "catalog_upsert_failures_total"
@@ -387,7 +394,7 @@ describe("effectiveSets", () => {
     ]);
     expect(effectiveSets(def("signer_failures_total"))).toEqual([{ dims: ["network"] }]);
     expect(effectiveSets(def("spend_budget_nearing_total"))).toEqual([
-      { dims: ["network"], when: { budget: ["asset", "other", "global"] } },
+      { dims: ["network"], when: { budget: ["asset", "other", "free", "global"] } },
     ]);
   });
 

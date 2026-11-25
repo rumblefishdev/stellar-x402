@@ -45,7 +45,10 @@ export interface SettlementRecord {
   feeCharged?: bigint;
   /** x402 `errorReason` for a final state other than `success`. */
   errorReason?: string;
-  /** The checks' message for a `refused` record, so a repeat gets the same answer (0086). */
+  /**
+   * The checks' message for a `refused` record (0086), or the before-submit hook's for a
+   * `rejected` one (0107), so a repeat gets the same answer.
+   */
   errorMessage?: string;
   /** Our own code next to upstream's reason (`extra.reason`) for a `refused` record (0086). */
   errorDetail?: string;
@@ -114,7 +117,10 @@ export type ReopenResult = SettlementRecord | { busy: SettlementKey } | undefine
 
 /** Fields a state change may set. */
 export type SettlementUpdate = Partial<
-  Pick<SettlementRecord, "channel" | "ledger" | "feeCharged" | "errorReason" | "failure">
+  Pick<
+    SettlementRecord,
+    "channel" | "ledger" | "feeCharged" | "errorReason" | "errorMessage" | "failure"
+  >
 > & {
   state: SettlementState;
   updatedAt: number;
@@ -297,10 +303,11 @@ export interface SettlementStore {
   /**
    * Compare-and-set, the one backward move (0073 decision 5): moves the record from `rejected`
    * back to `claimed` while it has the same `fingerprint`, one of `reasons` as its `errorReason`,
-   * no hash, so nothing was ever sent for it, and was claimed since 0073 (`reopened` not -1). Clears `errorReason`, adds one to `reopened` and
-   * to `version`, and sets `createdAt` and `updatedAt` to `now`, so a repeat counts the new
-   * claim's budget from it, and a writer that read the earlier claim and passes its version or
-   * `reopened` count fails (0073 decision 19).
+   * no hash, so nothing was ever sent for it, and was claimed since 0073 (`reopened` not -1).
+   * Clears `errorReason` and its `errorMessage`, adds one to `reopened` and to `version`, and sets
+   * `createdAt` and `updatedAt` to `now`, so a repeat counts the new claim's budget from it, and a
+   * writer that read the earlier claim and passes its version or `reopened` count fails (0073
+   * decision 19).
    * Resolves the reopened record, or `undefined` if any condition fails: exactly one of several
    * concurrent callers wins. A reopened record takes its payer and asset's slot, as `claim` does,
    * so one balance is spent by one settlement at a time (0024): while another key of them is not

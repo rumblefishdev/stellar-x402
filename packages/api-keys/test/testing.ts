@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   assertApiKey,
+  assertApiKeyOwner,
   assertSealedKey,
+  type AccountPlanRecord,
+  type AccountPlanStore,
+  type AccountUsageReader,
   type ApiKeyRecord,
   type ApiKeyStore,
   type OwnerKeys,
@@ -38,12 +42,15 @@ export class MemoryKeyStore implements ApiKeyStore, SealedKeyStore {
   }
 
   revoke(owner: string, now: number): Promise<boolean> {
-    for (const key of this.keys) if (key.owner === owner) this.copies.delete(key.hash);
+    // As PostgreSQL's: revoke, then delete the copies of the owner's revoked keys only.
     const active = this.active(owner);
-    if (!active) return Promise.resolve(false);
-    active.state = "revoked";
-    active.revokedAt = now;
-    return Promise.resolve(true);
+    if (active) {
+      active.state = "revoked";
+      active.revokedAt = now;
+    }
+    for (const key of this.keys)
+      if (key.owner === owner && key.state === "revoked") this.copies.delete(key.hash);
+    return Promise.resolve(active !== undefined);
   }
 
   list(): Promise<ApiKeyRecord[]> {
@@ -69,6 +76,57 @@ export class MemoryKeyStore implements ApiKeyStore, SealedKeyStore {
 
   private active(owner: string): ApiKeyRecord | undefined {
     return this.keys.find((key) => key.owner === owner && key.state === "active");
+  }
+}
+
+/** Account plans in memory, for tests of what reads them. It passes PostgreSQL's contract. */
+export class MemoryAccountPlanStore implements AccountPlanStore {
+  private readonly rows = new Map<string, AccountPlanRecord>();
+
+  planOf(owner: string): Promise<string | undefined> {
+    return Promise.resolve(this.rows.get(owner)?.plan);
+  }
+
+  setPlan(row: Parameters<AccountPlanStore["setPlan"]>[0]): Promise<void> {
+    try {
+      assertApiKeyOwner(row.owner);
+    } catch (error) {
+      return Promise.reject(error as Error);
+    }
+    this.rows.set(row.owner, {
+      owner: row.owner,
+      plan: row.plan,
+      setAt: row.now,
+      setBy: row.setBy,
+      ...(row.note !== undefined && { note: row.note }),
+    });
+    return Promise.resolve();
+  }
+
+  listPlans(): Promise<AccountPlanRecord[]> {
+    return Promise.resolve(
+      [...this.rows.values()]
+        .map((row) => ({ ...row }))
+        .sort((a, b) => (a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : 0)),
+    );
+  }
+}
+
+/**
+ * Accounts' payments in memory, for tests of what reads them. `pay` stands for a reservation the
+ * spend store keeps; it passes the contract PostgreSQL's view does.
+ */
+export class MemoryAccountUsage implements AccountUsageReader {
+  private readonly payments: { owner: string; at: number }[] = [];
+
+  pay(owner: string, at: number): void {
+    this.payments.push({ owner, at });
+  }
+
+  paymentsSince(owner: string, since: number): Promise<number> {
+    return Promise.resolve(
+      this.payments.filter((payment) => payment.owner === owner && payment.at >= since).length,
+    );
   }
 }
 
@@ -168,6 +226,82 @@ export function apiKeyStoreContract(make: () => ApiKeyStore | Promise<ApiKeyStor
     ])("refuses %s and stores nothing", async (_name, key) => {
       await expect(store.issue({ ...key, now: 1_000 })).rejects.toThrow(RangeError);
       expect(await store.list()).toEqual([]);
+    });
+  });
+}
+
+/** Behaviour every `AccountPlanStore` must have. `make` must return an empty store. */
+export function accountPlanStoreContract(make: () => AccountPlanStore | Promise<AccountPlanStore>) {
+  describe("AccountPlanStore contract (0107)", () => {
+    const OWNER = "discord:412345678901234567";
+    let store: AccountPlanStore;
+    beforeEach(async () => {
+      store = await make();
+    });
+
+    it("has no plan for an owner it never saw, which the caller reads as free", async () => {
+      expect(await store.planOf(OWNER)).toBeUndefined();
+      expect(await store.listPlans()).toEqual([]);
+    });
+
+    it("keeps the last plan set, with who set it, when and why", async () => {
+      await store.setPlan({ owner: OWNER, plan: "basic", now: 1, setBy: "operator:a", note: "x" });
+      await store.setPlan({ owner: OWNER, plan: "pro", now: 2, setBy: "operator:b", note: "y" });
+      expect(await store.planOf(OWNER)).toBe("pro");
+      expect(await store.listPlans()).toEqual([
+        { owner: OWNER, plan: "pro", setAt: 2, setBy: "operator:b", note: "y" },
+      ]);
+      // A plan set without a note keeps none of the one before.
+      await store.setPlan({ owner: OWNER, plan: "basic", now: 3, setBy: "operator:a" });
+      expect(await store.listPlans()).toEqual([
+        { owner: OWNER, plan: "basic", setAt: 3, setBy: "operator:a" },
+      ]);
+    });
+
+    it("keeps one row per owner, listed by owner", async () => {
+      await store.setPlan({ owner: "operator:acme", plan: "pro", now: 2_000, setBy: "operator:a" });
+      await store.setPlan({ owner: OWNER, plan: "basic", now: 1_000, setBy: "operator:a" });
+      expect(await store.planOf("operator:acme")).toBe("pro");
+      expect(await store.planOf(OWNER)).toBe("basic");
+      expect((await store.listPlans()).map((row) => row.owner)).toEqual([OWNER, "operator:acme"]);
+    });
+
+    it.each([
+      ["an empty owner", ""],
+      ["an owner without a kind", "412345678901234567"],
+      ["an owner with a space", "discord:1 2"],
+      ["an owner over 128 characters", `discord:${"1".repeat(121)}`],
+    ])("refuses %s and stores nothing", async (_name, owner) => {
+      await expect(
+        store.setPlan({ owner, plan: "basic", now: 1_000, setBy: "operator:a" }),
+      ).rejects.toThrow(RangeError);
+      expect(await store.listPlans()).toEqual([]);
+    });
+  });
+}
+
+/**
+ * Behaviour every `AccountUsageReader` must have. `make` must return a reader on no payments, and
+ * `pay`, which counts one payment of `owner` at `at` as the spend store does.
+ */
+export function accountUsageReaderContract(
+  make: () =>
+    | { reader: AccountUsageReader; pay: (owner: string, at: number) => Promise<void> }
+    | Promise<{ reader: AccountUsageReader; pay: (owner: string, at: number) => Promise<void> }>,
+) {
+  describe("AccountUsageReader contract (0107)", () => {
+    const SINCE = Date.UTC(2026, 10, 1);
+
+    it("counts an owner's payments from the instant it is given, that instant included", async () => {
+      const { reader, pay } = await make();
+      expect(await reader.paymentsSince("discord:1", SINCE)).toBe(0);
+      await pay("discord:1", SINCE - 1);
+      await pay("discord:1", SINCE);
+      await pay("discord:1", SINCE + 86_400_000);
+      await pay("discord:2", SINCE + 1);
+      expect(await reader.paymentsSince("discord:1", SINCE)).toBe(2);
+      expect(await reader.paymentsSince("discord:2", SINCE)).toBe(1);
+      expect(await reader.paymentsSince("discord:3", SINCE)).toBe(0);
     });
   });
 }

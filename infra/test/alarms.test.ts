@@ -76,8 +76,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 89 with two networks", () => {
-    expect(alarms).toHaveLength(89);
+  test("has every alarm of the list once per network, 91 with two networks", () => {
+    expect(alarms).toHaveLength(91);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -144,6 +144,19 @@ describe("the Alarms template", () => {
     }
   });
 
+  test("names in budget-nearing each budget the catalog writes its series for (0107)", () => {
+    const def = CATALOG.find((m) => m.name === "spend_budget_nearing_total");
+    const budgets = def?.sets[0]?.when?.["budget"] ?? [];
+    expect(budgets).toContain("free");
+    const named = `(${budgets.slice(0, -1).join(", ")} or ${budgets.at(-1)})`;
+    const nearing = records.filter((r) => r.base === "budget-nearing");
+    expect(nearing.length).toBeGreaterThan(0);
+    for (const r of nearing) {
+      const d = byName.get(r.alarmName)!["AlarmDescription"] as string;
+      expect(d, r.alarmName).toContain(named);
+    }
+  });
+
   test("keeps the backup and snapshot alarms out of host, apart from it and each other (40)", () => {
     const bases = (g: string) =>
       [...new Set(records.filter((r) => r.group === g).map((r) => r.base))].sort();
@@ -175,6 +188,18 @@ describe("the Alarms template", () => {
       "account-state",
       "backup-secret-read",
     ]);
+  });
+
+  test("gives the portal's and the hub's probes a group each, on their own metric (0106 decision 21)", () => {
+    const of = (g: string) =>
+      records.filter((r) => r.group === g).map((r) => [r.alarmName, r.series[0]?.metricName]);
+    expect(of("portalUptime")).toEqual([["x402-production-portal-uptime", "portal_ready"]]);
+    expect(of("hubUptime")).toEqual([["x402-production-hub-uptime", "hub_ready"]]);
+    expect(of("uptime").map(([, m]) => m)).toEqual(["ready", "ready"]);
+    for (const name of ["x402-production-portal-uptime", "x402-production-hub-uptime"]) {
+      const d = byName.get(name)!["AlarmDescription"] as string;
+      expect(d, name).toContain(name === "x402-production-hub-uptime" ? "/api/hub/me" : "/health");
+    }
   });
 
   test("puts the upstream alarms in their own group, so they go on only after the first daily run", () => {
@@ -419,6 +444,8 @@ const LEVEL: Record<
 > = {
   uptime: ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
   "uptime-flapping": ["<", 1, "Minimum", 60, t.uptimeFlapFailingMinutes, t.uptimeFlapWindowMinutes],
+  "portal-uptime": ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
+  "hub-uptime": ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
   "rpc-stalled": [">", t.rpcStalledSeconds, "Maximum", 60, 5, 5],
   "balance-stale": [">", t.balanceStaleSeconds, "Maximum", 60, 1, 1],
   "balance-low": ["<", t.balanceLowStroops, "Minimum", 300, 1, 1],

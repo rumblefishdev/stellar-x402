@@ -63,6 +63,7 @@ the alarms that read them. The [uptime figure](#the-uptime-figure) is under Upti
 | `certificate`             | `host`        | 2026-11-09 12:19 UTC | Not fired: every hour holds the real days left ([Drills](#drills))                                                                      |
 | `log-volume`              | `logVolume`   | 2026-11-09 12:19 UTC | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                   |
 | `memory`                  | `memory`      | 2026-11-09 15:11 UTC | Not fired: a `Minimum` alarm can't be faked while the agent writes real samples ([Drills](#drills))                                     |
+| `monitoring-heartbeat`    | `heartbeat`   | 2026-11-24 12:48 UTC | 2026-11-24, Alertmanager stopped ([Drills](#drills)): ALARM 13:11:33, OK 13:13:33 UTC; `make fire-test` at 12:49:29                     |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
 `breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). `log-volume` ends in
@@ -83,6 +84,8 @@ once, by the task that turns it on.
 | `backup-age`         | `backups`       | 0026, once the first pgBackRest backup is made                                         |
 | `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
 | `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
+| `hub-uptime`         | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
+| `portal-uptime`      | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
 | `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
 | `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
 | `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
@@ -101,8 +104,8 @@ To find an event in Logs Insights, on `/x402/production/app`:
 fields @timestamp, @message | filter event = "rpc_failover" | sort @timestamp desc | limit 50
 ```
 
-On the server, the same lines, the rotated files included (10 of 100 MB, compressed after the
-first): `sudo zgrep -h '"event":"rpc_failover"' /var/log/x402/production/facilitator.log*`. The
+On the server, the same lines, the rotated files included (10, each a day or up to 100 MB, none
+past 30 days, compressed after the first): `sudo zgrep -h '"event":"rpc_failover"' /var/log/x402/production/facilitator.log*`. The
 file also holds the metric lines, which the agent ships apart; leave them out of a `tail` with
 `sudo grep -v '^{"_aws":' /var/log/x402/production/facilitator.log | tail -n 50`.
 
@@ -139,6 +142,26 @@ The uptime probe, a Lambda in the Uptime stack, reads
 `https://x402-facilitator.sorobanscan.com/health` through Cloudflare every minute and publishes
 `ready` (1 or 0) to `x402-watch`. Its log is `/aws/lambda/x402-production-uptime-probe`, and each
 line says what it read (`reason`).
+
+The same code runs twice more, a function and a schedule each, so that one probe failing can't
+silence another (0106 decision 21). Each publishes 1 only for a 200 whose JSON holds what its
+target answers when it can serve:
+
+| Function                              | Reads                                                                                         | Ready when               | Metric         | Alarm, group                          |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------ | -------------- | ------------------------------------- |
+| `x402-production-uptime-probe`        | `https://x402-facilitator.sorobanscan.com/health`                                             | `"ready": true`          | `ready`        | `uptime`, `uptime-flapping`           |
+| `x402-production-portal-uptime-probe` | `https://x402-portal.sorobanscan.com/health`, the portal's backend                            | `"ready": true`          | `portal_ready` | `portal-uptime`, `portalUptime` (off) |
+| `x402-production-hub-uptime-probe`    | `https://sorobanscan.com/api/hub/me`, the API hub's backend through the explorer's CloudFront | `"authenticated": false` | `hub_ready`    | `hub-uptime`, `hubUptime` (off)       |
+
+The hub's probe reads the whole path a member's browser takes, the distribution included. A
+status proves nothing there: the distribution answers a path it doesn't route with a redirect
+(`/api/hub/me` gives a `302` to `/api/` until the hub's backend is routed, so the probe reads 0
+today), or with the explorer's page as a 200 or a 403. Without a session the hub's `/me` answers
+`{"authenticated": false}`, which nothing else on the distribution does. Each function's log is
+`/aws/lambda/<function>`, and each line names the URL, the metric and the `reason`. The hub's own
+alarms, on its Lambda's `Throttles` and `Url5xxCount`, are being added in its repo
+(`rumblefishdev/sorobanscan-api-portal`), publishing to this repo's `x402-production-alarms`
+topic, so they reach the same channel.
 
 ### The uptime figure
 
@@ -181,6 +204,36 @@ probe now and then, a lease that moves, or a tunnel that drops.
    lines in `/var/log/x402/host/metrics.log`; the [watchdog](runbook.md#the-watchdog) section
    says where the reason is logged.
 2. Then `/var/log/x402/production/cloudflared.log`.
+
+### portal-uptime
+
+The portal's backend (`apps/portal`, [runbook, The portal's backend](runbook.md#the-portals-backend))
+was not ready for 7 minutes in a row. The hub's x402 tab can't show, issue or revoke a key
+meanwhile; the facilitator doesn't need the backend, and pubnet's `/verify` and `/settle` read the
+registry, not the backend. Missing points count as down.
+
+1. Open `https://x402-portal.sorobanscan.com/health`. `{"ready":false}` with a 503 is the
+   backend's own answer: its database didn't answer. A 502 or a Cloudflare error page is the
+   tunnel or Cloudflare, and the backend never saw the request.
+2. On the server: `systemctl status x402-portal@production`, then the end of
+   `/var/log/x402/production/portal.log` (`startup_failed`, `not_ready`, `pool_error`) and
+   `/var/log/x402/production/cloudflared.log`.
+3. If the backend answers ready and the probe still reads 0, read the probe's log,
+   `/aws/lambda/x402-production-portal-uptime-probe`.
+
+### hub-uptime
+
+The API hub's backend did not answer `https://sorobanscan.com/api/hub/me` with a 200 and
+`{"authenticated": false}` for 7 minutes in a row, read through the explorer's CloudFront: no
+member can sign in, and neither the x402 tab nor the Prices API tab works. Missing points count as
+down.
+
+1. Open the URL. A redirect or the explorer's HTML is the distribution: its route for
+   `/api/hub/*` (`soroban-block-explorer`, `infra/`). A JSON error or a 5xx from the hub is its
+   backend, a Lambda in `rumblefishdev/sorobanscan-api-portal`, whose own alarms (`Throttles`,
+   `Url5xxCount`, being added there) post to this channel too.
+2. If the hub answers and the probe still reads 0, read the probe's log,
+   `/aws/lambda/x402-production-hub-uptime-probe`.
 
 ## The off-server check
 
@@ -468,8 +521,11 @@ check after start counts each retry, and this sends one message for them.
 
 ### store-outage
 
-A write to Postgres failed: a settlement record, or the spend store. Settle answers may be missing
-from the records, and the spend policy may be blind.
+A read or write to Postgres failed: a settlement record, or the spend store. Settle answers may be
+missing from the records, and the spend policy may be blind. The spend store's reads are a
+breaker's and, on pubnet, an account's plan (`op` `plan`, 0107), in the same database through the
+registry's pool; a failed one refuses that settlement with
+`settle_exact_stellar_spend_store_unavailable`.
 
 1. On the server, the alarm's network's database: `systemctl status x402-db-testnet@production`
    and `/var/log/x402/production/postgres-testnet.log` for testnet.
@@ -478,7 +534,9 @@ from the records, and the spend policy may be blind.
 ### hook-failures
 
 A settlement hook threw: the spend policy's fee count, failure count or breaker may have missed a
-final settlement, so budgets and breakers count low.
+final settlement. Breakers then count low and budgets high: a reservation it didn't commit or
+release stays counted at the fee ceiling, for 24 h in the fee budgets and, on pubnet, until the
+month ends in its account's payments (0107).
 
 1. The `settlement_hook_failed` event names the hook and the error.
 2. If the store is the cause, `spend_store_failed` too ([store-outage](#store-outage)).
@@ -532,11 +590,14 @@ payments are refused for the cool-down.
 
 ### budget-nearing
 
-A fee budget (asset, other or global) passed its nearing level: at its limit, settlement for that
-scope stops until the window rolls (0024).
+A fee budget (asset, other, free or global) passed its nearing level: at its limit, settlement for
+that scope stops until the window rolls (0024). `free` is every account on the free plan together,
+on pubnet (0107): full, it refuses each of them, while accounts on a raised plan keep settling. An
+account's own budgets raise nothing: a full one refuses only its holder.
 
 1. The `spend_budget_nearing` event names the scope, with the used and maximum stroops.
-2. Raise the budget only if the traffic is real.
+2. Raise the budget only if the traffic is real. For `free`, the runbook's "Account plans" has a
+   query for the accounts behind it, and `SPEND_FREE_STROOPS` stays within `global`.
 
 ### commit-unmatched
 
@@ -657,6 +718,47 @@ fails. When it expires, no log or metric line reaches CloudWatch.
    a new key and CSR on the server, signed by the ClickHouse project's CA holder, committed by pull
    request to `deploy/production`.
 
+## The monitoring VM
+
+### monitoring-heartbeat
+
+Alertmanager's always-firing `Watchdog` stopped reaching the topic
+`x402-production-monitoring-heartbeat`, which it publishes to every minute (ADR 0011,
+"Heartbeat"): Prometheus, Alertmanager or the VM `monitoring-hel1-01` is down, or the VM's AWS
+credential is broken. It fires about 20 minutes after the Watchdog stops (drill, 2026-11-24): the
+Prometheus rules have paged no one since then. Its own stack, `X402-production-Heartbeat`.
+
+1. Did the Watchdog reach SNS? Two hours, one-minute periods:
+
+   ```sh
+   S=$(date -u -d '-2 hour' +%FT%TZ 2>/dev/null || date -u -v-2H +%FT%TZ); E=$(date -u +%FT%TZ); aws cloudwatch get-metric-statistics --profile stellar --region eu-central-1 --namespace AWS/SNS --metric-name NumberOfMessagesPublished --dimensions Name=TopicName,Value=x402-production-monitoring-heartbeat --statistics Sum --period 60 --start-time $S --end-time $E --query 'sort_by(Datapoints,&Timestamp)[].[Timestamp,Sum]' --output text
+   ```
+
+   No points since it fired: nothing reached the topic, go to 2. Points every minute and the
+   alarm still in ALARM: the alarm's own settings (`aws cloudwatch describe-alarms --profile stellar --region eu-central-1 --alarm-names x402-production-monitoring-heartbeat`).
+
+2. Is the VM up, and does Alertmanager send?
+
+   ```sh
+   ssh monitoring 'uptime; sudo docker ps --format "{{.Names}} {{.Status}}"'
+   ssh monitoring 'sudo docker logs --since 30m monitoring-alertmanager-1 2>&1 | grep -i -E "sns|error" | tail'
+   ```
+
+   No SSH: the VM or Hetzner, in the Hetzner Cloud console. No `Watchdog` firing in Alertmanager:
+   Prometheus doesn't evaluate or doesn't reach Alertmanager. `Watchdog` firing: Alertmanager
+   doesn't publish; its log names an SNS or credential error (the VM's certificate, its signing
+   helper, or the role's IP condition after the VM's IP changed). A new IP takes the parameter
+   and a deploy of the stack: CloudFormation reads the parameter only at deploy, so until then the
+   role keeps the old IP and denies every publish, the heartbeat's and the alarm topic's.
+
+   ```sh
+   aws ssm put-parameter --profile stellar --region eu-central-1 --type String --overwrite --name /x402/production/monitoring-vm-ip --value <IPv4>
+   cd infra && make deploy-production-heartbeat
+   ```
+
+3. Meanwhile, the server's agent keeps a few hours of samples in its write-ahead log, so the
+   metrics come back with the VM; the CloudWatch alarms and the logs still cover the facilitator.
+
 ## Log volume
 
 ### log-volume
@@ -668,7 +770,8 @@ fails. When it expires, no log or metric line reaches CloudWatch.
    `stats count() by @logStream, event | sort count() desc | limit 10` (only the facilitator's
    lines have an `event`; the other streams are its own Postgres, tunnel, OpenBao and deploy). The
    metrics group, whose lines have no `event`: `stats count() by @logStream`.
-2. Then its cause. `x402-logrotate.timer` keeps the files on the server to 10 × 100 MB each.
+2. Then its cause. `x402-logrotate.timer` keeps the files on the server to 10 rotations of a day
+   or 100 MB each.
 
 ## Protocol
 
@@ -708,6 +811,68 @@ of them run it. Mainnet was in this state on 2026-11-06 (29, Core supporting 30)
 3. Raise `supported` for that network to the new version in a PR and deploy the alarms: this one
    goes back to OK. `protocol-changed` fires on the upgrade itself, with its own `expected`.
 
+## The Prometheus rules
+
+From 0139's switch, the alarms on the server's metrics run as Prometheus rules on the monitoring
+VM (ADR 0011, "Monitoring stack"). The rule file is
+[`deploy/metrics/rules/x402-production.yml`](../deploy/metrics/rules/x402-production.yml),
+written by `make rules` in `infra/` from the same rows as the alarms
+(`infra/src/lib/rules.ts`), so each rule keeps its alarm's name with an `x402-` prefix, its
+threshold and this page's section. Until the switch nothing on the VM loads it.
+
+- `network` is a label, not part of the name: pubnet adds alert instances, not rules.
+- Every Event alarm is one branch of the single rule `x402-event`; its `check` label is the
+  alarm's name. A branch fires on any increase in its window, or for a threshold above 1, on that
+  many in one period at any 15-second step. A branch with a threshold of 1 on one of the
+  facilitator's own counters also fires on a count above 0 in a process started within the
+  window: the process reports again at its start what the last one counted, as `history-gone`
+  does, and `increase()` sees no step when the value is the same. `pool-health` (5 in one period)
+  doesn't take this, nor do `facilitator-failed` and `watchdog-restart`, the host probe's
+  counters, which keep their totals across restarts.
+  `deploy/metrics/rules/event-restart-and-pool-health.test.yml` shows when a branch fires, ends
+  and stays quiet, in `promtool`.
+- Every alert has `severity`: `critical` for what would page on mainnet (`pending`, the
+  `breaker-opened-*` alarms, `budget-nearing`, `sweeps-stopped`, `landed-after-expired`,
+  `commit-unmatched`, `facilitator-silent`, `gauge-stale`), `warning` for the rest (lore 0139,
+  decision 1). Until the phone route exists, both go to Slack.
+- Without data a rule doesn't keep its state as a CloudWatch alarm does: it resolves once its
+  series goes stale, so a resolved message can mean the series stopped. The silence rules say
+  which: `facilitator-silent`, `gauge-stale`, `textfile-stale` (for `probe-silent`) and
+  `server-silent` (for the agent, `telemetry-silent` in CloudWatch).
+- What stays in CloudWatch: the off-server check's and the uptime probe's alarms, `audit-disk`,
+  `certificate`, `credentials-stale`, `telemetry-silent` and `log-volume-app`. The EMF alarms go
+  with EMF.
+- `facilitator-silent`, `gauges-silent` and `probe-silent` read a series' arrival, which
+  Prometheus reads another way: `x402-facilitator-silent` (the liveness series),
+  `x402-gauge-stale` and `x402-textfile-stale` below.
+
+### gauge-stale
+
+A facilitator gauge has had no successful read for 15 minutes, or none for a network since the
+start, while the process runs: its `_last_read_timestamp_seconds` is over 10 minutes old, or
+missing, for the rule's 5. The `gauge` label names it; find its read error in the app logs
+(`metric_issue`, `read-failed`).
+
+### textfile-stale
+
+A host probe textfile in `/var/lib/x402/textfile` is over 5 minutes old, missing, or unreadable
+(`node_textfile_scrape_error`). Check the `x402-host-probe` timer and its journal.
+
+### server-silent
+
+No sample from ch-prod-01's metrics agent for 5 minutes. Check `x402-metrics` and
+`/var/log/x402/metrics/agent.log` ([runbook](runbook.md#the-metrics-agent)), then the agent's
+certificate.
+
+### target-down
+
+The agent has failed to scrape one of its targets (`job`) for 5 minutes.
+
+### agent-certificate
+
+The metrics agent's client certificate has under 30 days left. Renew it as the
+[runbook](runbook.md#the-metrics-agent) says.
+
 ## Every metric
 
 Every metric in [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts), then
@@ -740,6 +905,7 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `settlement_nonce_reuse_total`              | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
 | `lease_changes_total`                       | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
 | `store_prune_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `search_card_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_internal_errors_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_attempts_total`                    | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_upsert_failures_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
@@ -747,7 +913,7 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `catalog_route_template_ignored_total`      | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `discovery_unknown_params_total`            | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `spend_breaker_opened_total`                | `x402-facilitator` | counter, Count | `network`, `breaker`                                     | [breaker-opened](#breaker-opened)                                                                             |
-| `spend_budget_nearing_total`                | `x402-facilitator` | counter, Count | `network` (budget asset/other/global only)               | [budget-nearing](#budget-nearing)                                                                             |
+| `spend_budget_nearing_total`                | `x402-facilitator` | counter, Count | `network` (budget asset/other/free/global only)          | [budget-nearing](#budget-nearing)                                                                             |
 | `spend_failure_attributed_total`            | `x402-facilitator` | counter, Count | `network`, `fault` (fault ours only)                     | [failure-ours](#failure-ours)                                                                                 |
 | `spend_commit_unmatched_total`              | `x402-facilitator` | counter, Count | `network`                                                | [commit-unmatched](#commit-unmatched)                                                                         |
 | `spend_store_failures_total`                | `x402-facilitator` | counter, Count | `network`                                                | [store-outage](#store-outage)                                                                                 |
@@ -778,6 +944,8 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `mem_used_percent`                          | `x402-host`        | gauge, Percent | none                                                     | [memory](#memory), [telemetry-silent](#telemetry-silent)                                                      |
 | `disk_used_percent`                         | `x402-host`        | gauge, Percent | `path`                                                   | [audit-disk](#audit-disk), [disk](#disk), [telemetry-silent](#telemetry-silent)                               |
 | `ready`                                     | `x402-watch`       | gauge, None    | none                                                     | [uptime](#uptime), [uptime-flapping](#uptime-flapping)                                                        |
+| `portal_ready`                              | `x402-watch`       | gauge, None    | none                                                     | [portal-uptime](#portal-uptime) (off)                                                                         |
+| `hub_ready`                                 | `x402-watch`       | gauge, None    | none                                                     | [hub-uptime](#hub-uptime) (off)                                                                               |
 | `spendable_stroops`                         | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
 | `protocol_version`                          | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
 | `protocol_supported_version`                | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |
@@ -787,6 +955,7 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `backup_secret_reads`                       | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |
 | `Errors`                                    | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-errors](#watch-errors)                                                                                 |
 | `Invocations`                               | `AWS/Lambda`       | AWS's own      | `FunctionName` `x402-production-watch`                   | [watch-no-invocations](#watch-no-invocations)                                                                 |
+| `NumberOfMessagesPublished`                 | `AWS/SNS`          | AWS's own      | `TopicName` `x402-production-monitoring-heartbeat`       | [monitoring-heartbeat](#monitoring-heartbeat)                                                                 |
 | `EMFParsingErrors`                          | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-parsing](#emf-parsing)                                                                                   |
 | `EMFValidationErrors`                       | `AWS/Logs`         | AWS's own      | `LogGroupName` `/x402/production/metrics`                | [emf-validation](#emf-validation)                                                                             |
 | `IncomingBytes`                             | `AWS/Logs`         | AWS's own      | `LogGroupName`, each of our log groups                   | [log-volume](#log-volume)                                                                                     |
@@ -892,3 +1061,29 @@ reset-failed x402@production`, the agent, the credentials timer and the probe ti
   (about 3%) every minute, so a fake point can't move it without stopping the agent again.
 - **In the metrics' history:** `disk_used_percent` for `/` reads 85% from 15:15 to 15:30 on
   2026-11-09: the drill's, not a real reading.
+
+### 2026-11-24: the heartbeat
+
+- **After the deploy** that turned `heartbeat` on (12:48:08 UTC, with Alertmanager's `Watchdog`
+  publishing every minute since 11:55 through soroban-infrastructure#19): the alarm read OK at
+  12:49:12 on 5 messages a period; `make fire-test ALARM=x402-production-monitoring-heartbeat`
+  at 12:49:29, both actions to `x402-production-alarms` executed.
+- **How:** `ssh monitoring 'sudo docker stop monitoring-alertmanager-1'` at 12:50:54, and
+  `docker start` once the alarm fired. Nothing else on the VM alerts on x402 before the switch,
+  so the gap lost no alert.
+- **What happened:** ALARM at 13:11:33, 20 minutes 39 seconds after the stop, not the 10 to 15
+  that two empty 5-minute periods suggest: CloudWatch waits for late data before it reads a
+  period as missing. Alertmanager started at 13:11:50; OK at 13:13:33.
+- **Shown once:** the ALARM went out as one publish to `x402-production-alarms` at 13:11:33,
+  delivered once to its one subscription, the Slack channel's Amazon Q endpoint
+  (`NumberOfNotificationsDelivered` 1, `NumberOfNotificationsFailed` 0), and the OK as one more
+  at 13:13:33. The alarm sends nothing while it stays in ALARM, so a longer outage is still one
+  message.
+- **Why stopping Alertmanager covers the VM and Prometheus:** the alarm reads only the heartbeat
+  topic's `NumberOfMessagesPublished`. Prometheus evaluates the `Watchdog` and Alertmanager
+  publishes it, so a stopped Prometheus (no alert to send), a stopped Alertmanager (nobody to
+  send it) and a stopped VM (neither) all end the same way: no publish. The drill stopped the
+  last link in that chain.
+- **What it shows:** the topic's count, the alarm's missing-data rule and its path to Slack. A
+  broken credential, the other cause, was seen for real at 11:43–11:46 before the helper's
+  `HOME` fix: `NotificationsFailed` posted it to Slack (soroban-infrastructure#19).
