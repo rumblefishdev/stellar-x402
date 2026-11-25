@@ -10,6 +10,7 @@ const read = (path: string) => readFileSync(`${DEPLOY}/${path}`, "utf8");
 const UNIT = read("systemd/x402-metrics.service");
 const COMPOSE = read("metrics/compose.yaml");
 const CONFIG = read("metrics/prometheus.yml");
+const PRODUCTION = read("production/compose.yaml");
 
 describe("the metrics agent's key", () => {
   test("is the one secret the unit decrypts, Compose mounts and prometheus.yml reads", () => {
@@ -28,5 +29,23 @@ describe("the metrics agent's key", () => {
       );
       expect(CONFIG).toContain(`key_file: /run/secrets/${secret}\n`);
     }
+  });
+});
+
+// The facilitator's /metrics crosses two projects: production's Compose sets its port and joins the
+// agent's network, and prometheus.yml scrapes that port by the service's name. If they drift
+// apart, the first sign is `x402-target-down` in production (Oskar's review of #241).
+describe("the facilitator's /metrics", () => {
+  test("is scraped on METRICS_PORT, over the agent's network", () => {
+    const port = PRODUCTION.match(/^ {6}METRICS_PORT: "(\d+)"$/m)![1];
+    expect(CONFIG).toMatch(
+      new RegExp(
+        `- job_name: facilitator\\n\\s+static_configs:\\n\\s+- targets: \\[facilitator:${port}\\]`,
+      ),
+    );
+    const facilitator = PRODUCTION.match(/^ {2}facilitator:\n((?: {4}.*\n)+)/m)![1]!;
+    expect(facilitator).toMatch(/^ {4}networks:\n(?: {6}- .*\n)* {6}- metrics\n/m);
+    expect(PRODUCTION).toMatch(/^ {2}metrics:\n {4}external: true\n {4}name: x402-metrics\n/m);
+    expect(COMPOSE).toMatch(/^ {2}metrics:\n {4}name: x402-metrics\n/m);
   });
 });
