@@ -15,6 +15,10 @@ Part 1 of the TypeScript SDK (task 0102). Its entry points come one per pull req
 Not on npm before part 2 (task 0163). From this repository it is `@stellar-x402/sdk` in the
 workspace, as the MCP server (`apps/mcp-local`) uses it.
 
+`@x402/core` and `@x402/stellar` are peer dependencies (`~2.31.0`): install them beside it. The
+schemes you pass are built from your copy, and the SDK tells a missing trustline from a low balance
+by the class of the error your scheme throws, so there must be one copy of each.
+
 ## Pay for a resource
 
 ```ts
