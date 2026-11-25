@@ -45,7 +45,7 @@ export interface PrunerDeps {
   spend: Pick<SpendStore, "prune" | "pruneScopes">;
   rateLimits: Pick<RateLimitStore, "prune">;
   catalogAttempts: Pick<CatalogAttemptStore, "prune">;
-  /** The longest window any spend budget sums. */
+  /** The longest window any limit sums. */
   spendWindowMs: number;
   rateLimitWindowMs: number;
   logger: Logger;

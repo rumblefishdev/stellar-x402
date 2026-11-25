@@ -521,8 +521,11 @@ check after start counts each retry, and this sends one message for them.
 
 ### store-outage
 
-A write to Postgres failed: a settlement record, or the spend store. Settle answers may be missing
-from the records, and the spend policy may be blind.
+A read or write to Postgres failed: a settlement record, or the spend store. Settle answers may be
+missing from the records, and the spend policy may be blind. The spend store's reads are a
+breaker's and, on pubnet, an account's plan (`op` `plan`, 0107), in the same database through the
+registry's pool; a failed one refuses that settlement with
+`settle_exact_stellar_spend_store_unavailable`.
 
 1. On the server, the alarm's network's database: `systemctl status x402-db-testnet@production`
    and `/var/log/x402/production/postgres-testnet.log` for testnet.
@@ -531,7 +534,9 @@ from the records, and the spend policy may be blind.
 ### hook-failures
 
 A settlement hook threw: the spend policy's fee count, failure count or breaker may have missed a
-final settlement, so budgets and breakers count low.
+final settlement. Breakers then count low and budgets high: a reservation it didn't commit or
+release stays counted at the fee ceiling, for 24 h in the fee budgets and, on pubnet, until the
+month ends in its account's payments (0107).
 
 1. The `settlement_hook_failed` event names the hook and the error.
 2. If the store is the cause, `spend_store_failed` too ([store-outage](#store-outage)).
@@ -585,11 +590,14 @@ payments are refused for the cool-down.
 
 ### budget-nearing
 
-A fee budget (asset, other or global) passed its nearing level: at its limit, settlement for that
-scope stops until the window rolls (0024).
+A fee budget (asset, other, free or global) passed its nearing level: at its limit, settlement for
+that scope stops until the window rolls (0024). `free` is every account on the free plan together,
+on pubnet (0107): full, it refuses each of them, while accounts on a raised plan keep settling. An
+account's own budgets raise nothing: a full one refuses only its holder.
 
 1. The `spend_budget_nearing` event names the scope, with the used and maximum stroops.
-2. Raise the budget only if the traffic is real.
+2. Raise the budget only if the traffic is real. For `free`, the runbook's "Account plans" has a
+   query for the accounts behind it, and `SPEND_FREE_STROOPS` stays within `global`.
 
 ### commit-unmatched
 
@@ -904,7 +912,7 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `catalog_route_template_ignored_total`      | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `discovery_unknown_params_total`            | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `spend_breaker_opened_total`                | `x402-facilitator` | counter, Count | `network`, `breaker`                                     | [breaker-opened](#breaker-opened)                                                                             |
-| `spend_budget_nearing_total`                | `x402-facilitator` | counter, Count | `network` (budget asset/other/global only)               | [budget-nearing](#budget-nearing)                                                                             |
+| `spend_budget_nearing_total`                | `x402-facilitator` | counter, Count | `network` (budget asset/other/free/global only)          | [budget-nearing](#budget-nearing)                                                                             |
 | `spend_failure_attributed_total`            | `x402-facilitator` | counter, Count | `network`, `fault` (fault ours only)                     | [failure-ours](#failure-ours)                                                                                 |
 | `spend_commit_unmatched_total`              | `x402-facilitator` | counter, Count | `network`                                                | [commit-unmatched](#commit-unmatched)                                                                         |
 | `spend_store_failures_total`                | `x402-facilitator` | counter, Count | `network`                                                | [store-outage](#store-outage)                                                                                 |
