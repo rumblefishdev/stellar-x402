@@ -4,6 +4,7 @@ import { SellerFetchError, type SellerFetchCode } from "@stellar-x402/seller-fet
 export type ErrorCode =
   | "upstream_error"
   | "invalid_input"
+  | "invalid_cursor"
   | "resource_not_found"
   | "unsafe_url"
   | "unsupported_payment"

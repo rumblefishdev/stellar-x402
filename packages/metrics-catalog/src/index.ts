@@ -92,6 +92,7 @@ export const CATALOG = [
         "settle_exact_stellar_fee_exceeds_maximum",
         "settle_exact_stellar_signature_expiration_too_soon",
         "invalid_exact_stellar_payload_fee_exceeds_maximum",
+        "invalid_exact_stellar_pay_to_balance_missing",
         "other",
       ],
     },
@@ -312,7 +313,6 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
     fields: ["table"],
-    // `settlements_refused` is #205's (0086): listed ahead, so it isn't `other` once that lands.
     fieldValues: {
       table: [
         "spend_reservations",
@@ -440,14 +440,16 @@ export const CATALOG = [
     values: { breaker: ["payer", "pay_to", "asset", "other"] },
   },
   // `payer` and `pay_to` write no metric: one buyer or seller near its budget is the budget
-  // working (G-alarm-list). `budget` matches the set but is never a dimension.
+  // working (G-alarm-list), as is an account near its own (0107, which logs no nearing for it
+  // either). `free`, the free plan's accounts together, does: filled, it refuses every one of them.
+  // `budget` matches the set but is never a dimension.
   {
     namespace: FAC,
     name: "spend_budget_nearing_total",
     kind: "counter",
     unit: "Count",
     scope: "network",
-    sets: [{ dims: [], when: { budget: ["asset", "other", "global"] } }],
+    sets: [{ dims: [], when: { budget: ["asset", "other", "free", "global"] } }],
   },
   {
     namespace: FAC,
@@ -477,7 +479,7 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["op"],
-    fieldValues: { op: ["breaker", "reserve", "release", "other"] },
+    fieldValues: { op: ["breaker", "reserve", "release", "plan", "other"] },
   },
   {
     namespace: FAC,
@@ -500,6 +502,9 @@ export const CATALOG = [
         "settle_exact_stellar_spend_limit_asset",
         "settle_exact_stellar_spend_limit_other",
         "settle_exact_stellar_spend_limit_global",
+        "settle_exact_stellar_quota_exhausted",
+        "settle_exact_stellar_spend_limit_account",
+        "settle_exact_stellar_spend_limit_free",
         "other",
       ],
     },

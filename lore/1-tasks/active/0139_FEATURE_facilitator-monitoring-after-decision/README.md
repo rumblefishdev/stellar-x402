@@ -44,6 +44,14 @@ history:
     note: >
       Severity and repeat intervals decided for Alertmanager's routes (Design Decisions 1 and 2),
       after Karol's review of #211. His points for the switch are under "For the switch".
+  - date: "2026-11-24"
+    status: active
+    who: stkrolikiewicz
+    note: >
+      Heartbeat on: the VM's Watchdog reaches the topic every minute through IAM Roles Anywhere
+      (soroban-infrastructure#19), the alarm on since 12:48 UTC, drilled by stopping
+      Alertmanager (ALARM 20 minutes later, docs/monitoring.md, Drills). The switch's plan and
+      drill are in [G-switch-plan](notes/G-switch-plan.md).
 ---
 
 # Carry out the monitoring decision for the facilitator, with every alarm fired again
@@ -82,8 +90,8 @@ losing an alarm that protects money or a payment.
       the new setup, and the drill is recorded
 - [ ] The switch is one change, with no period running both the old alarms and the new rules,
       and every rule's drill follows it the same day
-- [ ] Given the monitoring VM or its Alertmanager stops, then a CloudWatch alarm fires from
-      outside it, shown once
+- [x] Given the monitoring VM or its Alertmanager stops, then a CloudWatch alarm fires from
+      outside it, shown once (2026-11-24, docs/monitoring.md, Drills)
 - [ ] `docs/monitoring.md` and the runbook describe the new setup, and ADR 0011 matches it
 
 ## Design Decisions
@@ -106,6 +114,14 @@ losing an alarm that protects money or a payment.
    `landed-after-expired`, `commit-unmatched`) for it sends no alert. EMF wrote those at once and
    flushed at the exit. Accepted, at most 15 s of counts: the app line still reaches the logs, so
    the record is kept and only the alert is lost (Adam's review of #241).
+4. **The switch leaves a window ADR 0011 rules out (2026-11-24).** ADR 0011 has the EMF adapter
+   and the `x402-facilitator` alarms go in the same change that turns the rules on. On the day
+   they are three deploys (G-switch-plan): the facilitator stops writing EMF at step 1, and the
+   rules go on at step 3, so between them nothing watches its metrics. Accepted with only testnet
+   in production (Adam's and Oskar's reviews of #240), and kept to one playbook run by having
+   soroban-infrastructure#20 merged before the day. CloudWatch's `facilitator-silent` posts to
+   Slack after 15 minutes of it: expected, not an outage. The other half of the ADR holds: no
+   period runs both the old alarms and the rules.
 
 ## For the switch
 

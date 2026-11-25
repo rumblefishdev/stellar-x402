@@ -1,4 +1,4 @@
-import { PostgresApiKeyStore } from "@stellar-x402/api-keys";
+import { PostgresAccountPlanStore, PostgresApiKeyStore } from "@stellar-x402/api-keys";
 import type { StellarNetwork } from "@stellar-x402/config";
 import pg from "pg";
 import {
@@ -69,6 +69,9 @@ import { PostgresSearchCardStore } from "./postgres-search-cards.js";
  *   Its own pool keeps that queue off `/settle`'s connections and off `hit`, which every request
  *   on a network without keys still needs. A request with a real key waits in that queue too.
  *   Its writes, the operator's and the portal's, stay on the main pool.
+ * - An account's plan is read on `pools.apiKeys` too, once per keyed settlement (0107), beside
+ *   the registry read that let the request in. The service never sets a plan: the operator's
+ *   script does, on a pool of its own.
  */
 export function postgresStores(
   pool: pg.Pool,
@@ -82,6 +85,7 @@ export function postgresStores(
     rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
     apiKeys: new PostgresApiKeyStore(pools.apiKeys ?? pool, pool),
+    accountPlans: new PostgresAccountPlanStore(pools.apiKeys ?? pool),
   };
 }
 
@@ -284,6 +288,7 @@ const UPDATE_COLUMNS = {
   ledger: "ledger",
   feeCharged: "fee_charged",
   errorReason: "error_reason",
+  errorMessage: "error_message",
   failure: "failure",
 } as const;
 
@@ -604,7 +609,8 @@ export class PostgresSettlementStore implements SettlementStore {
       return await inTransaction(this.pool, async (client) => {
         const { rows } = await client.query<SettlementRow>(
           `UPDATE settlements s
-           SET state = 'claimed', error_reason = NULL, reopened = s.reopened + 1,
+           SET state = 'claimed', error_reason = NULL, error_message = NULL,
+               reopened = s.reopened + 1,
                version = s.version + 1, created_at = $4, updated_at = $4
            WHERE s.key = $1 AND s.state = 'rejected' AND s.fingerprint = $2
              AND s.error_reason = ANY ($3::text[]) AND s.reopened >= 0
@@ -835,9 +841,22 @@ const STRIKES_NOW =
 const WINDOW_SUM = `SELECT coalesce(sum(amount), 0)::text AS used
   FROM spend_reservation_scopes WHERE scope = $1 AND at > $2`;
 
+/**
+ * Reservations in one scope stamped at or after `$2`, as text: a count limit's, which counts from
+ * the start of its period, that instant included. Served by the same index as
+ * {@link WINDOW_SUM}, though where the scope holds a large share of the table the planner may
+ * scan the table instead (0107 measured a parallel sequential scan with the scope half of it). A
+ * released reservation has no scope rows, so it counts nothing; a committed one keeps them.
+ */
+const SINCE_COUNT = `SELECT count(*)::text AS count
+  FROM spend_reservation_scopes WHERE scope = $1 AND at >= $2`;
+
 /** Thrown inside `reserve`'s transaction so a breach rolls the reservation back. */
 class LimitExceeded extends Error {
-  constructor(readonly scope: SpendScope) {
+  constructor(
+    readonly scope: SpendScope,
+    readonly limit: "stroops" | "count",
+  ) {
     super("spend limit exceeded");
   }
 }
@@ -851,13 +870,30 @@ export class PostgresSpendStore implements SpendStore {
   /**
    * One transaction: insert the reservation (a repeated id is a no-op), create or lock the scope
    * rows in one statement and sorted order so two reservations can't deadlock, then sum each
-   * limit's window in a statement of its own, which sees every reservation committed before the
-   * locks were granted. A wait on any lock longer than `RESERVE_LOCK_TIMEOUT_MS` rejects with
-   * `55P03` and reserves nothing.
+   * stroop limit's window, or count a count limit's reservations, in a statement of its own and
+   * in the limits' order. Each sees every reservation committed before the locks were granted. A
+   * scope two limits share is locked, and written for the reservation, once. A wait on any lock
+   * longer than `RESERVE_LOCK_TIMEOUT_MS` rejects with `55P03` and reserves nothing.
    */
   async reserve({ id, amount, limits, now }: SpendReservation): Promise<ReserveResult> {
     assertStroops(amount, "amount");
-    for (const limit of limits) assertStroops(limit.maxStroops, "maxStroops");
+    for (const limit of limits) {
+      if (!("maxCount" in limit)) {
+        assertStroops(limit.maxStroops, "maxStroops");
+        continue;
+      }
+      // A NaN or infinite count would compare false, and a missing `since` (SQL NULL) would match
+      // no row: either lets every reservation past the limit.
+      if (
+        !Number.isSafeInteger(limit.maxCount) ||
+        limit.maxCount < 0 ||
+        !Number.isSafeInteger(limit.since)
+      ) {
+        throw new RangeError(
+          "a count limit needs a non-negative integer maxCount and an integer since",
+        );
+      }
+    }
     const scopes = [...new Set(limits.map((limit) => limit.scope))].sort();
     try {
       return await inTransaction<ReserveResult>(this.reservePool, async (client) => {
@@ -897,13 +933,28 @@ export class PostgresSpendStore implements SpendStore {
         // reservations one row at a time, about 6 times slower at 100 000 rows (0022 decision 22).
         const usage: ScopeUsage[] = [];
         for (const limit of limits) {
+          if ("maxCount" in limit) {
+            const { rows } = await client.query<{ count: string }>(SINCE_COUNT, [
+              limit.scope,
+              limit.since,
+            ]);
+            // This reservation's own scope rows are written below, after every check.
+            if (Number(rows[0]!.count) + 1 > limit.maxCount)
+              throw new LimitExceeded(limit.scope, "count");
+            continue;
+          }
           const { rows } = await client.query<{ used: string }>(WINDOW_SUM, [
             limit.scope,
             now - limit.windowMs,
           ]);
           const usedStroops = BigInt(rows[0]!.used) + amount;
-          if (usedStroops > limit.maxStroops) throw new LimitExceeded(limit.scope);
-          usage.push({ scope: limit.scope, usedStroops, maxStroops: limit.maxStroops });
+          if (usedStroops > limit.maxStroops) throw new LimitExceeded(limit.scope, "stroops");
+          usage.push({
+            scope: limit.scope,
+            usedStroops,
+            maxStroops: limit.maxStroops,
+            windowMs: limit.windowMs,
+          });
         }
         await client.query(
           `INSERT INTO spend_reservation_scopes (id, scope, at, amount)
@@ -913,7 +964,8 @@ export class PostgresSpendStore implements SpendStore {
         return { reserved: true, usage };
       });
     } catch (error) {
-      if (error instanceof LimitExceeded) return { reserved: false, scope: error.scope };
+      if (error instanceof LimitExceeded)
+        return { reserved: false, scope: error.scope, limit: error.limit };
       throw error;
     }
   }

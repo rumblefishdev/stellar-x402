@@ -62,7 +62,7 @@
     "watchSecurity": false,
     "protocol": true,
     "upstream": false,
-    "heartbeat": false
+    "heartbeat": true
   },
   "thresholds": {
     "uptimeFailingMinutes": 7,

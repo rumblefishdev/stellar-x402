@@ -28,6 +28,17 @@ const PRICES_TOKEN =
 const OWNER_A = ownerOf(ACCOUNT_A);
 const DAY = 86_400_000;
 const THIS_MONTH_END = "2026-12-01T00:00:00Z";
+/** What an account with no payments and no plan of its own is told (NOW is 2026-11-18T12:00Z). */
+const FREE_UNUSED = {
+  used: 0,
+  remaining: 1000,
+  limit: 1000,
+  period_start: "2026-11-01T00:00:00Z",
+  period_end: THIS_MONTH_END,
+  resets_at: THIS_MONTH_END,
+  as_of: "2026-11-18T12:00:00Z",
+  plan: { name: "free", quota_limit: 1000, quota_period: "month" },
+};
 
 /** Gives account A a key through the route, and the key it was given, through the other. */
 async function issueAndReveal(portal: Portal, id = ACCOUNT_A): Promise<string> {
@@ -239,7 +250,7 @@ describe("GET /api/hub/v1/account", () => {
         created_at: "2026-11-18T12:00:00Z",
         can_issue: false,
       },
-      details: { showable: true },
+      details: { showable: true, usage: FREE_UNUSED },
     });
   });
 
@@ -279,7 +290,7 @@ describe("GET /api/hub/v1/account", () => {
         next_eligible_at: THIS_MONTH_END,
         can_issue: false,
       },
-      details: { showable: false },
+      details: { showable: false, usage: { ...FREE_UNUSED, as_of: "2026-11-19T12:00:00Z" } },
     });
   });
 
@@ -291,7 +302,7 @@ describe("GET /api/hub/v1/account", () => {
     const answer = await portal.hub("read");
     expect(answer.body).toEqual({
       key: { state: "revoked", revoked_at: "2026-10-20T08:00:00Z", can_issue: true },
-      details: { showable: false },
+      details: { showable: false, usage: FREE_UNUSED },
     });
   });
 
@@ -301,7 +312,7 @@ describe("GET /api/hub/v1/account", () => {
     await portal.keys.issue({ hash: apiKeyHash(bare), owner: OWNER_A, now: NOW });
     const noCopy = await portal.hub("read");
     expect(noCopy.body.key.state).toBe("active");
-    expect(noCopy.body.details).toEqual({ showable: false });
+    expect(noCopy.body.details).toEqual({ showable: false, usage: FREE_UNUSED });
 
     const other = "x402_" + "c".repeat(43);
     const foreign = sealer(Buffer.alloc(32, 1)).seal(other, ownerOf(ACCOUNT_B), apiKeyHash(other));
@@ -313,7 +324,7 @@ describe("GET /api/hub/v1/account", () => {
     });
     const wrongKey = await portal.hub("read", { id: ACCOUNT_B });
     expect(wrongKey.body.key.state).toBe("active");
-    expect(wrongKey.body.details).toEqual({ showable: false });
+    expect(wrongKey.body.details).toEqual({ showable: false, usage: FREE_UNUSED });
   });
 });
 
@@ -398,7 +409,10 @@ describe("POST /api/hub/v1/key/reveal", () => {
     await portal.hub("issue");
     const answer = await portal.hub("reveal");
     expect(answer.status).toBe(409);
-    expect((await portal.hub("read")).body.details).toEqual({ showable: false });
+    expect((await portal.hub("read")).body.details).toEqual({
+      showable: false,
+      usage: FREE_UNUSED,
+    });
   });
 });
 
@@ -519,6 +533,79 @@ describe("POST /api/hub/v1/key/issue", () => {
     expect(answer.status).toBe(200);
     expect(answer.body).toEqual({ outcome: "failed" });
     expect(portal.logs.find((l) => l.event === "hub_call_failed")?.level).toBe("error");
+  });
+});
+
+describe("the account's use (0107)", () => {
+  const issue = (portal: Portal, id = ACCOUNT_A) =>
+    portal.keys.issue({ hash: apiKeyHash("x402_" + "d".repeat(43)), owner: ownerOf(id), now: NOW });
+
+  it("counts this month's payments against the free plan, in Prices' shape", async () => {
+    const portal = await startPortal();
+    await issue(portal);
+    for (let i = 0; i < 312; i++) portal.usage.pay(OWNER_A, NOW - i * 1000);
+    // Last month's and another account's do not count.
+    portal.usage.pay(OWNER_A, Date.UTC(2026, 9, 31, 23, 59, 59));
+    portal.usage.pay(ownerOf(ACCOUNT_B), NOW);
+    const answer = await portal.hub("read");
+    expect(answer.body.details.usage).toEqual({ ...FREE_UNUSED, used: 312, remaining: 688 });
+  });
+
+  it("takes the limit from the plan the operator gave the account", async () => {
+    const portal = await startPortal();
+    await issue(portal);
+    await portal.plans.setPlan({ owner: OWNER_A, plan: "basic", now: NOW, setBy: "operator:a" });
+    const { usage } = (await portal.hub("read")).body.details;
+    expect(usage).toMatchObject({
+      used: 0,
+      remaining: 10_000,
+      limit: 10_000,
+      plan: { name: "basic", quota_limit: 10_000, quota_period: "month" },
+    });
+  });
+
+  it("reads a plan the config no longer has as free", async () => {
+    const portal = await startPortal();
+    await issue(portal);
+    await portal.plans.setPlan({ owner: OWNER_A, plan: "gold", now: NOW, setBy: "operator:a" });
+    const { usage } = (await portal.hub("read")).body.details;
+    expect(usage).toMatchObject({ limit: 1000, plan: { name: "free", quota_limit: 1000 } });
+  });
+
+  it("never lets remaining go below 0", async () => {
+    const portal = await startPortal();
+    await issue(portal);
+    for (let i = 0; i < 1003; i++) portal.usage.pay(OWNER_A, NOW);
+    const { usage } = (await portal.hub("read")).body.details;
+    expect(usage).toMatchObject({ used: 1003, remaining: 0, limit: 1000 });
+  });
+
+  it("shows the use of a revoked key's account too, and none for an account without a key", async () => {
+    const portal = await startPortal();
+    await issue(portal);
+    await portal.keys.revoke(OWNER_A, NOW);
+    portal.usage.pay(OWNER_A, NOW);
+    expect((await portal.hub("read")).body.details.usage).toMatchObject({ used: 1 });
+    const none = await portal.hub("read", { id: ACCOUNT_B });
+    expect(none.body.key.state).toBe("none");
+    expect(none.body.details).toEqual({ showable: false });
+  });
+
+  it("answers the key with usage null when the use can't be read, and logs it", async () => {
+    for (const reader of ["usage", "plans"] as const) {
+      const portal = await startPortal();
+      await issue(portal);
+      portal[reader].failing = true;
+      const answer = await portal.hub("read");
+      expect(answer.status).toBe(200);
+      expect(answer.body.key.state).toBe("active");
+      expect(answer.body.details).toEqual({ showable: false, usage: null });
+      const line = portal.logs.find((l) => l.event === "hub_usage_unavailable");
+      expect(line?.level).toBe("error");
+      expect(line?.fields).toMatchObject({ jti: "jti-read", act: "read" });
+      // Nothing of the failure reaches the hub.
+      expect(JSON.stringify(answer.body)).not.toMatch(/secret|postgres|ECONNREFUSED/);
+    }
   });
 });
 

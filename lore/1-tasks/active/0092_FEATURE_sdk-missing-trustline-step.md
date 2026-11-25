@@ -2,7 +2,8 @@
 id: "0092"
 title: "Tell a buyer about a missing trustline before signing, in the SDK and MCP"
 type: FEATURE
-status: backlog
+status: active
+owner: akot
 milestone: 2
 related_adr: []
 related_tasks: ["0078", "0145", "0102", "0094"]
@@ -26,6 +27,12 @@ history:
     who: okarcz
     note: >
       Moved to M2 by okarcz in the M1 Payments cleanup: not started, and M1 is closing.
+  - date: "2026-11-25"
+    status: active
+    who: akot
+    note: >
+      Started with the MCP part: `pay.ts` tells a missing trustline from a low balance by the
+      error's type. The SDK criteria follow in 0102, whose buyer helper carries the same codes.
 ---
 
 # Tell a buyer about a missing trustline before signing, in the SDK and MCP

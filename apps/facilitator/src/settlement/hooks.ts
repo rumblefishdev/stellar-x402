@@ -29,7 +29,8 @@ export interface BeforeSubmitContext {
   /**
    * The caller this `/settle` request came from, on a network that requires an API key (0105);
    * `undefined` on one that takes none. A repeat or a reopen carries its own request's caller,
-   * which may differ from the first one's. 0107 budgets by `caller.owner`.
+   * which may differ from the first one's. The spend policy counts the settlement in
+   * `caller.owner`'s account (0107).
    */
   caller?: Caller;
   /**
@@ -49,13 +50,14 @@ export interface BeforeSubmitContext {
 export type BeforeSubmitResult =
   | { allow: true }
   /**
-   * Nothing is submitted: the record moves `claimed → rejected` with this x402 `errorReason`,
-   * `/settle` answers `success: false`, and `onFinal` is not called. A hook that throws is
-   * treated the same way, with `settle_exact_stellar_refused`. If the refusal can't be stored, the
-   * record stays `claimed`: a repeat past the budget ends it with `…_timeout`, and then `onFinal`
-   * runs (`settle`), so a release must tolerate a reservation that was never made.
+   * Nothing is submitted: the record moves `claimed → rejected` with this x402 `errorReason`, and
+   * `errorMessage` if given, `/settle` answers `success: false` with them, and `onFinal` is not
+   * called. The message is stored, so a repeat of the payment answers the same (0107). A hook that
+   * throws is treated the same way, with `settle_exact_stellar_refused`. If the refusal can't be
+   * stored, the record stays `claimed`: a repeat past the budget ends it with `…_timeout`, and
+   * then `onFinal` runs (`settle`), so a release must tolerate a reservation that was never made.
    */
-  | { allow: false; errorReason: string };
+  | { allow: false; errorReason: string; errorMessage?: string };
 
 /** Where a record turned final: inline in `/settle`, or later (`resolved` event, startup re-check). */
 export type SettlementOrigin = "settle" | "resolved";

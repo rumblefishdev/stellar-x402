@@ -376,7 +376,7 @@ facilitator refuses to start.
   reviews.
 - M2, from decision 31: [0105](../../backlog/0105_FEATURE_api-keys-on-pubnet.md) (API keys on
   pubnet), [0106](../../backlog/0106_FEATURE_api-key-portal-discord.md) (the portal with Discord
-  sign-in), [0107](../../active/0107_FEATURE_per-key-fee-quota.md) (free quota and per-key fee
+  sign-in), [0107](../../active/0107_FEATURE_per-key-fee-quota/README.md) (free quota and per-key fee
   budget), [0108](../../backlog/0108_FEATURE_settle-billing.md) (charging past the quota).
 
 ## Modified tests

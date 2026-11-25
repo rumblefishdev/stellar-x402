@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { DEFAULT_ACCOUNT_PLANS, parseAccountPlans, type AccountPlan } from "@stellar-x402/api-keys";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -20,6 +21,8 @@ export interface Config {
   minAccountAgeMinutes: number;
   /** Where a caller's address is read from: the socket, or Cloudflare's header behind its tunnel. */
   clientIp: "socket" | "cloudflare";
+  /** The plans by name, as the facilitator reads them (0107): the quota the hub shows. */
+  accountPlans: Map<string, AccountPlan>;
   logLevel: LogLevel;
 }
 
@@ -106,6 +109,15 @@ export function parseConfig(env: Env): Config {
     problems.push("HUB_TOKEN_SECRET and KEY_ENCRYPTION_KEY must differ");
   }
 
+  let accountPlans: Map<string, AccountPlan> | undefined;
+  try {
+    accountPlans = parseAccountPlans(get("ACCOUNT_PLANS") ?? DEFAULT_ACCOUNT_PLANS);
+  } catch {
+    problems.push(
+      "ACCOUNT_PLANS must be <name>:<payments a month>:<fee stroops per 24 h>, comma-separated, with a free plan",
+    );
+  }
+
   const config = {
     port: integer("PORT", 4022, 1, 65_535),
     hubSecret,
@@ -113,6 +125,7 @@ export function parseConfig(env: Env): Config {
     databaseUrl: required("DATABASE_URL"),
     minAccountAgeMinutes: integer("MIN_ACCOUNT_AGE_MINUTES", 5, 0, 525_600),
     clientIp: oneOf("CLIENT_IP", ["socket", "cloudflare"] as const, "socket"),
+    accountPlans,
     logLevel: oneOf("LOG_LEVEL", LOG_LEVELS, "info"),
   };
   if (problems.length > 0) throw new ConfigError(problems);

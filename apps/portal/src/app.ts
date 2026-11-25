@@ -1,4 +1,16 @@
-import { apiKeyHash, newApiKey, type OwnerKeys, type SealedKeyStore } from "@stellar-x402/api-keys";
+import {
+  FREE_PLAN,
+  apiKeyHash,
+  monthEnd,
+  monthStart,
+  newApiKey,
+  utcInstant,
+  type AccountPlan,
+  type AccountPlanStore,
+  type AccountUsageReader,
+  type OwnerKeys,
+  type SealedKeyStore,
+} from "@stellar-x402/api-keys";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { ipKeyGenerator } from "express-rate-limit";
 import { capOf, rfc3339 } from "./cap.js";
@@ -24,8 +36,12 @@ export const ACCOUNT_LIMIT_PER_MINUTE = 60;
 export const HEALTH_WINDOW_MS = 2_000;
 
 export interface AppDeps {
-  config: Pick<Config, "hubSecret" | "minAccountAgeMinutes" | "clientIp">;
+  config: Pick<Config, "hubSecret" | "minAccountAgeMinutes" | "clientIp" | "accountPlans">;
   keys: SealedKeyStore;
+  /** The plan name the operator gave an account, if any (0107). */
+  plans: AccountPlanStore;
+  /** What the account's payments count to this month (0107). */
+  usage: AccountUsageReader;
   sealer: Sealer;
   logger: Logger;
   /** Rejects when the database can't be reached. */
@@ -42,7 +58,8 @@ const keyIdOf = (hash: string) => hash.slice(0, 12);
  * word of a short token the hub signs. There is no sign-in, session or cookie here, and no
  * browser reaches it, so no CORS header is ever sent.
  *
- * - `GET /api/hub/v1/account` is the state of the key (`act: read`).
+ * - `GET /api/hub/v1/account` is the state of the key and the account's use this month
+ *   (`act: read`).
  * - `POST /api/hub/v1/key/reveal` is the key itself (`act: reveal`).
  * - `POST /api/hub/v1/key/revoke` ends it at once (`act: revoke`).
  * - `POST /api/hub/v1/key/issue` gives the account a key if it may have one (`act: issue`).
@@ -51,7 +68,7 @@ const keyIdOf = (hash: string) => hash.slice(0, 12);
  * answer never holds a store's error message.
  */
 export function createApp(deps: AppDeps): Express {
-  const { config, keys, sealer, logger } = deps;
+  const { config, keys, plans, usage, sealer, logger } = deps;
   const now = deps.now ?? Date.now;
 
   const app = express();
@@ -82,6 +99,36 @@ export function createApp(deps: AppDeps): Express {
       (config.clientIp === "cloudflare" && typeof header === "string" && header) ||
       req.socket.remoteAddress;
     return address ? ipKeyGenerator(address) : "unknown";
+  };
+
+  /**
+   * The account's payments this month against its plan's quota (0107), in Prices' shape. `null`
+   * when either read fails: the key is still answered, and the hub shows no figures.
+   */
+  const usageOf = async (caller: HubCaller, owner: string): Promise<object | null> => {
+    const at = now();
+    try {
+      const name = await plans.planOf(owner);
+      // A plan the config no longer has reads as the free one, as the facilitator reads it.
+      const plan: AccountPlan =
+        (name === undefined ? undefined : config.accountPlans.get(name)) ??
+        config.accountPlans.get(FREE_PLAN)!;
+      const used = await usage.paymentsSince(owner, monthStart(at));
+      const end = utcInstant(monthEnd(at));
+      return {
+        used,
+        remaining: Math.max(0, plan.payments - used),
+        limit: plan.payments,
+        period_start: utcInstant(monthStart(at)),
+        period_end: end,
+        resets_at: end,
+        as_of: utcInstant(at),
+        plan: { name: plan.name, quota_limit: plan.payments, quota_period: "month" },
+      };
+    } catch (error) {
+      logger.error("hub_usage_unavailable", { jti: caller.jti, act: caller.act, error });
+      return null;
+    }
   };
 
   /**
@@ -225,7 +272,7 @@ export function createApp(deps: AppDeps): Express {
             created_at: rfc3339(held.active.createdAt),
             can_issue: false,
           },
-          details: { showable },
+          details: { showable, usage: await usageOf(caller, owner) },
         });
       } else if (held.lastRevokedAt !== undefined) {
         log("revoked");
@@ -237,7 +284,7 @@ export function createApp(deps: AppDeps): Express {
             ...(cap.capped && { next_eligible_at: cap.nextEligibleAt }),
             can_issue: !cap.capped,
           },
-          details: { showable: false },
+          details: { showable: false, usage: await usageOf(caller, owner) },
         });
       } else {
         log("none");

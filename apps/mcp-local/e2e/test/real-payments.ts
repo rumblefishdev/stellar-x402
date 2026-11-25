@@ -4,6 +4,8 @@ import { succeeded, usdcBalance, usdcTransfer, xlmBalance } from "../src/horizon
 import { row } from "../src/results.js";
 import {
   balanceAfter,
+  example,
+  facilitator,
   freshDir,
   httpArgs,
   keys,
@@ -19,14 +21,18 @@ import {
  */
 const PAYMENT_LIMIT_MS = "55000";
 
-describe("real payments on testnet (0.002 USDC)", () => {
+describe("real payments on testnet (0.003 USDC)", () => {
   /** Pays the example seller once and checks it on Horizon: the transfer, both balances, the fees. */
-  async function payAndCheck(id: string, env: Record<string, string>): Promise<void> {
+  async function payAndCheck(
+    id: string,
+    env: Record<string, string>,
+    url = weather(),
+  ): Promise<void> {
     const buyerBefore = await usdcBalance(keys.buyerPublic);
     const sellerBefore = await usdcBalance(keys.sellerPublic);
     const xlmBefore = await xlmBalance(keys.buyerPublic);
     const server = await startServer(env);
-    const answer = await server.call("call_paid_http", httpArgs(weather()));
+    const answer = await server.call("call_paid_http", httpArgs(url));
     await server.close();
     const value = answer.value as Partial<PaidResult>;
     const hash = value.payment?.transaction ?? undefined;
@@ -107,4 +113,50 @@ describe("real payments on testnet (0.002 USDC)", () => {
       [String(afterB), String(await usdcBalance(keys.buyerPublic))],
     );
   });
+
+  it("E-25 finds the example seller with search_resources on our facilitator, and pays it", async () => {
+    // E-21's payment cataloged the seller; the seller check runs after the settle answer (ADR 0008).
+    const env = paying({
+      STELLAR_X402_TIMEOUT_MS: PAYMENT_LIMIT_MS,
+      STELLAR_X402_DISCOVERY_URL: facilitator.url,
+    });
+    const args = { query: "current temperature for a city" };
+    const server = await startServer(env);
+    let answer = await server.call("search_resources", args);
+    for (let i = 0; i < 20 && found(answer) === undefined; i++) {
+      await new Promise((done) => setTimeout(done, 500));
+      answer = await server.call("search_resources", args);
+    }
+    await server.close();
+    const hit = found(answer);
+    const route = (await (
+      await fetch(`${facilitator.url}/discovery/search?${new URLSearchParams(args)}`)
+    ).json()) as { resources: { resource: string }[]; partialResults: boolean };
+    const value = answer.value as { items: { resource: string }[]; partialResults: boolean };
+    row(
+      "E-25",
+      "search finds the example seller on testnet, in the route's order, partialResults as the route",
+      ["ok", true, "stellar:testnet", route.resources.map((r) => r.resource), route.partialResults],
+      [
+        code(answer),
+        hit !== undefined,
+        hit?.accepts[0]?.network,
+        value.items?.map((i) => i.resource),
+        value.partialResults,
+      ],
+    );
+    if (hit === undefined) return;
+    await payAndCheck("E-25", env, `${hit.resource}?city=Warsaw`);
+  });
+
+  /** The example seller's weather listing among a search answer's items. */
+  function found(answer: { value?: unknown }) {
+    const items = (answer.value as { items?: SearchItem[] } | undefined)?.items ?? [];
+    return items.find((item) => item.resource.startsWith(`${example.url}/weather`));
+  }
 });
+
+interface SearchItem {
+  resource: string;
+  accepts: { network: string }[];
+}

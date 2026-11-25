@@ -478,6 +478,24 @@ export function settlementStoreContract(make: Make<SettlementStore>) {
         });
       });
 
+      it("clears a transition's errorMessage with its reason (0107)", async () => {
+        const s = settlement("1");
+        await store.claim(s);
+        const rejected = await store.transition(s.key, "claimed", {
+          state: "rejected",
+          errorReason: "unsent_b",
+          errorMessage: "why",
+          updatedAt: 2_000,
+        });
+        expect(rejected).toMatchObject({ errorReason: "unsent_b", errorMessage: "why" });
+        expect(await store.get(s.key)).toMatchObject({ errorMessage: "why" });
+        // The message is the reason's: a reopened claim has neither.
+        expect(await store.reopen(s.key, s.fingerprint, UNSENT, 5_000)).not.toHaveProperty(
+          "errorMessage",
+        );
+        expect(await store.get(s.key)).not.toHaveProperty("errorMessage");
+      });
+
       it("refuses another fingerprint, another reason, a record with a hash, or one not rejected", async () => {
         const s = await rejected("1");
         expect(await store.reopen(s.key, "fp-other", UNSENT, 5_000)).toBeUndefined();
@@ -1328,11 +1346,12 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: 1 })).toEqual({
         reserved: false,
         scope: "global",
+        limit: "stroops",
       });
       expect(await store.used(`payer:${PAYER}`, DAY, 1)).toBe(60n);
       expect(
         await store.reserve({ id: "c", amount: 30n, limits: limits(1_000n, 80n), now: 2 }),
-      ).toEqual({ reserved: false, scope: `payer:${PAYER}` });
+      ).toEqual({ reserved: false, scope: `payer:${PAYER}`, limit: "stroops" });
       expect(await store.used("global", DAY, 2)).toBe(60n);
     });
 
@@ -1375,7 +1394,7 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(await store.used(`payer:${PAYER}`, DAY, 0)).toBe(INT64_MAX);
       expect(
         await store.reserve({ id: "b", amount: 1n, limits: limits(INT64_MAX, INT64_MAX), now: 0 }),
-      ).toEqual({ reserved: false, scope: "global" });
+      ).toEqual({ reserved: false, scope: "global", limit: "stroops" });
     });
 
     it("rejects a stroop amount that isn't a non-negative int64, and changes nothing", async () => {
@@ -1407,6 +1426,7 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: 1 })).toEqual({
         reserved: false,
         scope: "global",
+        limit: "stroops",
       });
       await store.release("a", 5);
       expect(
@@ -1420,7 +1440,7 @@ export function spendStoreContract(make: Make<SpendStore>) {
       await store.reserve({ id: "b", amount: 60n, limits: limits(100n), now: 1_001 });
       expect(
         await store.reserve({ id: "a", amount: 60n, limits: limits(100n), now: 1_000 }),
-      ).toEqual({ reserved: false, scope: "global" });
+      ).toEqual({ reserved: false, scope: "global", limit: "stroops" });
       expect(await store.used("global", DAY, 1_000)).toBe(60n);
     });
 
@@ -1462,8 +1482,8 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(result).toEqual({
         reserved: true,
         usage: [
-          { scope: "global", usedStroops: 40n, maxStroops: 100n },
-          { scope: `payer:${PAYER}`, usedStroops: 40n, maxStroops: 500n },
+          { scope: "global", usedStroops: 40n, maxStroops: 100n, windowMs: DAY },
+          { scope: `payer:${PAYER}`, usedStroops: 40n, maxStroops: 500n, windowMs: DAY },
         ],
       });
     });
@@ -1577,6 +1597,182 @@ export function spendStoreContract(make: Make<SpendStore>) {
       expect(await store.used("payer:A", DAY, 0)).toBe(80n);
       expect(await store.used("payer:B", DAY, 0)).toBe(80n);
       expect(await store.used("global", DAY, 0)).toBe(0n);
+    });
+
+    it("sums and reports each stroop limit over its own window", async () => {
+      const HOUR = 3_600_000;
+      await store.reserve({ id: "a", amount: 10n, limits: limits(1_000n), now: 0 });
+      const result = await store.reserve({
+        id: "b",
+        amount: 30n,
+        limits: [
+          { scope: "global", maxStroops: 1_000n, windowMs: DAY },
+          // `a` is out of this window: 30 fits, where a day's 40 would not.
+          { scope: `payer:${PAYER}`, maxStroops: 35n, windowMs: HOUR },
+        ],
+        now: 2 * HOUR,
+      });
+      expect(result).toEqual({
+        reserved: true,
+        usage: [
+          { scope: "global", usedStroops: 40n, maxStroops: 1_000n, windowMs: DAY },
+          { scope: `payer:${PAYER}`, usedStroops: 30n, maxStroops: 35n, windowMs: HOUR },
+        ],
+      });
+    });
+
+    describe("count limits (0107)", () => {
+      const ACCOUNT = "account:discord:1" as const;
+      /** At most `maxCount` of the account's reservations stamped at or after `since`. */
+      const payments = (maxCount: number, since = 0): SpendLimit => ({
+        scope: ACCOUNT,
+        maxCount,
+        since,
+      });
+      const global = (maxStroops = 1_000n): SpendLimit => ({
+        scope: "global",
+        maxStroops,
+        windowMs: DAY,
+      });
+      const refusedBy = (scope: string, limit: "stroops" | "count") => ({
+        reserved: false,
+        scope,
+        limit,
+      });
+
+      it("refuses the reservation past a count limit", async () => {
+        const quota = [payments(2), global()];
+        for (const id of ["a", "b"]) {
+          expect(await store.reserve({ id, amount: 10n, limits: quota, now: 1 })).toMatchObject({
+            reserved: true,
+          });
+        }
+        expect(await store.reserve({ id: "c", amount: 10n, limits: quota, now: 2 })).toEqual(
+          refusedBy(ACCOUNT, "count"),
+        );
+        // `c` reserved nothing, in no limit: its retry is refused again, not taken for a repeat.
+        expect(await store.used("global", DAY, 2)).toBe(20n);
+        expect(await store.used(ACCOUNT, DAY, 2)).toBe(20n);
+        expect(await store.reserve({ id: "c", amount: 10n, limits: quota, now: 3 })).toEqual(
+          refusedBy(ACCOUNT, "count"),
+        );
+        // A repeat of a reserved id is the no-op it always was, not refused by its own row.
+        expect(await store.reserve({ id: "a", amount: 10n, limits: quota, now: 4 })).toEqual({
+          reserved: true,
+          usage: [],
+        });
+        expect(await store.used(ACCOUNT, DAY, 4)).toBe(20n);
+      });
+
+      it("a released reservation frees its count", async () => {
+        const quota = [payments(2)];
+        await store.reserve({ id: "a", amount: 10n, limits: quota, now: 1 });
+        await store.reserve({ id: "b", amount: 10n, limits: quota, now: 1 });
+        await store.release("a", 2);
+        expect(await store.reserve({ id: "c", amount: 10n, limits: quota, now: 3 })).toMatchObject({
+          reserved: true,
+        });
+      });
+
+      it("a committed reservation keeps its count", async () => {
+        const quota = [payments(2)];
+        await store.reserve({ id: "a", amount: 10n, limits: quota, now: 1 });
+        await store.reserve({ id: "b", amount: 10n, limits: quota, now: 1 });
+        await store.commit("a", 5n);
+        // A rewrap under someone else's fee bump commits 0: it was still a payment.
+        await store.commit("b", 0n);
+        // A late release can't hand a paid settlement back.
+        await store.release("a", 2);
+        expect(await store.reserve({ id: "c", amount: 10n, limits: quota, now: 3 })).toEqual(
+          refusedBy(ACCOUNT, "count"),
+        );
+      });
+
+      it("counts from since, inclusive", async () => {
+        // The last millisecond of November counts in November only; the 1st of December at
+        // 00:00:00.000 counts in December.
+        const since = Date.UTC(2026, 11, 1);
+        await store.reserve({ id: "before", amount: 1n, limits: [payments(10)], now: since - 1 });
+        await store.reserve({ id: "at", amount: 1n, limits: [payments(10)], now: since });
+        const later = since + 5;
+        expect(
+          await store.reserve({ id: "c", amount: 1n, limits: [payments(1, since)], now: later }),
+        ).toEqual(refusedBy(ACCOUNT, "count"));
+        expect(
+          await store.reserve({
+            id: "c",
+            amount: 1n,
+            limits: [payments(1, since + 1)],
+            now: later,
+          }),
+        ).toMatchObject({ reserved: true });
+        // `at` and `c` count from `since`, `before` doesn't: a third fits in 3.
+        expect(
+          await store.reserve({ id: "d", amount: 1n, limits: [payments(3, since)], now: later }),
+        ).toMatchObject({ reserved: true });
+      });
+
+      it("a stroop refusal says limit: stroops", async () => {
+        const quota = [payments(10), global(100n)];
+        await store.reserve({ id: "a", amount: 60n, limits: quota, now: 1 });
+        expect(await store.reserve({ id: "b", amount: 60n, limits: quota, now: 2 })).toEqual(
+          refusedBy("global", "stroops"),
+        );
+      });
+
+      it("an account's two limits on one scope", async () => {
+        // One scope row, locked once, and one reservation row in it: two would fail the upsert
+        // or the insert, or count the reservation twice.
+        const fees: SpendLimit = { scope: ACCOUNT, maxStroops: 1_000n, windowMs: DAY };
+        const quota = [payments(2), fees, global()];
+        expect(await store.reserve({ id: "a", amount: 10n, limits: quota, now: 1 })).toEqual({
+          reserved: true,
+          usage: [
+            { scope: ACCOUNT, usedStroops: 10n, maxStroops: 1_000n, windowMs: DAY },
+            { scope: "global", usedStroops: 10n, maxStroops: 1_000n, windowMs: DAY },
+          ],
+        });
+        expect(await store.reserve({ id: "b", amount: 10n, limits: quota, now: 1 })).toEqual({
+          reserved: true,
+          usage: [
+            { scope: ACCOUNT, usedStroops: 20n, maxStroops: 1_000n, windowMs: DAY },
+            { scope: "global", usedStroops: 20n, maxStroops: 1_000n, windowMs: DAY },
+          ],
+        });
+        expect(await store.used(ACCOUNT, DAY, 1)).toBe(20n);
+        expect(await store.reserve({ id: "c", amount: 10n, limits: quota, now: 2 })).toEqual(
+          refusedBy(ACCOUNT, "count"),
+        );
+        // Both full: the refusal names the first in the limits' order.
+        const full = { scope: ACCOUNT, maxStroops: 20n, windowMs: DAY };
+        expect(
+          await store.reserve({ id: "d", amount: 10n, limits: [payments(2), full], now: 2 }),
+        ).toEqual(refusedBy(ACCOUNT, "count"));
+        expect(
+          await store.reserve({ id: "d", amount: 10n, limits: [full, payments(2)], now: 2 }),
+        ).toEqual(refusedBy(ACCOUNT, "stroops"));
+      });
+
+      it("rejects a count limit with a bad maxCount or since, and changes nothing", async () => {
+        const bad: SpendLimit[] = [
+          ...[-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY].map((maxCount) => payments(maxCount)),
+          // Untyped code's missing start: SQL NULL would match no row, so nothing would count.
+          ...[undefined, null, 1.5].map((since) => ({
+            scope: ACCOUNT,
+            maxCount: 1,
+            since: since as unknown as number,
+          })),
+        ];
+        for (const limit of bad) {
+          await expect(
+            store.reserve({ id: "a", amount: 1n, limits: [limit, global()], now: 0 }),
+          ).rejects.toBeInstanceOf(RangeError);
+        }
+        expect(await store.used("global", DAY, 0)).toBe(0n);
+        expect(
+          await store.reserve({ id: "a", amount: 1n, limits: [payments(0), global()], now: 0 }),
+        ).toEqual(refusedBy(ACCOUNT, "count"));
+      });
     });
 
     const backoff = { baseMs: 1_000, factor: 2, maxMs: 5_000, strikeResetMs: 100_000 };
@@ -1939,6 +2135,196 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
         items: [],
         total: 0,
       });
+    });
+  });
+}
+
+export function catalogSearchContract(make: Make<CatalogStore>) {
+  let store: CatalogStore;
+  beforeEach(async () => {
+    store = await make();
+  });
+  const resource = (
+    url: string,
+    overrides: Partial<DiscoveryResource> = {},
+  ): DiscoveryResource => ({
+    resource: url,
+    type: "http",
+    x402Version: 2,
+    accepts: [requirements()],
+    lastUpdated: "2026-10-08T00:00:00.000Z",
+    ...overrides,
+  });
+  const upsert = (
+    entry: Omit<CatalogEntry, "keyVersion" | "ledger" | "checkedAt">,
+    checkedAt = 1,
+  ) => store.upsert({ keyVersion: CATALOG_KEY_VERSION, ledger: 1, checkedAt, ...entry });
+  const key = (url: string, payTo = PAY_TO, network: StellarNetwork = "stellar:testnet") => ({
+    network,
+    payTo,
+    method: "GET",
+    resourceUrl: url,
+  });
+  describe("CatalogStore search by words (0120, ADR 0014)", () => {
+    type Search = Parameters<CatalogStore["search"]>[0];
+    const search = (text: string, query: Partial<Search> = {}) =>
+      store.search({ text, limit: 10, ...query });
+    const urls = async (text: string, query: Partial<Search> = {}) =>
+      (await search(text, query)).map((hit) => hit.resource.resource);
+    const listing = (url: string, overrides: Partial<DiscoveryResource>) =>
+      upsert({ key: key(url), resource: resource(url, overrides) });
+
+    it("finds a listing as soon as the catalog stores it", async () => {
+      await listing("https://a.example/x", { description: "weather" });
+      expect(await urls("weather")).toEqual(["https://a.example/x"]);
+    });
+
+    it("finds a listing by any word of the query, and nothing when no listing holds one", async () => {
+      await listing("https://a.example/x", { description: "Weather forecast for a city" });
+      await listing("https://b.example/x", { description: "Stock prices" });
+      expect(await urls("weather in paris")).toEqual(["https://a.example/x"]);
+      expect(await urls("zebra")).toEqual([]);
+      // Only stop words: no word to look for.
+      expect(await urls("the of")).toEqual([]);
+    });
+
+    it("looks for the first 32 distinct words of a long query", async () => {
+      await listing("https://a.example/x", { description: "w32" });
+      await listing("https://b.example/x", { description: "w31" });
+      const words = Array.from({ length: 33 }, (_, i) => `w${i}`);
+      // Repeats don't count against the 32.
+      expect(await urls(["w0", ...words].join(" "))).toEqual(["https://b.example/x"]);
+    });
+
+    it("ranks a word in the name above tags, then description, then parameters", async () => {
+      await listing("https://params.example/x", {
+        extensions: {
+          bazaar: { info: { input: { type: "http", queryParams: { weather: "" } } } },
+        },
+      });
+      await listing("https://description.example/x", { description: "weather" });
+      await listing("https://tags.example/x", { tags: ["weather"] });
+      await listing("https://name.example/x", { serviceName: "Weather" });
+      expect(await urls("weather")).toEqual([
+        "https://name.example/x",
+        "https://tags.example/x",
+        "https://description.example/x",
+        "https://params.example/x",
+      ]);
+    });
+
+    it("reads the name from the URL path and an MCP tool's name", async () => {
+      await listing("https://a.example/v1/forecast?city=x", {});
+      await listing("mcp://tool/lookup", {
+        type: "mcp",
+        extensions: { bazaar: { info: { input: { type: "mcp", toolName: "get_tides" } } } },
+      });
+      expect(await urls("forecast")).toEqual(["https://a.example/v1/forecast?city=x"]);
+      expect(await urls("tides")).toEqual(["mcp://tool/lookup"]);
+      // The query string is not part of the name.
+      expect(await urls("city")).toEqual([]);
+    });
+
+    it("reads parameters' names and descriptions from the inputs and the schema", async () => {
+      await listing("mcp://tool/a", {
+        type: "mcp",
+        extensions: {
+          bazaar: {
+            info: {
+              input: {
+                type: "mcp",
+                toolName: "a",
+                inputSchema: { properties: { zip: { description: "postal code" } } },
+              },
+            },
+          },
+        },
+      });
+      await listing("https://b.example/x", {
+        extensions: {
+          bazaar: {
+            schema: {
+              properties: {
+                input: {
+                  properties: {
+                    body: { properties: { ticker: { description: "exchange symbol" } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      expect(await urls("postal")).toEqual(["mcp://tool/a"]);
+      expect(await urls("zip")).toEqual(["mcp://tool/a"]);
+      expect(await urls("exchange")).toEqual(["https://b.example/x"]);
+      expect(await urls("ticker")).toEqual(["https://b.example/x"]);
+    });
+
+    it("stores a listing whose fields have unexpected shapes, and still finds it", async () => {
+      await listing("https://odd.example/x", {
+        description: "weather",
+        extensions: {
+          bazaar: { info: { input: "x" }, schema: { properties: { input: [] } } },
+        } as unknown as DiscoveryResource["extensions"],
+      });
+      expect(await urls("weather")).toEqual(["https://odd.example/x"]);
+    });
+
+    it("filters before ranking, and searches both networks without a network filter", async () => {
+      await upsert({
+        key: key("https://a.example/x"),
+        resource: resource("https://a.example/x", { description: "weather" }),
+      });
+      await upsert({
+        key: key("https://b.example/x", "GOTHER"),
+        resource: resource("https://b.example/x", { description: "weather", type: "mcp" }),
+      });
+      await upsert({
+        key: key("https://c.example/x", PAY_TO, "stellar:pubnet"),
+        resource: resource("https://c.example/x", { description: "weather" }),
+      });
+      expect((await urls("weather")).sort()).toEqual([
+        "https://a.example/x",
+        "https://b.example/x",
+        "https://c.example/x",
+      ]);
+      expect(await urls("weather", { type: "mcp" })).toEqual(["https://b.example/x"]);
+      expect(await urls("weather", { payTo: "GOTHER" })).toEqual(["https://b.example/x"]);
+      expect(await urls("weather", { network: "stellar:pubnet" })).toEqual(["https://c.example/x"]);
+      expect(await urls("weather", { network: "eip155:8453" })).toEqual([]);
+    });
+
+    it("orders equal ranks by key and pages after a result without a repeat or a gap", async () => {
+      for (const host of ["e", "c", "a", "d", "b"])
+        await listing(`https://${host}.example/x`, { description: "weather" });
+      const seen: string[] = [];
+      let after: Search["after"];
+      for (let page = 0; page < 4; page++) {
+        const hits = await search("weather", { limit: 2, after });
+        seen.push(...hits.map((hit) => hit.resource.resource));
+        if (hits.length < 2) break;
+        const last = hits.at(-1)!;
+        after = { rank: last.rank, key: last.key };
+      }
+      expect(seen).toEqual(["a", "b", "c", "d", "e"].map((host) => `https://${host}.example/x`));
+    });
+
+    it("pages from a higher rank to a lower one", async () => {
+      await listing("https://name.example/x", { serviceName: "weather" });
+      await listing("https://description.example/x", { description: "weather" });
+      const [first] = await search("weather", { limit: 1 });
+      expect(first?.resource.resource).toBe("https://name.example/x");
+      const next = await urls("weather", { after: { rank: first!.rank, key: first!.key } });
+      expect(next).toEqual(["https://description.example/x"]);
+    });
+
+    it("searches the stored listing's words after an update", async () => {
+      const url = "https://a.example/x";
+      await upsert({ key: key(url), resource: resource(url, { description: "weather" }) }, 1);
+      await upsert({ key: key(url), resource: resource(url, { description: "stocks" }) }, 2);
+      expect(await urls("weather")).toEqual([]);
+      expect(await urls("stocks")).toEqual([url]);
     });
   });
 }
