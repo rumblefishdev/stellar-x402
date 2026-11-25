@@ -33,6 +33,9 @@ COPY --from=build /out ./
 # The search model's server and its files, run as a container of its own from this image.
 COPY --from=build /out-search-model /search-model
 ENV MODEL_DIR=/search-model/model
+# onnxruntime's official builds send usage telemetry to Microsoft from every start; today only
+# the network without a way out and the missing CA bundle stop it.
+ENV ORT_DISABLE_TELEMETRY=1
 USER node
 # The commit this image is built from; `/health` reports it. Last, so the layers above stay cached.
 ARG GIT_COMMIT

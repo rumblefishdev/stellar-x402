@@ -430,10 +430,15 @@ can. That is expected; a fallback outside a restart is not.
 
 2. In Logs Insights on `/x402/production/app`, the `search_words_only` lines around that time:
    their `error` is the cause, a timeout or the model's answer.
-3. A container that is down stays down until `x402@production` starts again: no restart policy
-   brings it back. Restart that unit, which drains, so plan it like a deploy. The facilitator
-   starts only once the model is healthy, so read the model's log first: a model that can't
-   start keeps `/settle` down too.
+3. A container that exits, out of memory too, comes back by itself (`restart: unless-stopped`).
+   One that runs but doesn't answer, `unhealthy` in `ps`, stays so: nothing restarts it, since
+   a restart of an overloaded model would drop its queue. Many long searches at once slow it as
+   well; fallbacks that end with the burst were load, not a hang. A hung one: restart the model
+   alone, which leaves the facilitator and `/settle` up.
+
+   ```sh
+   sudo /usr/local/libexec/x402/x402-compose production restart search-model
+   ```
 
 ### rpc-stalled
 

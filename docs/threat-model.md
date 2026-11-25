@@ -779,3 +779,16 @@ search model can't be used.
   matched 39,170 of them and took 1.8–2.2 s, the pool's statement timeout, so such a query may
   answer 500 at that size. It keeps no limit of its own: once the catalog passes about 10,000
   listings, a pool of its own for search is the next step.
+
+#### Load on the search model
+
+- **Attack:** A client sends many long queries at once, so the model, which embeds one query at a
+  time, falls behind. One query of 2,000 characters took 0.12 s on the model's 1 CPU; 40 sent at
+  once kept its health check waiting 3.25 s (both on an arm64 build of the image).
+- **Mitigation:** The model runs in its own container, capped at 1 CPU and 768 MiB, so it never
+  takes the facilitator's memory, and inside `/discovery/*`'s per-IP limit (ADR 0007). A query
+  that waits past 2 s is answered by words alone with `partialResults: true`, and
+  `search-words-only` fires. Nothing restarts an overloaded model: a restart would drop every
+  query in its queue and leave search on words alone while the model loads, about 12 s.
+- **Residual risk:** A client within its limit can keep search on words alone for every client,
+  and a hung model stays hung until an operator restarts it.
