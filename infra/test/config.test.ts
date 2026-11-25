@@ -65,15 +65,16 @@ describe("envs/production.json", () => {
     });
   });
 
-  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-09 (decision 70)", () => {
+  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-25 (decision 70)", () => {
     expect(production().watch.protocol).toEqual({
       "stellar:testnet": {
         horizonUrl: "https://horizon-testnet.stellar.org",
         expected: 30,
         supported: 30,
       },
-      // Mainnet runs 29 and its Core supports 30, which testnet runs and 0111's SDK reads.
-      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 29, supported: 30 },
+      // Mainnet moved to 30 on 2026-11-23 (protocol-changed fired at 17:11 UTC): the version testnet
+      // runs and 0111's SDK reads.
+      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 30, supported: 30 },
     });
   });
 
