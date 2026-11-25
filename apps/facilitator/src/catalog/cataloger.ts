@@ -90,8 +90,13 @@ export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"
    * learns the listing's keys from the 402, then each key gets the check a payment would start, on
    * that same 402 unless the seller declares another method or an MCP tool. `requests` counts the
    * requests sent, for the seed's pace. Never rejects: every failure is a result with its reason.
+   * `disallowed` is the host's robots.txt: a second request it disallows is not sent.
    */
-  seed(url: string, method: string): Promise<{ results: SeedResult[]; requests: number }>;
+  seed(
+    url: string,
+    method: string,
+    disallowed: (url: string) => boolean,
+  ): Promise<{ results: SeedResult[]; requests: number }>;
 };
 
 /**
@@ -472,7 +477,7 @@ export function createCataloger({
     async drain() {
       await Promise.allSettled([...inFlight]);
     },
-    async seed(url, method) {
+    async seed(url, method, disallowed) {
       const fields = { url, origin: "seed" };
       let requests = 1;
       try {
@@ -507,6 +512,23 @@ export function createCataloger({
           const key = listing.entry.key as CatalogKey;
           // The probe answered this method over HTTP: it is the check's answer, not asked again.
           const answered = listing.input.type === "http" && key.method === method;
+          // The 402's query parameters make a URL of their own, which robots.txt may disallow.
+          const asked =
+            listing.input.type === "http"
+              ? bazaarLib.sellerRequest(url, { ...listing.input, method: key.method }).url
+              : url;
+          if (!answered && disallowed(asked)) {
+            results.push({
+              url,
+              method: key.method,
+              network,
+              payTo,
+              outcome: "skipped",
+              reason: "robots",
+              detail: asked,
+            });
+            continue;
+          }
           if (!answered) requests++;
           const ended = await checkSeller({ ...fields, network }, "seed", {
             url,
