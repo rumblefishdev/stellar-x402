@@ -1775,8 +1775,10 @@ while the VM can't be reached. node_exporter's textfile collector reads the host
 `/var/lib/x402/textfile`: `host-probe.prom`, the gauges of its last run, replaced whole each
 minute, so its age is the probe's; and one file per counter (`watchdog_restarts_total.prom`,
 `facilitator_failures_total.prom`), the total since the file was made, written when the event
-happens and rewritten by every run, so every file's age is the probe's. The facilitator's
-`/metrics` joins at the switch (0139 step 7). ClickHouse's own endpoint is on, but listens on
+happens and rewritten by every run, so every file's age is the probe's. The agent scrapes the
+facilitator too, at `facilitator:9464` on the `x402-metrics` network the facilitator joins:
+`METRICS_PORT` in `deploy/production/compose.yaml` sets the port, and unset, the facilitator
+serves no `/metrics` (0139). ClickHouse's own endpoint is on, but listens on
 127.0.0.1 inside `app-clickhouse-1` (the explorer's
 `crates/db-clickhouse/config.d/prometheus.xml`), so the agent can't reach it yet: only
 `docker exec` or a scraper in that container's network namespace can. The VM lets only the CNs in
@@ -1802,8 +1804,22 @@ cd /srv/x402/metrics && sudo docker compose exec -T agent \
 ```
 
 On the VM, in Prometheus (`ssh -L 9090:localhost:9090 monitoring`), each of these answers for
-`ch-prod-01`: `up{job="node"} == 1`, `node_textfile_scrape_error == 0`, and
-`time() - node_textfile_mtime_seconds < 120` for all three of the probe's files.
+`ch-prod-01`: `up{job="node"} == 1`, `up{job="facilitator"} == 1`,
+`node_textfile_scrape_error == 0`, and `time() - node_textfile_mtime_seconds < 120` for all three
+of the probe's files.
+
+**The facilitator needs the agent's network.** `x402-metrics` is the agent's project's network,
+external to production's, so the facilitator can't start where the agent's project never ran, or
+after a `docker compose down` of it (`systemctl stop` is `compose stop`, which keeps the network).
+`x402@production` then fails at once with `network x402-metrics declared as external, but could
+not be found` in `/var/log/x402/production/facilitator.err.log`, five times, and stays `failed`
+(`StartLimitBurst`): starting the agent later doesn't bring it back. The fix:
+
+```sh
+sudo systemctl start x402-metrics
+sudo docker network inspect x402-metrics --format '{{.Name}}'   # x402-metrics
+sudo systemctl reset-failed x402@production && sudo systemctl start x402@production
+```
 
 ## Not here yet
 

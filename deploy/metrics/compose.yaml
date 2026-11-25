@@ -54,7 +54,7 @@ volumes:
 
 networks:
   # Its subnet set, as production's are (compose.yaml of the production environment): Docker's
-  # pool on the server has none left. The facilitator joins it at the switch (0139 step 7).
+  # pool on the server has none left. The facilitator joins it for its /metrics (0139).
   metrics:
     name: x402-metrics
     ipam:

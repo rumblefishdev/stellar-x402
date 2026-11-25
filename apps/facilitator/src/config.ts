@@ -137,6 +137,11 @@ const envSchema = z
     ),
     /** 0 lets the system pick a free port; the `listening` log line names it. */
     PORT: int(0, 65_535).default("4021"),
+    /**
+     * `GET /metrics` for the metrics agent, on its own listener off the public port (ADR 0011,
+     * "Metrics"). Unset, nothing listens: the tests and a local run need none. 0 picks a free port.
+     */
+    METRICS_PORT: int(0, 65_535).optional(),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
     /** The commit the image was built from (its Dockerfile); unset on a local run. */
     GIT_COMMIT: z.string().optional(),
@@ -453,6 +458,7 @@ const SEARCH_MODEL_TIMEOUT_MS = 2_000;
 export interface Config {
   network: (typeof STELLAR_NETWORKS)[keyof typeof STELLAR_NETWORKS];
   port: number;
+  metricsPort?: number;
   logLevel: "debug" | "info" | "warn" | "error";
   gitCommit?: string;
   rpcUrls: string[];
@@ -592,6 +598,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   return {
     network: e.NETWORK,
     port: e.PORT,
+    ...(e.METRICS_PORT !== undefined && { metricsPort: e.METRICS_PORT }),
     logLevel: e.LOG_LEVEL,
     gitCommit: e.GIT_COMMIT,
     rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],

@@ -15,12 +15,6 @@ export type MetricKind = "counter" | "gauge";
 export type Unit = "Count" | "Seconds" | "None" | "Percent";
 /** `network` puts `network` in every set (added by the writer); `process` never carries it. */
 export type Scope = "network" | "process";
-/**
- * `eager-first`: the first increment of a series in a window is written at once, later ones add
- * to the minute line (an Event alarm's deciding point leaves before a crash). It only governs the
- * facilitator's writer; the other namespaces are `aggregated`.
- */
-export type Emit = "eager-first" | "aggregated";
 
 /**
  * One CloudWatch dimension set. A line carries every set whose `when` matches its labels (each
@@ -59,7 +53,6 @@ export interface MetricDef {
    * switch. A field not listed here stays out of the Prometheus series (its home is the app line).
    */
   readonly fieldValues?: Readonly<Record<string, readonly string[]>>;
-  readonly emit: Emit;
 }
 
 /** Every EMF line starts with this; #113's agent filter shares it. */
@@ -84,7 +77,6 @@ export const CATALOG = [
     values: { result: ["success", "error", "other"] },
     fields: ["reason", "replay"],
     fieldValues: { replay: ["true", "false", "other"] },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -104,7 +96,6 @@ export const CATALOG = [
         "other",
       ],
     },
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -113,7 +104,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -122,7 +112,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -133,7 +122,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["state"],
     fieldValues: { state: ["success", "failed", "other"] },
-    emit: "eager-first",
   },
   // 0087: our inner transaction landed under someone else's fee bump, or bare. Free for us, a
   // warning only: no alarm.
@@ -146,7 +134,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["state"],
     fieldValues: { state: ["success", "failed", "other"] },
-    emit: "aggregated",
   },
   // 0141: another transaction used the payer's nonce first. `window` says where it was seen:
   // `verify` for a refusal in `/verify` or in `/settle`'s re-check, `settle` for our transaction or
@@ -160,7 +147,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["window"],
     fieldValues: { window: ["verify", "settle", "other"] },
-    emit: "aggregated",
   },
   // The OpenBao signer holds one network's keys (openbao-signer.ts logs its `network`).
   {
@@ -184,7 +170,6 @@ export const CATALOG = [
       ],
       step: ["sign", "check", "other"],
     },
-    emit: "eager-first",
   },
   // From the submitter's `onEvent` in main.ts: one pool per network.
   {
@@ -211,7 +196,6 @@ export const CATALOG = [
       ],
     },
     fields: ["status"],
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -220,7 +204,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -229,7 +212,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -240,7 +222,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["signed"],
     fieldValues: { signed: ["true", "false", "other"] },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -251,7 +232,6 @@ export const CATALOG = [
     // `state` only for `expired`: a payment that never landed, which `settlement-expired` reads.
     sets: [{ dims: [] }, { dims: ["state"], when: { state: ["expired"] } }],
     values: { state: ["rejected", "success", "failed", "expired", "other"] },
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -277,7 +257,6 @@ export const CATALOG = [
         "other",
       ],
     },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -286,7 +265,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -297,7 +275,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["hook"],
     fieldValues: { hook: ["beforeSubmit", "onFinal", "extensionResponses", "onSuccess", "other"] },
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -306,7 +283,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -315,7 +291,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // The lease is one network's channel set (lease.ts, `leaseName(network)`).
   {
@@ -327,7 +302,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["held"],
     fieldValues: { held: ["true", "false", "other"] },
-    emit: "aggregated",
   },
   // The pruner deletes from whole tables shared by every network (rate_limits, spend_*), not one
   // network's rows, so it is process-scoped.
@@ -349,7 +323,6 @@ export const CATALOG = [
         "other",
       ],
     },
-    emit: "aggregated",
   },
   // The search card rewrite (0120) fills one table shared by both networks, so process-scoped.
   {
@@ -359,7 +332,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // A card's vector the search model failed to give (0120): the same shared table.
   {
@@ -369,7 +341,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // A search answered by words alone because the model couldn't be used (0120); the route serves
   // every network.
@@ -380,7 +351,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -407,7 +377,6 @@ export const CATALOG = [
       ],
       origin: ["settle", "resolved", "other"],
     },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -435,7 +404,6 @@ export const CATALOG = [
         "other",
       ],
     },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -446,7 +414,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["origin"],
     fieldValues: { origin: ["settle", "resolved", "other"] },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -457,7 +424,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["origin"],
     fieldValues: { origin: ["settle", "resolved", "other"] },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -468,7 +434,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["origin"],
     fieldValues: { origin: ["settle", "resolved", "other"] },
-    emit: "aggregated",
   },
   // An HTTP route's query check; `discoveryResources` takes a network only for its answer.
   {
@@ -478,7 +443,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
 
   // ---- x402-facilitator, from 0024 (#105): the spend policy is per network ----
@@ -493,7 +457,6 @@ export const CATALOG = [
     sets: [{ dims: ["breaker"] }],
     // policy.ts BreakerKind.
     values: { breaker: ["payer", "pay_to", "asset", "other"] },
-    emit: "eager-first",
   },
   // `payer` and `pay_to` write no metric: one buyer or seller near its budget is the budget
   // working (G-alarm-list), as is an account near its own (0107, which logs no nearing for it
@@ -506,7 +469,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: [{ dims: [], when: { budget: ["asset", "other", "free", "global"] } }],
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -517,7 +479,6 @@ export const CATALOG = [
     sets: [{ dims: ["fault"], when: { fault: ["ours"] } }],
     // policy.ts FAULT_LABELS: fault classes, never addresses.
     values: { fault: ["payer", "pay_to", "asset", "ours", "other"] },
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -528,7 +489,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["state"],
     fieldValues: { state: ["success", "failed", "other"] },
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -539,7 +499,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["op"],
     fieldValues: { op: ["breaker", "reserve", "release", "plan", "other"] },
-    emit: "eager-first",
   },
   {
     namespace: FAC,
@@ -568,7 +527,6 @@ export const CATALOG = [
         "other",
       ],
     },
-    emit: "aggregated",
   },
   // The floor reads one network's fee account (balance-floor.ts).
   {
@@ -578,7 +536,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
 
   // ---- x402-facilitator, new in #112 ----
@@ -616,7 +573,6 @@ export const CATALOG = [
         "other",
       ],
     },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -626,7 +582,6 @@ export const CATALOG = [
     scope: "network",
     sets: [{ dims: ["outcome"] }],
     values: { outcome: ["listed", "failed", "other"] },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -635,7 +590,6 @@ export const CATALOG = [
     unit: "Seconds",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -645,7 +599,6 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["channels", "busy"],
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -654,7 +607,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // pool_queued's `channels` and `busy` as series of their own (0139 step 4): a number as a label
   // would make a new series per value. Registered in main.ts at the switch, so EMF bills nothing.
@@ -665,7 +617,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -674,7 +625,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -685,7 +635,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["rpc"],
     fieldValues: { rpc: ["0", "1", "2", "other"] },
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -694,7 +643,6 @@ export const CATALOG = [
     unit: "Seconds",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -703,7 +651,6 @@ export const CATALOG = [
     unit: "Seconds",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: FAC,
@@ -714,7 +661,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["state"],
     fieldValues: { state: ["success", "failed", "other"] },
-    emit: "aggregated",
   },
   // 0089: declared, emitter not yet on develop
   {
@@ -724,7 +670,6 @@ export const CATALOG = [
     unit: "Seconds",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
 
   // ---- x402-host: the host probe and the agent (#113), one host ----
@@ -735,7 +680,6 @@ export const CATALOG = [
     unit: "None",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: HOST,
@@ -744,7 +688,6 @@ export const CATALOG = [
     unit: "None",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: HOST,
@@ -753,7 +696,6 @@ export const CATALOG = [
     unit: "Seconds",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: HOST,
@@ -762,7 +704,6 @@ export const CATALOG = [
     unit: "Seconds",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: HOST,
@@ -771,7 +712,6 @@ export const CATALOG = [
     unit: "Seconds",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // Days, negative after expiry; CloudWatch has no day unit. Its EMF line is the CloudWatch
   // agent's certificate only; the probe's textfile has one sample per certificate (0139 step 3).
@@ -784,7 +724,6 @@ export const CATALOG = [
     sets: PLAIN,
     fields: ["certificate"],
     fieldValues: { certificate: ["cloudwatch-agent", "metrics-agent", "other"] },
-    emit: "aggregated",
   },
   {
     namespace: HOST,
@@ -793,7 +732,6 @@ export const CATALOG = [
     unit: "None",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // Since the signing helper last wrote the agent's credentials file; it runs hourly.
   {
@@ -803,7 +741,6 @@ export const CATALOG = [
     unit: "Seconds",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: HOST,
@@ -812,7 +749,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // An end of x402@<env> other than `success`, written by its ExecStopPost: a crash, a failed
   // start, a drain cut short, a dockerd crash, the watchdog's kill of a hung process.
@@ -823,7 +759,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: HOST,
@@ -832,7 +767,6 @@ export const CATALOG = [
     unit: "Percent",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // `path` is the mount point, under the name the agent's disk plugin gives it: the agent can't
   // rename a dimension. One mount: `/` holds everything of ours, OpenBao's audit volume too.
@@ -844,7 +778,6 @@ export const CATALOG = [
     scope: "process",
     sets: [{ dims: ["path"] }],
     values: { path: ["/"] },
-    emit: "aggregated",
   },
 
   // ---- x402-watch: PutMetricData from the uptime probes and the off-server check (#115) ----
@@ -855,7 +788,6 @@ export const CATALOG = [
     unit: "None",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // The same probe on the portal's backend (`/health`) and on the API hub's backend through the
   // explorer's CloudFront (`/api/hub/me`), one metric each (0106 decision 21).
@@ -866,7 +798,6 @@ export const CATALOG = [
     unit: "None",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: WATCH,
@@ -875,7 +806,6 @@ export const CATALOG = [
     unit: "None",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: WATCH,
@@ -884,7 +814,6 @@ export const CATALOG = [
     unit: "None",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // The network's ledger protocol and the highest one the Stellar Core behind its Horizon
   // supports, from Horizon's root, so a coming upgrade and a done one both show (0027 decision 70).
@@ -895,7 +824,6 @@ export const CATALOG = [
     unit: "None",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: WATCH,
@@ -904,7 +832,6 @@ export const CATALOG = [
     unit: "None",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   {
     namespace: WATCH,
@@ -913,7 +840,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // Effects seen since the cursor: a count per run.
   {
@@ -923,7 +849,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "network",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // `GetSecretValue` events not counted before: one AWS account, no network.
   {
@@ -933,7 +858,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
   // Upstream x402 files the conformance gate's suite rests on that differ from its pin (task 0029).
   {
@@ -943,7 +867,6 @@ export const CATALOG = [
     unit: "Count",
     scope: "process",
     sets: PLAIN,
-    emit: "aggregated",
   },
 ] as const satisfies readonly MetricDef[];
 
@@ -993,11 +916,6 @@ const BY_NAME: ReadonlyMap<string, MetricDef> = new Map(CATALOG.map((m) => [m.na
 export function byName(name: string): MetricDef | undefined {
   return BY_NAME.get(name);
 }
-
-/** The names written eager-first: the facilitator metrics an Event-shape alarm reads. */
-export const eagerNames: ReadonlySet<string> = new Set(
-  CATALOG.filter((m) => m.emit === "eager-first").map((m) => m.name),
-);
 
 /**
  * A set as it is written: `network` first in `dims` for a `network`-scoped metric, `when` as the

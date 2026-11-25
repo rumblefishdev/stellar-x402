@@ -17,27 +17,9 @@ import {
   type ProcessCounterName,
   type ProcessGaugeName,
   byName,
-  eagerNames,
   effectiveSets,
   seriesDims,
 } from "../src/index.js";
-
-/** The facilitator metrics an Event-shape alarm reads (G-alarm-list), written eager-first. */
-const EVENT_METRICS = [
-  "spend_breaker_opened_total",
-  "spend_budget_nearing_total",
-  "settlement_record_failures_total",
-  "spend_store_failures_total",
-  "settlement_refused_after_verify_total",
-  "settlement_history_gone_total",
-  "settlement_landed_after_expired_total",
-  "signer_failures_total",
-  "spend_failure_attributed_total",
-  "spend_commit_unmatched_total",
-  "settlement_reconciled_total",
-  "settlement_submit_failures_total",
-  "settlement_hook_failures_total",
-];
 
 const ALL: readonly MetricDef[] = CATALOG;
 const FACILITATOR = ALL.filter((m) => m.namespace === "x402-facilitator");
@@ -175,11 +157,6 @@ describe("CATALOG", () => {
       backup_secret_reads: "process",
       upstream_files_changed: "process",
     });
-  });
-
-  test("emit is eager-first for exactly the Event-alarm metrics", () => {
-    expect(eagerNames).toEqual(new Set(EVENT_METRICS));
-    for (const m of ALL) expect(["eager-first", "aggregated"]).toContain(m.emit);
   });
 
   test("units are one of the allowed EMF units", () => {

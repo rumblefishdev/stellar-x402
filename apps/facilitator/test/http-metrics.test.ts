@@ -129,7 +129,7 @@ describe("http_requests_total", () => {
     expect(refused.status).toBe(401);
     await vi.waitFor(() => expect(count("/settle", "401")).toBe(1));
     expect(counted).toEqual([{ route: "/settle", status: "401" }]);
-    // Outside the list, the EMF line would write it as `other` and report an unknown value.
+    // Outside the list, the writer would write it as `other` and report an unknown value.
     expect(byName("http_requests_total")?.values?.status).toContain("401");
   });
 

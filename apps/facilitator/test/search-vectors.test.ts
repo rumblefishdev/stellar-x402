@@ -17,16 +17,6 @@ import { meaningText, readCards, sameVector, setVector, sha256, unitVector } fro
 
 // Every case here needs the `vector` extension (pgvector) in the test database.
 
-// `main()`'s EMF lines off stdout: `LOG_LEVEL` quiets the logger only.
-vi.mock("../src/adapters/emf-metrics.js", async (importActual) => {
-  const actual = await importActual<typeof import("../src/adapters/emf-metrics.js")>();
-  return {
-    ...actual,
-    emfMetrics: (opts: Parameters<typeof actual.emfMetrics>[0]) =>
-      actual.emfMetrics({ write: () => {}, ...opts }),
-  };
-});
-
 const MODEL = "granite-test";
 
 /** A vector of its own for each text, so a stored vector names the text it was made from. */
