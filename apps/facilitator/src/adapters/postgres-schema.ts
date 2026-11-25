@@ -381,21 +381,13 @@ CREATE VIEW account_usage AS
 `,
   },
   {
-    // 0154: one row per settled payment for a listing, which the search's quality score counts
-    // (ADR 0014). A new, empty table: the release before never reads it.
-    name: "0019_catalog_payments",
+    // 0154: the listing a settled payment paid for, so the search's quality score counts its payer
+    // (ADR 0014). The rest of the key, the payer and the asset are already in the row. Nullable
+    // columns without a default change only the table's metadata (16.5 ms under its lock at
+    // 600,000 rows, measured locally on 18), and the release before never reads them.
+    name: "0019_settlement_listing",
     sql: `
-CREATE TABLE catalog_payments (
-  settlement_key text PRIMARY KEY,
-  network text NOT NULL,
-  pay_to text NOT NULL,
-  method text NOT NULL,
-  resource_url text NOT NULL,
-  payer text NOT NULL,
-  asset text NOT NULL,
-  amount text NOT NULL,
-  at bigint NOT NULL
-);
+ALTER TABLE settlements ADD COLUMN listing_method text, ADD COLUMN listing_url text;
 `,
   },
 ];

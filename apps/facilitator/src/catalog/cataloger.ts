@@ -265,17 +265,11 @@ export function createCataloger({
       const key = echoed.key as CatalogKey;
       const tried = { ...attempt, key, contentHash: contentHash(echoed.resource) };
       known = { ...known, ...tried };
-      // The search's quality score counts this payer (ADR 0014), so the row is written whether or
-      // not the copy changes the listing. A failed write loses one payer, and cataloging goes on.
+      // The search's quality score counts this payer (ADR 0014), so the settlement is linked to its
+      // listing whether or not the copy changes the listing. A failed link loses one payer, and
+      // cataloging goes on.
       try {
-        await store.recordPayment({
-          key,
-          payer: record.payer,
-          settlementKey: record.key,
-          asset: record.paymentRequirements.asset,
-          amount: record.paymentRequirements.amount,
-          at: now(),
-        });
+        await store.linkPayment({ settlementKey: record.key, key });
       } catch (error) {
         report(() => logger.error("catalog_payment_write_failed", { ...fields, error }));
       }

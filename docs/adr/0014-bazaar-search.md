@@ -144,14 +144,14 @@ The measurements are in
   - An empty description is a missing one, an empty one or one of spaces only. A short
     description gets no penalty.
   - q is computed when the search runs, from the payments stored at that moment.
-- **How a payment reaches its listing.** A table holds one row per settled payment that names a
-  listing: the settlement's key, the network, `payTo`, method, listing URL, payer, the paid asset and
-  amount, and the time the row is written. The asset is kept because the payment's terms come from
-  its caller, not from the listing: a seller can pay itself in a token its listing never offers. The settlement's key makes the row unique, since a success can be reported twice, by settle and by
-  reconcile. The cataloger writes the row right after it derives the listing's key from the
-  payment, also when the listing's copy is unchanged. A settlement recorded twice keeps its first
-  row. Rows are kept; the count reads the last 30
-  days. The table starts empty when it ships. A failed write is logged.
+- **How a payment reaches its listing.** The settlement's row already holds the network, `payTo`,
+  payer and paid asset; it gains the listing's method and URL. The cataloger writes them right after
+  it derives the listing's key from the payment, also when the listing's copy is unchanged. A
+  success reported twice, by settle and by reconcile, writes the same values. The asset counts
+  because a payment's terms come from its caller, not from the listing: a seller can pay itself in
+  a token its listing never offers. Settlements are kept; the count reads the last 30 days.
+  Settlements from before the release name no listing, so the count starts empty. A failed write
+  is logged.
 - **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
   0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
 - **When the ranking is served.** There is no separate curation-only mode. 0135's run decides

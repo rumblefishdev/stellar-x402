@@ -14,7 +14,7 @@ export type {
   CatalogEntry,
   CatalogKey,
   CatalogPage,
-  CatalogPayment,
+  CatalogPaymentLink,
   CatalogQuery,
   CatalogSearch,
   CatalogSearchHit,

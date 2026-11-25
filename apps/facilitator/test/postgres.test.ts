@@ -1356,7 +1356,7 @@ describe("PostgreSQL stores", () => {
           "0016_catalog_seed",
           "0017_catalog_search",
           "0018_account_plans",
-          "0019_catalog_payments",
+          "0019_settlement_listing",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1394,7 +1394,7 @@ describe("PostgreSQL stores", () => {
         "0016_catalog_seed",
         "0017_catalog_search",
         "0018_account_plans",
-        "0019_catalog_payments",
+        "0019_settlement_listing",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
@@ -1614,115 +1614,94 @@ describe("PostgreSQL stores", () => {
     expect(rows).toEqual([{ key_version: CATALOG_KEY_VERSION }]);
   });
 
-  describe("the payments of a listing (0154)", () => {
-    const key = (resourceUrl = "https://seller.example.com/data") => ({
+  describe("the listing of a settlement (0154)", () => {
+    const key = {
       network: "stellar:testnet" as const,
       payTo: "GPAYTO",
       method: "GET",
-      resourceUrl,
-    });
-    const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
-    const payment = (settlementKey: string, at = 1, resourceUrl?: string) => ({
-      key: key(resourceUrl),
-      payer: "GPAYER",
-      settlementKey,
-      at,
-      asset: USDC,
-      amount: "10000",
-    });
-    const rows = async () =>
-      (
-        await pool.query(
-          `SELECT settlement_key, network, pay_to, method, resource_url, payer, at, asset, amount
-           FROM catalog_payments ORDER BY settlement_key`,
-        )
-      ).rows;
-
-    it("stores each settled payment as one row with its listing key, payer, settlement key and time (behaviour 1)", async () => {
-      const { catalog } = await stores();
-      await catalog.recordPayment(payment("stellar:testnet:GPAYER:1", 1_000));
-      await catalog.recordPayment(payment("stellar:testnet:GPAYER:2", 2_000));
-      await catalog.recordPayment(
-        payment("stellar:testnet:GPAYER:3", 3_000, "https://seller.example.com/other"),
-      );
-      const row = (n: number, at: number, resourceUrl = "https://seller.example.com/data") => ({
-        settlement_key: `stellar:testnet:GPAYER:${n}`,
-        network: "stellar:testnet",
-        pay_to: "GPAYTO",
-        method: "GET",
-        resource_url: resourceUrl,
-        payer: "GPAYER",
-        at: String(at),
-        asset: USDC,
-        amount: "10000",
+      resourceUrl: "https://seller.example.com/data",
+    };
+    /** Every settlements row, every column, in key order. */
+    const rows = async (on = pool) =>
+      (await on.query<Record<string, unknown>>("SELECT * FROM settlements ORDER BY key")).rows;
+    /** Two settlements: the first a success, the second still claimed. */
+    const twoSettled = async (settlements: Stores["settlements"]) => {
+      await settlements.claim(settlement("1"));
+      await settlements.transition(settlement("1").key, "claimed", {
+        state: "success",
+        updatedAt: 3_000,
       });
+      await settlements.claim(settlement("2"));
+    };
+
+    it("adds nullable listing_method and listing_url to settlements, NULL on rows written before it (decision 1)", async () => {
+      const fresh = `${schema}_0018`;
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      await pool.query(`CREATE SCHEMA ${fresh}`);
+      const old = poolFor(fresh, 2);
+      try {
+        const before = MIGRATIONS.findIndex((m) => m.name === "0019_settlement_listing");
+        expect(before).toBe(18);
+        await migrate(old, 0, MIGRATIONS.slice(0, before));
+        // Written by the release before it.
+        await twoSettled(postgresStores(old).settlements);
+        expect(await migrate(old)).toEqual(["0019_settlement_listing"]);
+        expect(
+          (await rows(old)).map(({ key, listing_method, listing_url }) => ({
+            key,
+            listing_method,
+            listing_url,
+          })),
+        ).toEqual([
+          { key: settlement("1").key, listing_method: null, listing_url: null },
+          { key: settlement("2").key, listing_method: null, listing_url: null },
+        ]);
+        const { rows: columns } = await old.query(
+          `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+           WHERE table_schema = current_schema() AND table_name = 'settlements'
+             AND column_name IN ('listing_method', 'listing_url')
+           ORDER BY column_name`,
+        );
+        expect(columns).toEqual([
+          { column_name: "listing_method", data_type: "text", is_nullable: "YES" },
+          { column_name: "listing_url", data_type: "text", is_nullable: "YES" },
+        ]);
+      } finally {
+        await old.end();
+        await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      }
+    });
+
+    it("sets the listing's method and URL on that settlement's row, and nothing else on any row (decision 2)", async () => {
+      const { settlements, catalog } = await stores();
+      await twoSettled(settlements);
+      const [first, second] = await rows();
+      await catalog.linkPayment({ settlementKey: settlement("1").key, key });
       expect(await rows()).toEqual([
-        row(1, 1_000),
-        row(2, 2_000),
-        row(3, 3_000, "https://seller.example.com/other"),
+        { ...first, listing_method: "GET", listing_url: "https://seller.example.com/data" },
+        second,
       ]);
     });
 
-    it("keeps one row for a settlement recorded twice, by settle and by reconcile, in turn or at once, the first write kept (behaviours 2, 7)", async () => {
-      const { catalog } = await stores();
-      await catalog.recordPayment(payment("stellar:testnet:GPAYER:1", 1_000));
+    it("leaves the same values when settle and reconcile link one settlement, in turn or at once (decision 2)", async () => {
+      const { settlements, catalog } = await stores();
+      await twoSettled(settlements);
+      const link = { settlementKey: settlement("1").key, key };
+      await catalog.linkPayment(link);
+      const linked = await rows();
+      await expect(catalog.linkPayment(link)).resolves.toBeUndefined();
+      await Promise.all(Array.from({ length: 10 }, () => catalog.linkPayment(link)));
+      expect(await rows()).toEqual(linked);
+    });
+
+    it("rejects a link to a settlement no row has, and writes nothing (decision 2)", async () => {
+      const { settlements, catalog } = await stores();
+      await twoSettled(settlements);
+      const before = await rows();
       await expect(
-        catalog.recordPayment({
-          ...payment("stellar:testnet:GPAYER:1", 2_000, "https://seller.example.com/other"),
-          payer: "GOTHERPAYER",
-          asset: "CSELFISSUED",
-          amount: "1",
-        }),
-      ).resolves.toBeUndefined();
-      await Promise.all(
-        Array.from({ length: 10 }, () =>
-          catalog.recordPayment(payment("stellar:testnet:GPAYER:2", 3_000)),
-        ),
-      );
-      expect((await rows()).map((row) => row.settlement_key)).toEqual([
-        "stellar:testnet:GPAYER:1",
-        "stellar:testnet:GPAYER:2",
-      ]);
-      // The first write stands: its time and its other fields (behaviour 7).
-      expect((await rows())[0]).toEqual({
-        settlement_key: "stellar:testnet:GPAYER:1",
-        network: "stellar:testnet",
-        pay_to: "GPAYTO",
-        method: "GET",
-        resource_url: "https://seller.example.com/data",
-        payer: "GPAYER",
-        at: "1000",
-        asset: USDC,
-        amount: "10000",
-      });
-    });
-
-    it("stores the paid requirement's asset and amount as recorded, an asset no listing offers and a 39-digit amount included (behaviour 8)", async () => {
-      const { catalog } = await stores();
-      // A self-issued token's contract id: stored as it came, filtering is the count's job.
-      const selfIssued = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
-      // The largest i128 amount: kept to the digit, never as a float.
-      const huge = "170141183460469231731687303715884105727";
-      await catalog.recordPayment({ ...payment("stellar:testnet:GPAYER:1"), amount: "1" });
-      await catalog.recordPayment({
-        ...payment("stellar:testnet:GPAYER:2"),
-        asset: selfIssued,
-        amount: huge,
-      });
-      expect((await rows()).map(({ asset, amount }) => ({ asset, amount }))).toEqual([
-        { asset: USDC, amount: "1" },
-        { asset: selfIssued, amount: huge },
-      ]);
-      const { rows: columns } = await pool.query(
-        `SELECT column_name, data_type, is_nullable FROM information_schema.columns
-         WHERE table_schema = current_schema() AND table_name = 'catalog_payments'
-           AND column_name IN ('asset', 'amount')
-         ORDER BY column_name`,
-      );
-      expect(columns).toEqual([
-        { column_name: "amount", data_type: "text", is_nullable: "NO" },
-        { column_name: "asset", data_type: "text", is_nullable: "NO" },
-      ]);
+        catalog.linkPayment({ settlementKey: settlement("9").key, key }),
+      ).rejects.toThrow();
+      expect(await rows()).toEqual(before);
     });
   });
 });

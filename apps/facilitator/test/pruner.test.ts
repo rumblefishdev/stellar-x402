@@ -95,37 +95,6 @@ describe("pruner", () => {
     expect(rows).toEqual([{ at: String(NOW - 30 * DAY) }]);
   });
 
-  it("never deletes the payments of a listing while it prunes listing attempts (0154 behaviour 5)", async () => {
-    const { catalog, catalogAttempts } = db.stores();
-    const key = {
-      network: "stellar:testnet" as const,
-      payTo: "GPAYTO",
-      method: "GET",
-      resourceUrl: "https://seller.example.com/data",
-    };
-    await catalog.recordPayment({
-      key,
-      payer: "GPAYER",
-      settlementKey: "stellar:testnet:GPAYER:1",
-      asset: "CUSDC",
-      amount: "10000",
-      at: NOW - 365 * DAY,
-    });
-    await catalogAttempts.record({
-      at: NOW - 365 * DAY,
-      network: "stellar:testnet",
-      payTo: "GPAYTO",
-      payer: "GPAYER",
-      key,
-      stage: "payment",
-      outcome: "unchanged",
-    });
-    await createPruner(deps({ catalogAttempts })).runOnce();
-    expect((await db.pool.query("SELECT at FROM catalog_attempts")).rows).toEqual([]);
-    const { rows } = await db.pool.query("SELECT settlement_key FROM catalog_payments");
-    expect(rows).toEqual([{ settlement_key: "stellar:testnet:GPAYER:1" }]);
-  });
-
   const refusedAt = (nonce: string, createdAt: number) => ({
     key: `stellar:testnet:GPAYER:${nonce}` as const,
     network: "stellar:testnet" as const,
@@ -150,6 +119,35 @@ describe("pruner", () => {
     await settlements.claim(refusedAt("3", NOW - DAY));
     await createPruner(deps({ settlements })).runOnce();
     expect(await nonces()).toEqual(["2", "3"]);
+  });
+
+  it("keeps a success settlement's listing through a prune run (0154)", async () => {
+    const { settlements, catalog } = db.stores();
+    const paid = refusedAt("1", NOW - 365 * DAY);
+    await settlements.claim(paid);
+    await settlements.transition(paid.key, "claimed", { state: "success", updatedAt: NOW });
+    await catalog.linkPayment({
+      settlementKey: paid.key,
+      key: {
+        network: "stellar:testnet",
+        payTo: "GPAYTO",
+        method: "GET",
+        resourceUrl: "https://seller.example.com/data",
+      },
+    });
+    await settlements.refuse(refusedAt("2", NOW - DAY), { errorReason: FEE }, [], NOW);
+    await createPruner(deps({ settlements })).runOnce();
+    const { rows } = await db.pool.query(
+      "SELECT nonce, state, listing_method, listing_url FROM settlements",
+    );
+    expect(rows).toEqual([
+      {
+        nonce: "1",
+        state: "success",
+        listing_method: "GET",
+        listing_url: "https://seller.example.com/data",
+      },
+    ]);
   });
 
   it("keeps a refused settlement past its hour until its expiration ledger has closed (0086, #205)", async () => {

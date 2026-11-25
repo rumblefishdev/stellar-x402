@@ -9,7 +9,7 @@ import type {
   CatalogEntry,
   CatalogKey,
   CatalogPage,
-  CatalogPayment,
+  CatalogPaymentLink,
   CatalogQuery,
   CatalogSearch,
   CatalogSearchHit,
@@ -198,25 +198,12 @@ export class PostgresCatalogStore implements CatalogStore {
     }));
   }
 
-  async recordPayment(payment: CatalogPayment): Promise<void> {
-    const { network, payTo, method, resourceUrl } = payment.key;
-    await this.pool.query(
-      `INSERT INTO catalog_payments (settlement_key, network, pay_to, method, resource_url, payer,
-         asset, amount, at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       ON CONFLICT (settlement_key) DO NOTHING`,
-      [
-        payment.settlementKey,
-        network,
-        payTo,
-        method,
-        resourceUrl,
-        payment.payer,
-        payment.asset,
-        payment.amount,
-        payment.at,
-      ],
+  async linkPayment({ settlementKey, key }: CatalogPaymentLink): Promise<void> {
+    const { rowCount } = await this.pool.query(
+      "UPDATE settlements SET listing_method = $2, listing_url = $3 WHERE key = $1",
+      [settlementKey, key.method, key.resourceUrl],
     );
+    if (rowCount !== 1) throw new Error(`no settlement ${settlementKey} to link to its listing`);
   }
 }
 

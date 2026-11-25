@@ -70,17 +70,10 @@ export interface CatalogSearchHit extends CatalogSearchPosition {
   resource: DiscoveryResource;
 }
 
-/** A settled payment for a listing, counted by the search's quality score (ADR 0014, 0154). */
-export interface CatalogPayment {
-  key: CatalogKey;
-  payer: string;
-  /** The settlement's key, so a success reported twice, by settle and by reconcile, is one row. */
+/** A settled payment and the listing it paid for, which the search's quality score counts (0154). */
+export interface CatalogPaymentLink {
   settlementKey: string;
-  /** The paid requirement's asset and amount, so the score can keep payments in an offered asset. */
-  asset: string;
-  amount: string;
-  /** App clock, ms, when the row is written. */
-  at: number;
+  key: CatalogKey;
 }
 
 /** `stale`: the stored entry came from a check that started later; nothing was written. */
@@ -109,8 +102,11 @@ export interface CatalogStore {
    * goes on exactly where the page before stopped.
    */
   search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
-  /** Idempotent by `settlementKey`. Rows are kept; the score reads the last 30 days. */
-  recordPayment(payment: CatalogPayment): Promise<void>;
+  /**
+   * Writes the listing's method and URL on the settlement's row; the rest of the key is already
+   * there. Idempotent; rejects when no settlement has `settlementKey`.
+   */
+  linkPayment(link: CatalogPaymentLink): Promise<void>;
 }
 
 /** Where a listing attempt ended: the payment's copy, or the check of the seller's 402. */
