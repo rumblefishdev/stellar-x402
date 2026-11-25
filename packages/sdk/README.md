@@ -84,10 +84,11 @@ library's own text, and what a seller or another library wrote is in `cause` onl
 | `payment_rejected`        | after the payment was sent: the seller or its facilitator says it did not settle              | `not_settled` |
 | `payment_unknown`         | after the payment was sent, anything else goes wrong                                          | `unknown`     |
 
-`paid` says whether money may have moved. `none`: nothing was signed or sent, and the amount went
-back to the budget. `not_settled` and `unknown`: the signed payment left this process and counts
-as spent, since it stays valid until it expires; do not pay again for the same thing without
-checking. The two trustline codes also carry the `account` without the trustline and the `asset`.
+`paid` says whether money may have moved. `none`: nothing was signed or sent, and an amount
+already counted went back to the budget (the four refusals up to `over_budget` counted nothing).
+`not_settled` and `unknown`: the signed payment left this process and counts as spent, since it
+stays valid until it expires; do not pay again for the same thing without checking. The
+two trustline codes also carry the `account` without the trustline and the `asset`.
 
 A missing trustline is found before anything is signed: `@x402/stellar` simulates the payment
 first. The SDK reports it and does not add the trustline: that takes XLM for the reserve and the
