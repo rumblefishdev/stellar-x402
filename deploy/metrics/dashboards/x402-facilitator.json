@@ -439,7 +439,8 @@
               }
             ]
           },
-          "mappings": []
+          "mappings": [],
+          "decimals": 0
         },
         "overrides": []
       },
@@ -492,7 +493,8 @@
               }
             ]
           },
-          "mappings": []
+          "mappings": [],
+          "decimals": 0
         },
         "overrides": []
       },
@@ -541,7 +543,8 @@
               }
             ]
           },
-          "mappings": []
+          "mappings": [],
+          "decimals": 0
         },
         "overrides": []
       },
@@ -1726,7 +1729,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "s",
           "custom": {
             "fillOpacity": 10,
             "showPoints": "never",
@@ -1735,7 +1738,24 @@
             }
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "openbao up"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -1864,7 +1884,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "s",
           "custom": {
             "fillOpacity": 10,
             "showPoints": "never",
@@ -1873,7 +1893,24 @@
             }
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "samples dropped, 15 min"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -1884,7 +1921,7 @@
           "mode": "multi"
         }
       },
-      "description": "x402-agent-behind fires over 120 s."
+      "description": "x402-agent-behind fires over 120 s. These come from the agent through the queue they measure, so a lag shows once the agent has caught up, and a long one shows as server-silent instead."
     },
     {
       "type": "timeseries",
