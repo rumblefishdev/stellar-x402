@@ -42,14 +42,14 @@ describe("start-up", () => {
     }
   });
 
-  it("E-02 offers two tools without a key, and call_paid_http is the SDK's error", async () => {
+  it("E-02 offers three tools without a key, and call_paid_http is the SDK's error", async () => {
     const fake = await startFakeSeller(terms, { "/ok": {} });
     const server = await startServer(base());
     const tools = await server.tools();
     row(
       "E-02",
       "tools, each with an output schema",
-      [["get_resource", "list_resources"], true],
+      [["get_resource", "list_resources", "search_resources"], true],
       [tools.map((t) => t.name).sort(), tools.every((t) => t.outputSchema !== undefined)],
     );
     const answer = await server.call("call_paid_http", httpArgs(`${fake.url}/ok`));
@@ -63,13 +63,13 @@ describe("start-up", () => {
     await fake.close();
   });
 
-  it("E-03 offers three tools with a key and logs only the public address", async () => {
+  it("E-03 offers four tools with a key and logs only the public address", async () => {
     const server = await startServer(paying());
     const tools = await server.tools();
     row(
       "E-03",
       "tools, each with an output schema",
-      [["call_paid_http", "get_resource", "list_resources"], true],
+      [["call_paid_http", "get_resource", "list_resources", "search_resources"], true],
       [tools.map((t) => t.name).sort(), tools.every((t) => t.outputSchema !== undefined)],
     );
     row(

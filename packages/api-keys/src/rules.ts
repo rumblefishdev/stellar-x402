@@ -18,6 +18,11 @@ export const isApiKeyOwner = (owner: string): boolean =>
 export function assertApiKey(hash: string, owner: string): void {
   if (!API_KEY_HASH.test(hash))
     throw new RangeError("an API key hash must be 64 lower-case hex digits");
+  assertApiKeyOwner(owner);
+}
+
+/** Rejects an owner that isn't `<kind>:<id>`, which neither the registry nor a plan row takes. */
+export function assertApiKeyOwner(owner: string): void {
   if (!isApiKeyOwner(owner))
     throw new RangeError(
       `an API key owner must be <kind>:<id> in a-z, 0-9, "_" and "-", at most ${API_KEY_OWNER_MAX_LENGTH} characters`,

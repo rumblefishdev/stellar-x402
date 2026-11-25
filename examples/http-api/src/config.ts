@@ -18,7 +18,8 @@ const ENV = z.object({
       .string()
       .regex(/^\d+$/, "must be a port number")
       .transform(Number)
-      .refine((port) => port >= 1 && port <= 65_535, "must be between 1 and 65535"),
+      // 0 lets the system pick a free port; the start line names the one it bound.
+      .refine((port) => port <= 65_535, "must be between 0 and 65535"),
     "4021",
   ),
 });

@@ -1,0 +1,83 @@
+{
+  "network": "stellar:testnet",
+  "ranAt": "2026-11-24T09:46:28.768Z",
+  "maxFeeStroops": 100000,
+  "facilitator": "GCZH6L7CJXXSVUYCAQLPAPQPZMIXJZVOOOOFKNBHACE64CN7I7E4PMSD",
+  "payer": "GBXXUWZ6AJ2LGGO55UW3BI6ESVAB6E2B6MFHPP2M6D7NNXLTZXWTDHGX",
+  "seller": "GDH4IIUGY5EJTCAMDBEI6OIROSX3YTXEO2YAGBF3J42HAKA6UCXGGM5K",
+  "payTo": "CB7YD2YRBKQO6N2DAEC3UEM2KUCBTYTWUIZBMYZX2INKYRVKBK7ZRBMM",
+  "payToDeployed": "5ac8eb3eaa1df864d9c392e91779c0339bbd1eba35bd3e8c37e77258e4520b1b",
+  "balanceKey": "AAAABgAAAAHXkotywnA8z+r365/0701QSlWouXn8m0UOoshCtNHOYQAAABAAAAABAAAAAgAAAA8AAAAHQmFsYW5jZQAAAAASAAAAAX+B6xEKoO83QwEFuhGaVQQZ4naiMhZjN9IarEaqCr+YAAAAAQ==",
+  "first": {
+    "fees": {
+      "clientResourceFee": "128027",
+      "archivedEntries": 0,
+      "minResourceFee": "128027"
+    },
+    "verified": {
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_pay_to_balance_missing",
+      "payer": "GBXXUWZ6AJ2LGGO55UW3BI6ESVAB6E2B6MFHPP2M6D7NNXLTZXWTDHGX",
+      "invalidMessage": "this payment will not settle here, but its auth entry may still land in ledger 5897998: sign a new payment once that ledger has closed; payTo has no balance of this token yet, and its first payment, which creates one, costs more than the facilitator pays: send payTo a first amount of the token from your own account, then pay again",
+      "extra": {
+        "expirationLedger": 5897998
+      }
+    },
+    "settled": {
+      "success": false,
+      "errorReason": "invalid_exact_stellar_pay_to_balance_missing",
+      "errorMessage": "the auth entry may still land in ledger 5897998: sign a new payment once that ledger has closed; payTo has no balance of this token yet, and its first payment, which creates one, costs more than the facilitator pays: send payTo a first amount of the token from your own account, then pay again",
+      "payer": "GBXXUWZ6AJ2LGGO55UW3BI6ESVAB6E2B6MFHPP2M6D7NNXLTZXWTDHGX",
+      "transaction": "",
+      "network": "stellar:testnet",
+      "extra": {
+        "retryable": false,
+        "expirationLedger": 5897998
+      }
+    },
+    "verifiedAgain": {
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_pay_to_balance_missing",
+      "invalidMessage": "this payment will not settle here, but its auth entry may still land in ledger 5897998: sign a new payment once that ledger has closed; payTo has no balance of this token yet, and its first payment, which creates one, costs more than the facilitator pays: send payTo a first amount of the token from your own account, then pay again",
+      "payer": "GBXXUWZ6AJ2LGGO55UW3BI6ESVAB6E2B6MFHPP2M6D7NNXLTZXWTDHGX",
+      "extra": {
+        "expirationLedger": 5897998
+      }
+    }
+  },
+  "transfer": {
+    "hash": "b2c6339a219ba763e7d522a81154e9249b35dd0be7c111f899bb088b6ecef9e3",
+    "amount": "10000000",
+    "feeCharged": "104829"
+  },
+  "next": {
+    "fees": {
+      "clientResourceFee": "14730",
+      "archivedEntries": 0,
+      "minResourceFee": "14730"
+    },
+    "verified": {
+      "isValid": true,
+      "payer": "GBXXUWZ6AJ2LGGO55UW3BI6ESVAB6E2B6MFHPP2M6D7NNXLTZXWTDHGX"
+    },
+    "settled": {
+      "success": true,
+      "transaction": "86fc98415a36f603484fdb2196a97e6d7c0bc19eee53214b0d549878c971d0ef",
+      "network": "stellar:testnet",
+      "payer": "GBXXUWZ6AJ2LGGO55UW3BI6ESVAB6E2B6MFHPP2M6D7NNXLTZXWTDHGX"
+    },
+    "onChain": "SUCCESS",
+    "feeCharged": "9940"
+  },
+  "checks": {
+    "noBalanceBefore": true,
+    "firstVerifyRefused": true,
+    "firstSettleRefused": true,
+    "firstListsNoArchivedEntry": true,
+    "balanceKeyInTransferFootprint": true,
+    "balanceAfterTransfer": true,
+    "nextVerified": true,
+    "nextSettled": true,
+    "firstStillRefused": true
+  }
+}

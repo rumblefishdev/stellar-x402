@@ -20,6 +20,8 @@ import { apiKeyHash, newApiKey } from "@stellar-x402/api-keys";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main } from "../src/main.js";
+import { spendHorizonMs } from "../src/pruner.js";
+import { longestSpendWindowMs } from "../src/spend/limits.js";
 import { start, type Started } from "../src/start.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
@@ -175,8 +177,7 @@ describe("startup with a bad config", () => {
   }, 20_000);
 
   it("refuses stellar:pubnet before serving anything", async () => {
-    // `/settle` spends there: not without the lease's fencing token, and not while self-payments
-    // can use up the shared spend budgets (0024's residual risk).
+    // `/settle` spends there: not before the hot key's reach is decided again (0048).
     const pubnet = {
       ...env,
       NETWORK: "stellar:pubnet",
@@ -185,7 +186,7 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      "NETWORK stellar:pubnet is refused until per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
+      "NETWORK stellar:pubnet is refused until the hot key's re-check (0048) lands",
     ]);
   });
 });
@@ -583,7 +584,8 @@ describe("main()", () => {
       RATE_LIMIT_WINDOW_MS: String(hour),
     });
     try {
-      // A budget's window is never longer than SPEND_WINDOW_MS, which 0024 keeps.
+      // On testnet, which takes no API key, no limit sums more than SPEND_WINDOW_MS, which 0024
+      // keeps: no account month is counted (`longestSpendWindowMs`).
       const reserve = (id: string, at: number) =>
         app.stores.spend.reserve({
           id,
@@ -610,11 +612,24 @@ describe("main()", () => {
     }
   });
 
+  it("keeps an account's month of reservations where a key is required (0107)", () => {
+    const day = 86_400_000;
+    // An account's payments count from its month's 1st, up to 31 days back; the pruner keeps
+    // twice its window, so about 62 days, as 0107 decision 24 has it.
+    expect(longestSpendWindowMs(day, true)).toBe(31 * day);
+    expect(spendHorizonMs(longestSpendWindowMs(day, true))).toBe(62 * day);
+    expect(longestSpendWindowMs(40 * day, true)).toBe(40 * day);
+    // Where none is, no month is counted: SPEND_WINDOW_MS alone, as in the test above.
+    expect(longestSpendWindowMs(5 * day, false)).toBe(5 * day);
+  });
+
   it("prunes on its timer until it closes", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
       const prune = vi.spyOn(app.stores.spend, "prune");
+      // What stops the timer is the pruner's own test; here, that `main()`'s close calls it (0157).
+      const close = vi.spyOn(app.pruner, "close");
       try {
         // A tick comes within a minute, ±10%. It reads the latest ledger before any table, a
         // real request to the RPC that fake timers don't wait for (0156).
@@ -623,6 +638,9 @@ describe("main()", () => {
       } finally {
         await app.close();
       }
+      // Deterministic, unlike the check below: a stray tick reads the RPC before it prunes, a real
+      // request the fake timers don't wait for, so on a loaded machine that check can pass alone.
+      expect(close).toHaveBeenCalledTimes(1);
       prune.mockClear();
       await vi.advanceTimersByTimeAsync(10 * 66_000);
       expect(prune).not.toHaveBeenCalled();

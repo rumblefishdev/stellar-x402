@@ -9,7 +9,8 @@
   2026-10-27 (task 0067: online migrations) and 2026-10-29 (task 0077: one facilitator for both
   networks, still with a database per network) and 2026-11-16 (task 0105: a pool for the API key
   registry's reads) and 2026-11-18 (task 0106: the portal's sealed key copies and its role) and
-  2026-11-20 (task 0155: one catalog for both networks)
+  2026-11-20 (task 0155: one catalog for both networks) and 2026-11-23 (task 0107: the portal's
+  role also reads each account's plan and payment times)
 
 ## Context
 
@@ -61,9 +62,12 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
       the portal issues, so the API hub can show it again: AES-256-GCM under the portal's
       `KEY_ENCRYPTION_KEY`, which the database never holds, bound to the key's owner and hash,
       and deleted when the portal revokes the key. The portal's backend connects as a role of its
-      own, `x402_portal`, which reads and writes these two tables and nothing else. The
-      facilitator connects as the database's owner and never reads the copies, so they are
-      closed to it by the encryption, not by grants.
+      own, `x402_portal`, which reads and writes these two tables. Since 0107 it also reads, for
+      the usage the hub shows, `account_plans` (every account's plan row, the operator's note
+      included) and the view `account_usage` (the time of every account's payment the store
+      still keeps, about two months on pubnet, with its owner but no amount, fee or address), and
+      nothing else. The facilitator connects as the database's owner and never reads the copies,
+      so they are closed to it by the encryption, not by grants.
     - Each network's spend budgets count only its own fees, paid from its own fee account.
     - The catalog is one table for both networks, each listing with its network, whatever
       network the process settles on (task 0155): `/discovery/resources` without a `network`

@@ -20,7 +20,10 @@ import type { Construct } from "constructs";
 import type { EnvironmentConfig } from "../config.js";
 import { INFRA_ROOT, names } from "../names.js";
 
-/** Watchdog publishes every minute; two silent 5-minute periods fire, 10 to 15 minutes in. */
+/**
+ * Watchdog publishes every minute; two silent 5-minute periods fire. CloudWatch waits for late
+ * data before it treats a period as missing, so it fired about 20 minutes in (drill, 2026-11-24).
+ */
 export const HEARTBEAT_PERIOD_MINUTES = 5;
 export const HEARTBEAT_PERIODS = 2;
 

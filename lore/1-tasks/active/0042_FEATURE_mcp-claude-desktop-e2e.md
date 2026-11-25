@@ -2,7 +2,8 @@
 id: "0042"
 title: "Run the MCP CLI in Claude Desktop against our catalog, end to end on testnet"
 type: FEATURE
-status: backlog
+status: active
+owner: bstruzyk
 milestone: 2
 related_adr: []
 related_tasks: ["0037", "0032", "0041", "0063"]
@@ -15,6 +16,12 @@ history:
     note: >
       Spawned from 0037: its acceptance criterion on Claude Desktop needs a catalog a README reader
       can point at, and none exists until 0032 serves /discovery/resources.
+  - date: "2026-11-25"
+    status: active
+    who: bstruzyk
+    note: >
+      Started: first put examples/http-api on a public URL and get it listed in the testnet
+      catalog, then run the CLI in Claude Desktop against it.
 ---
 
 # Run the MCP CLI in Claude Desktop against our catalog, end to end on testnet

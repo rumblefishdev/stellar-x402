@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_ACCOUNT_PLANS, parseAccountPlans } from "@stellar-x402/api-keys";
 import { describe, expect, it } from "vitest";
 import { ConfigError, parseConfig, parseHubSecret } from "../src/config.js";
 
@@ -65,8 +66,23 @@ describe("the config", () => {
       databaseUrl: ENV.DATABASE_URL,
       minAccountAgeMinutes: 5,
       clientIp: "socket",
+      accountPlans: parseAccountPlans(DEFAULT_ACCOUNT_PLANS),
       logLevel: "info",
     });
+  });
+
+  it("takes the account plans as the facilitator does, and refuses text it would", () => {
+    expect(
+      parseConfig({ ...ENV, ACCOUNT_PLANS: "free:5:10,pro:50:100" }).accountPlans.get("pro"),
+    ).toEqual({ name: "pro", payments: 50, dailyFeeStroops: 100n });
+    for (const text of ["basic:1:1", "free:0:1", "free:1:1,free:2:2", "free"]) {
+      const found = problems({ ...ENV, ACCOUNT_PLANS: text });
+      expect(found).toEqual([expect.stringContaining("ACCOUNT_PLANS must be")]);
+    }
+    // The entry that is wrong is not echoed back.
+    const found = problems({ ...ENV, ACCOUNT_PLANS: "free:1000:2000,Odd_Name:7:xyz" });
+    expect(found).toHaveLength(1);
+    expect(found[0]).not.toContain("Odd_Name");
   });
 
   it("takes the optional settings", () => {

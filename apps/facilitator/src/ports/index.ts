@@ -1,6 +1,7 @@
-import type { ApiKeyStore } from "@stellar-x402/api-keys";
+import type { AccountPlanStore, ApiKeyStore } from "@stellar-x402/api-keys";
 import type { CatalogAttemptStore, CatalogStore } from "./catalog-store.js";
 import type { RateLimitStore } from "./rate-limit-store.js";
+import type { SearchCardStore } from "./search-card-store.js";
 import type { SettlementStore } from "./settlement-store.js";
 import type { SpendStore } from "./spend-store.js";
 
@@ -14,10 +15,14 @@ export type {
   CatalogKey,
   CatalogPage,
   CatalogQuery,
+  CatalogSearch,
+  CatalogSearchHit,
+  CatalogSearchPosition,
   CatalogStore,
   UpsertOutcome,
 } from "./catalog-store.js";
 export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
+export type { CardListing, SearchCardStore } from "./search-card-store.js";
 export {
   FINAL_SETTLEMENT_STATES,
   HashConflictError,
@@ -54,7 +59,10 @@ export interface Stores {
   settlements: SettlementStore;
   catalog: CatalogStore;
   catalogAttempts: CatalogAttemptStore;
+  searchCards: SearchCardStore;
   rateLimits: RateLimitStore;
   spend: SpendStore;
   apiKeys: ApiKeyStore;
+  /** Each API key holder's plan (0107), beside the registry. */
+  accountPlans: AccountPlanStore;
 }

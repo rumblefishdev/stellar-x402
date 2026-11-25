@@ -16,7 +16,7 @@ most. Each route takes one `act` only; a token for another one is refused.
 
 | Route                         | `act`    | Answer                                                                                                 |
 | ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `GET /api/hub/v1/account`     | `read`   | `{ key: { state, … }, details: { showable } }`; `state` is `none`, `active` or `revoked`               |
+| `GET /api/hub/v1/account`     | `read`   | `{ key: { state, … }, details: { showable, usage? } }`; `state` is `none`, `active` or `revoked`       |
 | `POST /api/hub/v1/key/reveal` | `reveal` | `{ key_id, value, created_at }`: the key                                                               |
 | `POST /api/hub/v1/key/revoke` | `revoke` | `{ revoked: true, revoked_at, next_eligible_at }`; the key stops working at once                       |
 | `POST /api/hub/v1/key/issue`  | `issue`  | `{ outcome, next_eligible_at? }`, always a 200: `issued`, `has_key`, `capped`, `too_young` or `failed` |
@@ -26,6 +26,19 @@ What `account` holds: `key_id` (the first 12 hex digits of the key's hash), `cre
 `can_issue` for an active key; `revoked_at`, `next_eligible_at` (only while a new key waits) and
 `can_issue` for a revoked one; only `can_issue: true` for none. `showable` is false for a key with
 no copy (one the operator's script issued) and for one whose copy doesn't open.
+
+`usage` is there for an active or a revoked key's account, not for none: the payments the account
+made this month (`used`, `remaining`, `limit`, `period_start`, `period_end`, `resets_at`, `as_of`)
+and its `plan` (`name`, `quota_limit`, `quota_period: "month"`), in Prices' shape (0107). The month
+is the calendar month in UTC, and the count is the facilitator's own, read through the view
+`account_usage`; a plan the config doesn't have reads as `free`. The view reaches an account's
+payments through its row in `spend_scopes`, and an account idle for the pruner's whole horizon
+can lose that row in a race with its next payment: it then shows fewer payments than the
+facilitator counts, until a later payment of the account writes the row again. What the
+facilitator refuses is unaffected: its count reads the payments themselves. It is `null` when the
+plan or the count can't be read (logged as `hub_usage_unavailable`), and the key is answered all
+the same. Until the portal reads pubnet's database (0126) it counts testnet's, where no keyed
+payment is.
 
 ### Errors
 
@@ -76,32 +89,34 @@ One JSON object per line on stdout. A call is named by the token's `jti` and `ac
 `key_id`, the first 12 hex digits of its hash. Never a key, a token, a secret or a Discord id, and
 `listening` carries the port only. Which to act on:
 
-| Event                                                           | Level | Means                                                                            |
-| --------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------- |
-| `startup_failed`                                                | error | bad settings or no database or tables; the process exits                         |
-| `hub_call_failed`, `pool_error`, `not_ready`                    | error | the database failed: act on a run of these                                       |
-| `hub_key_copy_unreadable`                                       | error | a copy exists and doesn't open: the wrong `KEY_ENCRYPTION_KEY`, or a damaged row |
-| `hub_call_refused` (`invalid_token`, `action_not_allowed`)      | warn  | the hub's token was refused: a bad secret or clock, or a stranger                |
-| `hub_strangers_limited`                                         | warn  | one address (an IPv6 /56) is over its limit; once per window                     |
-| `hub_key_issued`, `hub_key_revealed`, `hub_key_revoked`         | info  | the key events                                                                   |
-| `hub_issue_refused`, `hub_reveal_refused`, `hub_revoke_refused` | info  | what a call came to, with an `outcome`; not faults                               |
-| `hub_account_answered`                                          | info  | the state `account` gave                                                         |
-| `listening`                                                     | info  | started                                                                          |
+| Event                                                           | Level | Means                                                                                                                                                                 |
+| --------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `startup_failed`                                                | error | bad settings or no database or tables; the process exits                                                                                                              |
+| `hub_call_failed`, `pool_error`, `not_ready`                    | error | the database failed: act on a run of these                                                                                                                            |
+| `hub_usage_unavailable`                                         | error | the plan or the count couldn't be read, and `account` answers `usage: null`: the role lacks the 0107 grant (run the runbook's role step again) or the database failed |
+| `hub_key_copy_unreadable`                                       | error | a copy exists and doesn't open: the wrong `KEY_ENCRYPTION_KEY`, or a damaged row                                                                                      |
+| `hub_call_refused` (`invalid_token`, `action_not_allowed`)      | warn  | the hub's token was refused: a bad secret or clock, or a stranger                                                                                                     |
+| `hub_strangers_limited`                                         | warn  | one address (an IPv6 /56) is over its limit; once per window                                                                                                          |
+| `hub_key_issued`, `hub_key_revealed`, `hub_key_revoked`         | info  | the key events                                                                                                                                                        |
+| `hub_issue_refused`, `hub_reveal_refused`, `hub_revoke_refused` | info  | what a call came to, with an `outcome`; not faults                                                                                                                    |
+| `hub_account_answered`                                          | info  | the state `account` gave                                                                                                                                              |
+| `listening`                                                     | info  | started                                                                                                                                                               |
 
 A call with no bearer at all is logged at `debug` only, and `not_ready` once every 2 s at most,
 however often `/health` is called.
 
 ## Settings
 
-| Setting                   | What it is                                                                                                              |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `HUB_TOKEN_SECRET`        | JSON `{"current": "<base64>", "previous": "<base64>"}`, each 32 bytes in standard padded base64; `previous` is optional |
-| `KEY_ENCRYPTION_KEY`      | 32 bytes in base64: seals the copies; losing it loses every copy. Must differ from the hub's secret                     |
-| `DATABASE_URL`            | the database whose registry the facilitator reads                                                                       |
-| `MIN_ACCOUNT_AGE_MINUTES` | default `5`                                                                                                             |
-| `PORT`                    | default `4022`                                                                                                          |
-| `CLIENT_IP`               | `socket` (default) or `cloudflare`                                                                                      |
-| `LOG_LEVEL`               | `debug`, `info` (default), `warn` or `error`                                                                            |
+| Setting                   | What it is                                                                                                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `HUB_TOKEN_SECRET`        | JSON `{"current": "<base64>", "previous": "<base64>"}`, each 32 bytes in standard padded base64; `previous` is optional                                                              |
+| `KEY_ENCRYPTION_KEY`      | 32 bytes in base64: seals the copies; losing it loses every copy. Must differ from the hub's secret                                                                                  |
+| `DATABASE_URL`            | the database whose registry the facilitator reads                                                                                                                                    |
+| `MIN_ACCOUNT_AGE_MINUTES` | default `5`                                                                                                                                                                          |
+| `PORT`                    | default `4022`                                                                                                                                                                       |
+| `ACCOUNT_PLANS`           | the same plans text the facilitator has: `<name>:<payments a month>:<fee stroops per 24 h>`, comma-separated; default `free:1000:20000000,basic:10000:25000000,pro:100000:100000000` |
+| `CLIENT_IP`               | `socket` (default) or `cloudflare`                                                                                                                                                   |
+| `LOG_LEVEL`               | `debug`, `info` (default), `warn` or `error`                                                                                                                                         |
 
 A token verifies under `current` or `previous`. The backend reads the secret only when it starts,
 so it is changed in the runbook's four steps ("Changing the token's secret" in

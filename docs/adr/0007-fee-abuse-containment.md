@@ -4,7 +4,8 @@
 - Date: 2026-10-07, amended 2026-10-14 (task 0018: the bid counts twice), 2026-10-29 (task 0066:
   restore rent), 2026-10-30 (task 0024: payer proof, budget tiers, attributed breakers, what
   the budgets bound), 2026-11-03 (task 0024: API keys on pubnet, and the floor at 5 XLM for
-  task 0027's alarms) and 2026-11-13 (task 0105: how a key is checked and counted)
+  task 0027's alarms), 2026-11-13 (task 0105: how a key is checked and counted) and 2026-11-23
+  (task 0107: each account's quota and fee budget)
 
 ## Context
 
@@ -61,7 +62,8 @@ It also found that two fee ceilings disagreed:
 - **Spend budgets** (as amended on 2026-10-30, below).
   - Before `submit()`, `/settle` reserves the fee against a global rolling budget and against
     per-payer, per-`payTo` and per-asset budgets. When over budget it returns `success: false` and
-    submits nothing.
+    submits nothing. _Since 2026-11-23:_ a settlement with an API key (pubnet) reserves against
+    its account's budgets, the free plan's shared one and the global one instead (below).
   - Breakers per payer, per `payTo` and per wasm asset open after repeated on-chain failures
     attributed to them.
   - These raise alerts: the budget nearing its limit, an open breaker, a low facilitator balance,
@@ -170,7 +172,8 @@ a free testnet, configurable mainnet pricing and documented caller authenticatio
 - **Testnet ignores a key**: it stays free and open, the gate's harness calls as before, and the
   shared-budget residual stays accepted there.
 - **Mainnet ships in M2**, so none of this is in Tranche 1. `stellar:pubnet` is refused until
-  0090, 0105 and 0107 land, with 0027 and 0048 from ADR 0013.
+  0090, 0105 and 0107 land, with 0027 and 0048 from ADR 0013. _Since 2026-11-23:_ only 0048 is
+  left.
 
 ## Amendment 2026-11-13 (task 0105): how a key is checked and counted
 
@@ -196,6 +199,52 @@ Task 0105 built the key on `/verify` and `/settle`. Decided by akot with it:
   (task 0060). The cost is that such requests are unthrottled here: each is a body parse and, for
   a well-formed key, one registry read. The edge (Cloudflare) is the control for a flood of them
   (threat model, "API keys").
+
+## Amendment 2026-11-23 (task 0107): each account's quota and fee budget
+
+Task 0107 built the free quota the amendment of 2026-11-03 promised, on the model of
+stellar-prices-api's plans. Decided by akot with it:
+
+- **A settlement with a key counts in its account, not in the shared budgets.** On pubnet a
+  settlement counts in its caller's account (the key's owner), in `free` while that account is on
+  the free plan, and in `global`. It no longer counts in the payer, `payTo`, asset or tier
+  budgets, which another caller's payments could fill for it; those stay for settlements without
+  a key, every testnet one. The breakers are unchanged on both networks. A pubnet settlement
+  without a caller is refused: it would count in no account.
+- **An account has a plan.** A plan is a number of payments a calendar month in UTC and a fee
+  budget per 24 hours: `free` 1,000 and 2 XLM, `basic` 10,000 and 2.5 XLM, `pro` 100,000 and
+  10 XLM, all config. A payment is a settlement the network charged a fee for, a failed one too,
+  or one still in flight; one sent but never included stops counting when it ends. The seller
+  sees its payments in the API hub, not the fee budget. The plan is a row the operator sets by
+  hand after the seller writes to us, and an account without one is on `free`. The plan and the
+  count are the account's, not the key's, so a new key continues them.
+- **The fee budget is per 24 hours, not per month.** A monthly one can be spent in a day, so one
+  raised account could fill `global` for everyone, and a seller attacked with payments that cost
+  the ceiling would be refused for the rest of the month instead of for a day.
+- **The free accounts share one budget, `free`**, 25 XLM per 24 hours, so many Discord accounts
+  use up only the free traffic, never the room of the accounts the operator raised. `global`
+  stays at 50 XLM and holds `free` plus every raised account's fee budget, which the operator
+  checks when raising one; 0024's `global ≤ float − alarm` still holds.
+- **No ban.** An operator's revoke stays a revoke (task 0106). The use is the account's, so an
+  account gains no quota from a new key; one that abused the free tier comes back with the month.
+- **The refusals** come from `/settle`, with HTTP 200, `success: false` and nothing signed:
+  `settle_exact_stellar_quota_exhausted`, with the next month's start in the message and in
+  `extra.resetsAt`; `settle_exact_stellar_spend_limit_account`; and
+  `settle_exact_stellar_spend_limit_free`. None names an account, an address or an amount of XLM.
+  `/verify` checks no quota, since it spends nothing.
+- **A payment that creates `payTo`'s balance stays refused**, now with a reason of its own,
+  `invalid_exact_stellar_pay_to_balance_missing`, and the fix in its message: the seller sends
+  `payTo` a first amount of the token from its own account. On pubnet a USDC payment to a fresh
+  C-address balance has a fee of about 443,000 stroops and is charged about 382,000 (measured on
+  2026-11-05 and 2026-11-23), over the 250,000 ceiling, where a typical settlement is charged
+  12,203. Paying it would raise every reservation, which is the ceiling, or need reservations of
+  the simulated fee, which 0024 decided against. The x402 SVM maintainers, PayAI, x402-rs, the
+  NEAR spec and `@x402/stellar`'s own 50,000 ceiling refuse it too.
+- **What it leaves** (threat model, "Settlement fees" and "API keys"): the free tier can be used
+  up by many Discord accounts, raised accounts still settling, and a seller's own key carries its
+  buyers' payments, so a buyer can use up the seller's month at the price of its purchases.
+  Charging past the quota (task 0108) is the fix for the second; until then the operator raises
+  a plan by hand.
 
 ## References
 
