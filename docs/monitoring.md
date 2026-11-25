@@ -570,7 +570,13 @@ channels.
    `filter event = "settlement_submit_failed" and @message like /Account not found/`.
 3. Look the channel up on Horizon (`/accounts/<channel>`). If it is gone, make new channels with
    `create-channels.ts` ([runbook, OpenBao](runbook.md#openbao), step 6) and put their addresses
-   in `CHANNELS_TESTNET` ([runbook, Before the first deploy](runbook.md#before-the-first-deploy)).
+   in `CHANNELS_TESTNET`, changing only that line of the server's `.env`, so the key's name and
+   version stay as they are:
+
+   ```sh
+   ssh SERVER 'sudo sed -i "s|^CHANNELS_TESTNET=.*|CHANNELS_TESTNET=NEW_CHANNELS|" /srv/x402/production/.env'
+   ```
+
 4. A restart puts the channels back, once the reason is fixed.
 
 ### pool-health

@@ -123,8 +123,9 @@ no longer apply):
       checked, the result recorded (Implementation Notes, 2026-11-24)
 - [ ] `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` are read from the server's `.env`, not
       `deploy/production/compose.yaml`, so a new key needs no PR
-      Closes once the production server's `.env` holds both names and a deploy of this change has
-      run with `signer: ok`.
+      Closes once the production server's `.env` holds both names, the playbook has copied this
+      `compose.yaml`, and `x402@` has started from it with `signer: ok`. `x402-deploy` never copies
+      `compose.yaml`, so a deploy before that playbook run proves nothing about `.env`.
 - [ ] `docs/runbook.md` has a "lost access" section: new key, fee account, channels, `.env`,
       restart, alarms, and when the same server may stay
 - [ ] A testnet drill moves the facilitator to a new key, fee account and channels with that
