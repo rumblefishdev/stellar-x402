@@ -2,7 +2,7 @@
 id: "0092"
 title: "Tell a buyer about a missing trustline before signing, in the SDK and MCP"
 type: FEATURE
-status: active
+status: completed
 owner: akot
 milestone: 2
 related_adr: []
@@ -33,6 +33,15 @@ history:
     note: >
       Started with the MCP part: `pay.ts` tells a missing trustline from a low balance by the
       error's type. The SDK criteria follow in 0102, whose buyer helper carries the same codes.
+  - date: "2026-11-25"
+    status: completed
+    who: akot
+    note: >
+      Closed after PRs #247 (MCP) and #248 (0102's SDK buyer helper). Two codes,
+      payer_trustline_missing and payto_trustline_missing, told by the error's type; the messages
+      name the account and USDC as CODE:ISSUER too. MCP 173 unit tests, SDK 24; testnet e2e 28
+      scenarios, 132 rows, none failed, with the new E-14d and E-14e. No follow-up: a muxed payTo
+      (decision 8) is upstream's to fix.
 ---
 
 # Tell a buyer about a missing trustline before signing, in the SDK and MCP
@@ -131,6 +140,8 @@ The SDK part, in 0102's buyer helper (#248), which moves this code to `packages/
 - `test/buyer.test.ts`: the two trustline codes with the account and the asset named; a simulation
   upstream could not name, a trustline on neither's account and fields in no address's shape are
   `payment_failed`, with upstream's error as the `cause` unchanged and nothing sent.
+- After #247's review the SDK carries its messages too: USDC named as `CODE:ISSUER` (decision 7),
+  with the check of the two names against their contract ids in `buyer.test.ts`.
 
 ## Design Decisions
 
