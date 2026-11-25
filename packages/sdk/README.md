@@ -1,0 +1,111 @@
+# @stellar-x402/sdk
+
+TypeScript helpers for paying and charging with [x402](https://www.x402.org) on Stellar, over the
+published `@x402/*` packages and this repository's facilitator. The Rust crate is in
+[`rust/`](rust/README.md).
+
+Part 1 of the TypeScript SDK (task 0102). Its entry points come one per pull request:
+
+| Entry point | For      | What it holds                                                     | State    |
+| ----------- | -------- | ----------------------------------------------------------------- | -------- |
+| `/buyer`    | a buyer  | `createPayingFetch`: pays a seller's 402 within limits you set    | this one |
+| `/seller`   | a seller | the facilitator's config, the catalog's answer, a trustline check | to come  |
+| `/bazaar`   | an agent | a client to list and search the Bazaar                            | to come  |
+
+Not on npm before part 2 (task 0163). From this repository it is `@stellar-x402/sdk` in the
+workspace, as the MCP server (`apps/mcp-local`) uses it.
+
+## Pay for a resource
+
+```ts
+import { createPayingFetch, memoryBudget, PaymentError } from "@stellar-x402/sdk/buyer";
+import { createEd25519Signer, USDC_TESTNET_ADDRESS } from "@x402/stellar";
+import { ExactStellarScheme } from "@x402/stellar/exact/client";
+
+const signer = createEd25519Signer(process.env.SECRET_KEY!, "stellar:testnet");
+
+const pay = createPayingFetch({
+  schemes: [{ network: "stellar:testnet", client: new ExactStellarScheme(signer) }],
+  payer: signer.address,
+  // In the asset's atomic units: 10000 is 0.001 USDC. An offer in any other asset is refused.
+  assets: { [USDC_TESTNET_ADDRESS]: { maxPerCall: 10_000n, daily: 100_000n } },
+  // A daily budget needs a store; this one is forgotten when the process exits.
+  budget: memoryBudget(),
+});
+
+try {
+  const response = await pay("https://api.example.com/weather?city=Warsaw");
+  console.log(await response.json(), response.payment?.transaction);
+} catch (error) {
+  if (error instanceof PaymentError) console.log(error.code, error.paid, error.message);
+  else throw error;
+}
+```
+
+`pay` takes what `fetch` takes and answers the seller's `Response`. When a payment was sent for it,
+the response carries `payment`: the settlement's `transaction` (null when the seller showed none),
+`network`, `asset` and `amount`. An answer that needs no payment, a 404 or a 500 among them, comes
+back as it is, without `payment`.
+
+## Limits
+
+Checked before anything is signed, in this order; the first that leaves no offer gives the code:
+
+1. The asset is one of `assets` (`asset_not_allowed`).
+2. The price is a whole number of atomic units above zero, and the seller wants the payment valid
+   for at most 300 s (`unsupported_payment`).
+3. The price is within `maxPerCall` (`over_price_limit`).
+4. With a `daily` budget, the price fits what is left of the UTC day (`over_budget`). It is counted
+   when the offer is chosen, and given back only when nothing was signed or sent.
+
+`maxPerCall` is required for each asset. `daily` is optional; with one, `budget` is required, or
+`createPayingFetch` throws when it is made. `memoryBudget()` keeps one process's spending; a store
+of your own (`BudgetStore`: `count` and `giveBack`) can keep it across processes, as the MCP server
+does in SQLite.
+
+Upstream's own spend controls (`spendControls`) are off: these limits are in atomic units per
+asset, and name why they refused.
+
+## Errors
+
+A payment that is refused or fails is a `PaymentError`. Branch on `code`; `message` is this
+library's own text, and what a seller or another library wrote is in `cause` only.
+
+| `code`                    | When                                                                                          | `paid`        |
+| ------------------------- | --------------------------------------------------------------------------------------------- | ------------- |
+| `asset_not_allowed`       | no offer is in one of `assets`                                                                | `none`        |
+| `unsupported_payment`     | no offer with a price above zero and valid for at most 300 s, or none the schemes can pay     | `none`        |
+| `over_price_limit`        | every offer left costs more than `maxPerCall`                                                 | `none`        |
+| `over_budget`             | the offer would pass what is left of the day                                                  | `none`        |
+| `insufficient_funds`      | signing fails: the payer holds the trustline and too little of the asset                      | `none`        |
+| `payer_trustline_missing` | signing fails: the payer has no trustline to the asset; the seller's account was not checked  | `none`        |
+| `payto_trustline_missing` | signing fails: the seller's `payTo` has no trustline to the asset; only the seller can add it | `none`        |
+| `payment_failed`          | signing fails for another reason, or the budget store cannot be read or written               | `none`        |
+| `payment_rejected`        | after the payment was sent: the seller or its facilitator says it did not settle              | `not_settled` |
+| `payment_unknown`         | after the payment was sent, anything else goes wrong                                          | `unknown`     |
+
+`paid` says whether money may have moved. `none`: nothing was signed or sent, and the amount went
+back to the budget. `not_settled` and `unknown`: the signed payment left this process and counts
+as spent, since it stays valid until it expires; do not pay again for the same thing without
+checking. The two trustline codes also carry the `account` without the trustline and the `asset`.
+
+A missing trustline is found before anything is signed: `@x402/stellar` simulates the payment
+first. The SDK reports it and does not add the trustline: that takes XLM for the reserve and the
+fee, and a seller's only the seller can add.
+
+A failure of the underlying `fetch` before any payment was sent is thrown as it is, not as a
+`PaymentError`.
+
+## Options
+
+| Option    | Meaning                                                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `schemes` | scheme clients holding the buyer's key, such as `ExactStellarScheme` for a network                                      |
+| `payer`   | the buyer's public address, the one those schemes sign for; it keys the budget                                          |
+| `assets`  | per asset contract: `maxPerCall` and an optional `daily`, in atomic units                                               |
+| `budget`  | where the day's spending is kept; required with a `daily`                                                               |
+| `fetch`   | the fetch every request goes through, the unpaid one and the paid retry; pass a guarded one for URLs you did not choose |
+| `now`     | the clock that decides the day                                                                                          |
+
+A request's `signal` is honored before the payment leaves: a payment signed after it aborted is not
+sent, its amount goes back, and the signal's reason is thrown.
