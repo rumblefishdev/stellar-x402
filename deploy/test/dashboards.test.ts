@@ -11,6 +11,7 @@ const dashboards = readdirSync(DIR).map((f) => ({
   json: JSON.parse(readFileSync(`${DIR}/${f}`, "utf8")) as {
     uid: string;
     panels: { targets?: { expr: string; datasource: { uid: string } }[] }[];
+    templating?: { list: { definition?: string }[] };
   },
 }));
 // Series that aren't the catalog's: node_exporter's, the agent's own, and the liveness series.
@@ -23,10 +24,14 @@ test.each(dashboards)(
     expect(json.uid).toMatch(/^x402-/);
     const targets = json.panels.flatMap((p) => p.targets ?? []);
     expect(targets.length).toBeGreaterThan(0);
-    for (const t of targets) {
-      expect(t.datasource.uid).toBe("prometheus");
-      for (const [, name] of t.expr.matchAll(/([a-zA-Z_:][a-zA-Z0-9_:]*)\{/g))
-        if (!OTHER.test(name!)) expect(KNOWN, `${name} in ${t.expr}`).toContain(name);
-    }
+    for (const t of targets) expect(t.datasource.uid).toBe("prometheus");
+    // The panels' queries and the variables' (a variable's metric renamed empties its menu).
+    const queries = [
+      ...targets.map((t) => t.expr),
+      ...(json.templating?.list ?? []).flatMap((v) => v.definition ?? []),
+    ];
+    for (const q of queries)
+      for (const [, name] of q.matchAll(/([a-zA-Z_:][a-zA-Z0-9_:]*)\{/g))
+        if (!OTHER.test(name!)) expect(KNOWN, `${name} in ${q}`).toContain(name);
   },
 );
