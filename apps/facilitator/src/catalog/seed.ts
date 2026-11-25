@@ -10,7 +10,8 @@ import { SELLER_USER_AGENT } from "./seller-check.js";
  */
 export const SEED_FILE_BYTES = 512 * 1024;
 /**
- * The wait after each request the seed sends a host: 60 a minute, so the largest measured file
+ * The wait after each URL, per request it cost (a second request to the same URL follows the
+ * first at once; an MCP check counts as one): 60 a minute, so the largest measured file
  * (581 URLs, 2026-11-23) is seeded in about 10 minutes. Checks after payments, which peaked at 3 a
  * minute across all sellers (testnet, 2026-11-03 to 11-25), keep their own budget (decision 12). A
  * URL costs one request, a second when its 402 declares another method or an MCP tool.

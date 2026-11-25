@@ -967,7 +967,8 @@ catalog:
    on that same 402, so a seeded listing passes the same gates. Only when the 402 declares another
    method, or an MCP tool, is the seller asked once more that way. It has no `ledger` and its
    attempt rows no `payer`; a listing a settlement wrote keeps its `ledger`.
-4. Hosts run at once; within a host the seed waits 1 s after each request, 60 a minute, so a host
+4. Hosts run at once; within a host the seed waits, after each URL, 1 s for each request it cost (a
+   second request to the same URL follows the first at once), 60 a minute, so a host
    of 581 URLs takes about 10 minutes. A URL that fails never stops the
    next, nor a host the others.
 

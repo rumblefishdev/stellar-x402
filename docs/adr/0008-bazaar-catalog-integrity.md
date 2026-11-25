@@ -46,7 +46,7 @@ settlement.
     payer filling it holds back only the hosts it pays for; `/settle`'s per-IP limit (task 0023)
     and the settled payment each check needs bound the rest. Over a budget the check is
     skipped; the next payment tries again. There is no retry queue. A seed's checks don't count
-    against these budgets: the operator picks the hosts, and the seed waits 1 s after each request
+    against these budgets: the operator picks the hosts, and the seed waits, after each URL, 1 s per request it cost
     to a host, 60 a minute, beside the host's checks after payments, which peaked at 3 a minute. A URL
     costs one request to learn its listing, then a check per Stellar account its 402 names. A
     seed's check of a listing a settlement wrote keeps that settlement's `ledger`.
