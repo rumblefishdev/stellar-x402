@@ -12,6 +12,9 @@ when the VM goes quiet (ADR 0011, tasks 0027 and 0139). Both reach the Slack cha
 - Every alarm, with its shape and missing-data rule:
   [the alarm list](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md).
 - The stacks and the alarm groups: [infra/README.md](../infra/README.md).
+- The dashboard: https://monitoring.sorobanscan.com, folder x402, for every @rumblefish.pl
+  address (Cloudflare Access, a one-time PIN), from
+  [`deploy/metrics/dashboards/`](../deploy/metrics/dashboards/); edited there, never in Grafana.
 
 This page has every alarm: a section for each one that is on, and the [alarms that are off](#the-alarms-that-are-off)
 with the task that turns each on. [Every metric](#every-metric) lists the catalog's metrics and

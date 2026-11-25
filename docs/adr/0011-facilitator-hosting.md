@@ -21,8 +21,8 @@
   in the portal backend's answer to `reveal`) and 2026-11-19 (task 0134: a search-model
   container, 512 MiB, joins the totals) and 2026-11-20 (task 0106: the log files also rotate
   daily and none is kept past 30 days, the hub's privacy policy) and 2026-11-25 (task 0139:
-  the switch went out as three deploys about 8 minutes apart, not one change; Grafana runs on the
-  VM, reached over SSH, its dashboards and Cloudflare Access in a later task)
+  the switch went out as three deploys about 8 minutes apart, not one change; Grafana is at
+  monitoring.sorobanscan.com behind Cloudflare Access, for every @rumblefish.pl address)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -659,9 +659,12 @@ One request or one stop must never outlast the layer in front of it:
     VM's own disk.
   - Grafana shows dashboards only; its own alerting is off, so alerts take one path. Its
     datasources and dashboards are provisioned from the repo, so its database holds nothing to
-    back up. It listens on the VM's loopback, reached over SSH
-    (`ssh -L 3000:localhost:3000 monitoring`); the dashboards from the repo and Cloudflare Tunnel
-    behind Cloudflare Access are a later task.
+    back up. It is at https://monitoring.sorobanscan.com, through a Cloudflare Tunnel whose
+    cloudflared runs on the VM, behind Cloudflare Access for every @rumblefish.pl address with a
+    one-time PIN. Grafana signs a person in as a Viewer from Access's signed token, so a request
+    that skipped Access gets nothing; its admin signs in over SSH only. Each project's dashboards
+    sit in a folder of their own, loaded from its repository at a pinned commit
+    (soroban-infrastructure `monitoring/`, "Dashboards" and "Grafana through Cloudflare Access").
   - The rules are generated from the catalog, as `infra/src/lib/alarms/factory.ts` builds the
     alarms today: one per check, with `network` as a label, so pubnet adds alert instances, not
     rules.
@@ -906,8 +909,7 @@ One request or one stop must never outlast the layer in front of it:
   until 0027 lands.
 - **0139 builds:** the Prometheus adapter; the monitoring VM, its role and its certificate; the
   agent on this server; the rules generated from the catalog; the Slack webhook, the heartbeat
-  and the failed-notification rule; Grafana on the VM (its dashboards and Cloudflare Access come
-  later); and the switch, which turns the rules on and retires the EMF adapter and the CloudWatch
+  and the failed-notification rule; Grafana behind Cloudflare Access with x402's dashboard; and the switch, which turns the rules on and retires the EMF adapter and the CloudWatch
   alarms that moved, with no period of both (three deploys on 2026-11-25, above). Each rule is drilled once right after the switch, and one that fails its
   drill is fixed forward.
 - **0023 keys the limiter on `CF-Connecting-IP`** as above.
