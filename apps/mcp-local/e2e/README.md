@@ -8,8 +8,8 @@ the servers write.
 
 The scenarios (E-01…E-23) were written from the README, the tool list and the acceptance criteria
 only, by a reviewer who had not read the code; E-09h, E-14b, E-14c and E-24 came from a second,
-independent review of what the first set left out. E-14d came with task 0092, which also changed
-E-14's code. E-25 comes from the search tool's acceptance criteria (task 0137).
+independent review of what the first set left out. E-14d and E-14e came with task 0092, which also
+changed E-14's code. E-25 comes from the search tool's acceptance criteria (task 0137).
 
 ## Run
 
