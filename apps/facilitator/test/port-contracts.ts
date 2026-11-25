@@ -2610,6 +2610,21 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
       expect(hosts(await fused("zebra", { network: "eip155:8453" }))).toEqual([]);
     });
 
+    it("says a listing that passes the filters waits for a vector of the model (ADR 0014)", async () => {
+      const waiting = (network?: string) =>
+        catalog.waitingForVector({ text: "x", limit: 10, network }, MODEL);
+      await listing(key("a"), { description: "Tides" }, 0.9);
+      expect(await waiting()).toBe(false);
+      await listing(key("b"), { description: "Waves" }, null);
+      expect(await waiting()).toBe(true);
+      // The network filter leaves b out; a vector of another model waits like none.
+      const pubnet = key("c", { network: "stellar:pubnet" });
+      await listing(pubnet, { description: "Stocks" }, 0.9);
+      expect(await waiting("stellar:pubnet")).toBe(false);
+      await listing(key("d", { network: "stellar:pubnet" }), { description: "Bonds" }, 0.9, "old");
+      expect(await waiting("stellar:pubnet")).toBe(true);
+    });
+
     it("leaves out a listing whose text changed until its new vector is written (G, ADR 0014)", async () => {
       await listing(key("a"), { description: "Tides" }, 0.9);
       await listing(key("a"), { description: "Waves" }, null, MODEL, 2);

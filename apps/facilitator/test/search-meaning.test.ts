@@ -145,26 +145,28 @@ function app(vectors: boolean, using?: () => Promise<Embedder>) {
     const response = await fetch(`${url}/discovery/search?${query}`);
     return { response, body: (await response.json()) as SearchDiscoveryResourcesResponse };
   };
-  return { search, lines, metrics };
+  /** Gives the listing `n`, stored without a vector, one of the model, as the pass would. */
+  const vectorN = () => setVector(db.pool, key("n"), model.name, unitVector(0.1));
+  return { search, lines, metrics, vectorN };
 }
 
 describe("GET /discovery/search by meaning, vectors stored (0120 G, I)", () => {
-  const { search } = app(true);
+  const { search, vectorN } = app(true);
 
-  it("ranks fused when the model answers, with every match and no partial results (G)", async () => {
+  it("ranks fused when the model answers, partial while a listing waits for its vector (G)", async () => {
     const { response, body } = await search("query=weather&limit=10");
     expect(response.status).toBe(200);
     // a: meaning 1, words 1; c: meaning 3, words 2; b: meaning 2 only. s and w are below 0.60, so
-    // not matches, though w holds the word; n holds it but has no vector (ADR 0014).
+    // not matches, though w holds the word; n holds it but has no vector (ADR 0014), so the answer
+    // is partial.
     expect(hostsOf(body)).toEqual(["a", "c", "b"]);
-    expect(body.partialResults).toBe(false);
+    expect(body.partialResults).toBe(true);
     expect(body.pagination).toEqual({ limit: 3, cursor: null });
   });
 
   it("finds a listing by meaning alone, with no query word in it (G)", async () => {
     const { body } = await search("query=zebra");
     expect(hostsOf(body)).toEqual(["a", "b", "c"]);
-    expect(body.partialResults).toBe(false);
   });
 
   it("pages the fused ranking with a cursor that carries the ranking and the model (G, I)", async () => {
@@ -174,13 +176,17 @@ describe("GET /discovery/search by meaning, vectors stored (0120 G, I)", () => {
       const { body } = await search(
         `query=weather&limit=1${cursor === null ? "" : `&cursor=${cursor}`}`,
       );
-      expect(body.partialResults).toBe(false);
       seen.push(...hostsOf(body));
       cursor = body.pagination!.cursor;
       if (cursor === null) break;
       expect(decode(cursor)).toMatchObject({ ranking: "fused", model: "granite-test" });
     }
     expect(seen).toEqual(["a", "c", "b"]);
+  });
+
+  it("answers complete once every listing has its vector (ADR 0014)", async () => {
+    await vectorN();
+    expect((await search("query=weather&limit=10")).body.partialResults).toBe(false);
   });
 
   it("answers by words alone when the model fails, listings without a vector included (H)", async () => {

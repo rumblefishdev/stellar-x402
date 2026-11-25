@@ -139,7 +139,7 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
 /**
  * `GET /discovery/search` (0120) with upstream's search types (ADR 0014). It asks the search model
  * for the query's vector and ranks by meaning and words fused; every match is ranked, so
- * `partialResults` is `false`. When the model fails or doesn't answer within its timeout, it ranks
+ * `partialResults` is `false` unless a listing that passes the filters has no vector yet. When the model fails or doesn't answer within its timeout, it ranks
  * by words alone, logged and counted, and `partialResults` is `true`:
  * matches by meaning were not looked for. A cursor from another ranking or model is refused with
  * a 400. A store failure rejects, and the shared error handler answers it with a 500.
@@ -198,7 +198,10 @@ export function discoverySearch(
     const body: SearchDiscoveryResourcesResponse = {
       x402Version: 2,
       resources: page.map((hit) => hit.resource),
-      partialResults: meaning === undefined,
+      // Partial too while a listing that passes the filters has no vector yet: search by meaning
+      // can't find it (ADR 0014).
+      partialResults:
+        meaning === undefined || (await catalog.waitingForVector(parsed.search, meaning.model)),
       pagination: {
         limit: page.length,
         cursor: more ? writeCursor(page.at(-1)!, ranked) : null,

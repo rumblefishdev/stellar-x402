@@ -190,6 +190,19 @@ export class PostgresCatalogStore implements CatalogStore {
     return rows.map(hitOf);
   }
 
+  async waitingForVector(query: CatalogSearch, model: string): Promise<boolean> {
+    const { rows } = await this.listPool.query<{ waiting: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM catalog JOIN catalog_search USING (seq)
+          WHERE model IS DISTINCT FROM $4
+            AND ($1::text IS NULL OR type = $1)
+            AND ($2::text IS NULL OR pay_to = $2)
+            AND ($3::text IS NULL OR network = $3)) AS waiting`,
+      [query.type ?? null, query.payTo ?? null, query.network ?? null, model],
+    );
+    return rows[0]!.waiting;
+  }
+
   /**
    * The fused ranking (ADR 0014). A listing matches when its card holds a vector of the query's
    * model with a cosine similarity of 0.60 or more to the query's (pgvector's `cosine_distance` is

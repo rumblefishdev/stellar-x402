@@ -104,6 +104,11 @@ export interface CatalogStore {
    * exactly where the page before stopped.
    */
   search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
+  /**
+   * Whether a listing that passes `query`'s filters has no vector of `model` yet (ADR 0014): search
+   * by meaning can't find it, so an answer by meaning is partial.
+   */
+  waitingForVector(query: CatalogSearch, model: string): Promise<boolean>;
 }
 
 /** Where a listing attempt ended: the payment's copy, or the check of the seller's 402. */

@@ -127,7 +127,8 @@ The measurements are in
 - **When a listing has no vector yet.** A new listing joins search only once its vector is stored,
   so a search never mixes listings that were scored two ways. `/discovery/resources` lists it at
   once. A listing whose text changes leaves search by meaning until its new vector is written,
-  right after the write.
+  right after the write. While a listing that passes the filters waits for its vector, the answer
+  says `partialResults: true`, so a client knows search by meaning may have missed it.
 - **When the model can't be used.** The facilitator ranks by words alone, in the same response
   shape, when the container doesn't answer within 2,000 ms or answers an error. The timeout stays
   until a measurement on the server sets it. Every listing is then scored one way, so the answer
