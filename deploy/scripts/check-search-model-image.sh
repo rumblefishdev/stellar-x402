@@ -3,8 +3,9 @@
 # deploy/production/compose.yaml does (ADR 0014): read-only, no capabilities, 768 MB, one CPU. So a
 # change that keeps the model from loading or answering in the amd64 image fails CI instead of the
 # server: onnxruntime's native build, the files the build fetched, the memory limit. It waits for
-# /health, asks /embed for one query's vector and checks it has 384 numbers. Not covered: the
-# facilitator's own container, the compose file itself and the server's network.
+# /health, asks /embed for one query's vector and checks it has 384 numbers, that a request
+# without `kind` is refused, and that a long text is read further as a listing than as a query.
+# Not covered: the facilitator's own container, the compose file itself and the server's network.
 #
 # Usage: deploy/scripts/check-search-model-image.sh   (Docker and jq; no root needed)
 set -eu
@@ -43,3 +44,34 @@ if [ "$length" != 384 ]; then
   exit 1
 fi
 echo "/embed answered 384 numbers"
+
+# `kind` is required: a query sent without it would be read as far as a listing.
+status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'content-type: application/json' --data '{"text":"weather"}' \
+  http://127.0.0.1:8080/embed)
+if [ "$status" != 400 ]; then
+  echo "/embed without kind answered $status, not 400" >&2
+  exit 1
+fi
+echo "/embed without kind answered 400"
+
+# 1,968 characters: more than 256 tokens, fewer than the 2,000 characters the model reads. A query
+# is cut at 256 tokens and a listing at 512 (ADR 0014), so the two vectors differ.
+long=$(printf 'weather forecast for every city and hour %.0s' $(seq 48))
+vector_as() {
+  jq --null-input --arg text "$long" --arg kind "$1" '{text: $text, kind: $kind}' \
+    | curl --silent --fail --header 'content-type: application/json' --data @- \
+      http://127.0.0.1:8080/embed \
+    | jq --compact-output '.vector'
+}
+query=$(vector_as query)
+listing=$(vector_as listing)
+if [ -z "$query" ] || [ -z "$listing" ]; then
+  echo "/embed answered no vector for a long text" >&2
+  exit 1
+fi
+if [ "$query" = "$listing" ]; then
+  echo "/embed answered a long text the same vector as a query and as a listing" >&2
+  exit 1
+fi
+echo "/embed reads a long text further as a listing than as a query"
