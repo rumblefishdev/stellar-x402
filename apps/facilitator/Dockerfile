@@ -20,8 +20,8 @@ RUN pnpm install --offline --frozen-lockfile --filter @stellar-x402/facilitator.
   && pnpm --filter @stellar-x402/facilitator... --filter @stellar-x402/search-model... build \
   && pnpm --filter @stellar-x402/facilitator deploy --prod /out \
   && pnpm --filter @stellar-x402/search-model deploy --prod /out-search-model
-# The model's files at the revision `apps/search-model/src/model.ts` pins, so its container
-# downloads nothing when it starts.
+# The model's files at the revision `apps/search-model/src/model.ts` pins, each checked against
+# the SHA-256 it names there, so its container downloads nothing when it starts.
 RUN node apps/search-model/scripts/fetch-model.mjs /out-search-model/model
 
 FROM ${NODE_IMAGE}
