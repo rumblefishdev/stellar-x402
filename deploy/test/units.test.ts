@@ -292,6 +292,11 @@ describe("the units' output", () => {
     expect(model).toContain("cpus: 1");
     expect(compose).toMatch(/depends_on:\n\s+search-model:\n\s+condition: service_started/);
     expect(model).toMatch(/networks:\n\s+- search\n/);
+    // Its health is checked as the facilitator's is, on its own port.
+    expect(model).toContain(
+      "fetch('http://127.0.0.1:8080/health',{signal:AbortSignal.timeout(5000)})",
+    );
+    expect(model).toMatch(/interval: 10s\n\s+timeout: 5s\n\s+start_period: 30s\n\s+retries: 3\n/);
     // The facilitator alone reaches it, over a network with no way out.
     const facilitator = compose.match(/^ {2}facilitator:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? "";
     expect(facilitator).toMatch(/networks:\n(?:\s+- \w+\n)*\s+- search\n/);
