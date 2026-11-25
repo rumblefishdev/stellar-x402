@@ -20,9 +20,6 @@
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist .turbo"
   },
-  "dependencies": {
-    "@x402/fetch": "~2.31.0"
-  },
   "peerDependencies": {
     "@x402/core": "~2.31.0",
     "@x402/stellar": "~2.31.0"
