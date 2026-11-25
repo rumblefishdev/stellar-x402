@@ -98,10 +98,11 @@ Started before the owner agreed to the list (akot, 2026-11-25), in this order:
 3. **PR 2**: 0044's first step, done here: `x402HTTPClient`'s calls in order instead of
    `wrapFetchWithPayment`, under the same tests.
 4. **PR 3**: the seller's helpers and the trustline check; `examples/http-api` uses them.
-5. **PR 4**: the Bazaar client, after #245 (0137) merges.
+5. **PR 4**: the Bazaar client, on top of #245 (0137, merged 2026-11-25).
 
-To agree with others: bstruzyk the list; karolkow 0044's step moving here and the order with
-#245; okarcz 0092's codes and what D4's evidence is (0132 names none).
+To agree with others: bstruzyk the list; karolkow 0044's step moving here and the catalog
+tools moving onto the Bazaar client; okarcz 0092's codes and what D4's evidence is (0132 names
+none).
 
 ## Acceptance Criteria
 

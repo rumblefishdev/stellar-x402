@@ -124,8 +124,8 @@ upstream client.
   order. A buyer helper over the wrapper would be rewritten by it.
 - **0162**: paid MCP tools under the same limits as `call_paid_http`, through
   `wrapMCPClientWithPayment`.
-- **0137** (active, karolkow): the MCP's search tool over `withBazaar().search()`, with its own
-  error codes.
+- **0137** (karolkow, done: #245 merged 2026-11-25): the MCP's search tool over
+  `withBazaar().search()`, with its own error codes.
 - **0092**: the error names the account and the asset, the payer's and the `payTo`'s.
 - **The Rust crate** (0136): no facilitator URL in the library, only in its example
   (`https://x402-facilitator.sorobanscan.com`, one for both networks); the key through
@@ -243,8 +243,8 @@ path during M2. The first PR is early and a move only, with the testnet e2e run 
      before it reaches a model; and a deadline, since `listResources` takes no abort signal.
      Checking the answer's shape is the weaker reason: an SDK user trusts our facilitator here as
      at `/verify`.
-   - In M2, as this task's last PR, after karolkow's #245 (0137) merges: it only reads, and with
-     it D4 shows all three parties the RFP names.
+   - In M2, as this task's last PR, on top of karolkow's #245 (0137, merged): it only reads,
+     and with it D4 shows all three parties the RFP names.
    - No `searchAndPay`: Rail402's binds the payment to the listing's price and owner, which is
      the MCP's work here.
 10. **`upto`**, decided (akot, 2026-11-25): deferred to 0163. Published `@x402/stellar` has only
@@ -265,7 +265,8 @@ path during M2. The first PR is early and a move only, with the testnet e2e run 
     - Not checked: who holds the `@stellar-x402` scope on npm.
 12. **M2 and M3**, decided (akot, 2026-11-25):
     - M2, in order: 0092's MCP part; PR 1, the package and the buyer's move; PR 2, 0044's first
-      step; PR 3, the seller's helpers and the trustline check; PR 4, the Bazaar client after #245.
+      step; PR 3, the seller's helpers and the trustline check; PR 4, the Bazaar client on top of
+      #245.
     - M3 is 0163, spawned from this task as 0140 was from 0136: `validateListing`, whether SQLite
       becomes `/sqlite`, the buyer's core as a public API (with 0162), the `upto` helpers, and
       npm. So this task can close in M2 on its own list.
