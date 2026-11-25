@@ -99,12 +99,12 @@ on the money path. The `pay.test.ts` tests go through a fake seller and never mo
   prevented one (be5d836). No ordering fix since 2026-10-15, so nothing here is breaking today.
 - Stays: `x402Client`'s hooks and `refusal`, `paid`, `signingError`, because
   `selectPaymentRequirements` is private. `preview.ts` stays stricter by design.
-- **Proposed to move to 0102** (akot, 2026-11-25, PR #246): 0102 moves `pay.ts`'s paid round trip
-  into `@stellar-x402/sdk` (its PR 1: the round trip moved behind the SDK's new API) and then
-  does this step there (its PR 2), both under the same `pay.test.ts`. Done here first, the step would be written twice. If agreed, this
-  section closes when that PR merges.
+- **Done in 0102's PR 2** (akot, 2026-11-25): `packages/sdk/src/buyer/fetch.ts` runs these calls,
+  MCP pays through it, and `pay.test.ts` passes unchanged. The 402 bodies are read within
+  upstream's `readLimitedText` bound, and `@x402/fetch` is no longer a dependency.
 - Lost from the wrapper, none in use: the `onPaymentRequired` hook, the recovery retry and the
-  "Payment already attempted" guard. Keep the `Access-Control-Expose-Headers` request line.
+  "Payment already attempted" guard (the SDK refuses a caller's payment header before counting
+  anything, from #248's review). The `Access-Control-Expose-Headers` request line stays.
 
 ## Acceptance Criteria
 
