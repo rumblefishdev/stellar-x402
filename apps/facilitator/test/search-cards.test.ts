@@ -4,6 +4,9 @@ import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import type { CardListing, SearchCardStore } from "../src/ports/index.js";
 
+/** What the card rewrite reads and writes. */
+type CardRewriteStore = Pick<SearchCardStore, "listings" | "write">;
+
 const listing = (seq: string, description: string): CardListing => ({
   seq,
   resource: {
@@ -19,7 +22,7 @@ const listing = (seq: string, description: string): CardListing => ({
 /** A store over `listings` in catalog order, recording each card written. */
 function memoryStore(listings: CardListing[], write?: (seq: string) => boolean) {
   const written: string[] = [];
-  const store: SearchCardStore = {
+  const store: CardRewriteStore = {
     listings: async (after, limit) =>
       listings.filter((l) => Number(l.seq) > Number(after)).slice(0, limit),
     write: async (l) => {
@@ -31,7 +34,7 @@ function memoryStore(listings: CardListing[], write?: (seq: string) => boolean) 
   return { store, written };
 }
 
-const rewrite = (store: SearchCardStore, lines: string[] = [], metrics = memoryMetrics()) =>
+const rewrite = (store: CardRewriteStore, lines: string[] = [], metrics = memoryMetrics()) =>
   createSearchCardRewrite({
     store,
     logger: jsonLogger("debug", (line) => lines.push(line)),
@@ -78,7 +81,7 @@ describe("search card rewrite", () => {
   });
 
   it("logs and counts a failed read, and ends the rewrite", async () => {
-    const store: SearchCardStore = {
+    const store: CardRewriteStore = {
       listings: async () => {
         throw new Error("database down");
       },
@@ -99,7 +102,7 @@ describe("search card rewrite", () => {
     let writing!: () => void;
     const underWay = new Promise<void>((resolve) => (writing = resolve));
     const written: string[] = [];
-    const store: SearchCardStore = {
+    const store: CardRewriteStore = {
       listings: async (after) => (after === "0" ? [listing("1", "a"), listing("2", "b")] : []),
       write: async (l) => {
         writing();
