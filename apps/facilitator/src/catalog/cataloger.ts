@@ -65,7 +65,7 @@ export interface CatalogerDeps {
   /** The app clock, ms. */
   now?: () => number;
   /** The search vectors (ADR 0014): asked for the vector of each listing written. */
-  vectors?: Pick<SearchVectors, "listed">;
+  vectors: Pick<SearchVectors, "listed">;
 }
 
 /** How seeding one resource URL ended, a line of the seed's report (0155). */
@@ -429,7 +429,7 @@ export function createCataloger({
         metrics.increment("catalog_route_template_ignored_total", { origin });
       // Not awaited: the listing is stored, and a slow or failing model must not hold up the
       // check. `drain()` still waits for it, so it ends before the pools do.
-      if (vectors && outcome !== "stale") {
+      if (outcome !== "stale") {
         // Never rejects: `listed()` logs and counts its own failure.
         const vectored = vectors.listed(entry.key);
         inFlight.add(vectored);

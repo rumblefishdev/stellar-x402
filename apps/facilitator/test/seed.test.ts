@@ -17,6 +17,7 @@ import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
 import { startSeller, type Seller } from "./seller.js";
+import { noVectors } from "./vectors.js";
 
 describe("the hosts file (0155 decision 13)", () => {
   it("reads one host a line, skipping blank lines and # comments", () => {
@@ -39,6 +40,14 @@ describe("the hosts file (0155 decision 13)", () => {
     await expect(seedMain([path], {})).rejects.toThrow(
       new SeedError("the hosts file has lines that aren't hosts: host:abc"),
     );
+  });
+
+  it("refuses to seed without the search model, so no seeded listing waits for a restart to be found (ADR 0014)", async () => {
+    const path = join(await mkdtemp(join(tmpdir(), "seed-")), "hosts.txt");
+    await writeFile(path, "a.example\n");
+    await expect(
+      seedMain([path], { DATABASE_URL: "postgres://user:pass@127.0.0.1:9/db" }),
+    ).rejects.toThrow(/SEARCH_MODEL_URL/);
   });
 
   it("names every line that isn't a host, so a typo never vanishes", () => {
@@ -158,6 +167,7 @@ describe("seedHosts (0155)", () => {
       store: stores.catalog,
       attempts: stores.catalogAttempts,
       rateLimits: stores.rateLimits,
+      vectors: noVectors,
       metrics: memoryMetrics(),
       logger,
       listLocal: true,

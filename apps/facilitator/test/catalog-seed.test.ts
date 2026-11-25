@@ -5,6 +5,7 @@ import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
 import { startSeller, type Seller } from "./seller.js";
+import { noVectors } from "./vectors.js";
 
 const offer = (overrides: Partial<PaymentRequirements> = {}) =>
   ({
@@ -49,6 +50,7 @@ function setup(now?: () => number) {
     store: stores.catalog,
     attempts: stores.catalogAttempts,
     rateLimits: stores.rateLimits,
+    vectors: noVectors,
     metrics,
     logger,
     listLocal: true,

@@ -11,6 +11,7 @@ import type { SettlementRecord } from "../src/ports/index.js";
 import { testDatabase } from "./database.js";
 import { startMcpSeller, type McpSeller } from "./mcp-seller.js";
 import { startSeller, type Seller } from "./seller.js";
+import { noVectors } from "./vectors.js";
 
 const requirements = {
   scheme: "exact",
@@ -84,6 +85,7 @@ function setup(deps: Partial<CatalogerDeps> = {}) {
     store,
     attempts: stores.catalogAttempts,
     rateLimits: stores.rateLimits,
+    vectors: noVectors,
     metrics,
     logger,
     listLocal: true,

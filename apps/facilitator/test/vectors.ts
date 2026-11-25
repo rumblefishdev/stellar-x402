@@ -101,3 +101,6 @@ export const noSearchModel: Embedder = {
     throw new Error("no search model in this test");
   },
 };
+
+/** The vectors for a cataloger whose tests don't search by meaning: each write asks, nothing is stored. */
+export const noVectors = { listed: async () => {} };

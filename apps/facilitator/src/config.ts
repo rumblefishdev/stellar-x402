@@ -127,6 +127,9 @@ function isPostgresUrl(value: string): boolean {
 /** Holds a password, so it is never logged and no message echoes it. */
 const databaseUrl = z.string().refine(isPostgresUrl, "must be a postgres:// URL");
 
+/** The search model container's URL (ADR 0014), read by the service and by `pnpm seed`. */
+const searchModelUrl = z.string().refine(isHttpUrl, "must be an http(s) URL without credentials");
+
 const envSchema = z
   .object({
     NETWORK: oneOf([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]).default(
@@ -314,7 +317,7 @@ const envSchema = z
      * The search model container (ADR 0014), on the environment's internal network. Required, so
      * an environment that forgot it stops at start instead of searching by words alone.
      */
-    SEARCH_MODEL_URL: z.string().refine(isHttpUrl, "must be an http(s) URL without credentials"),
+    SEARCH_MODEL_URL: searchModelUrl,
 
     /** The breakers are fixed in code now (0024, `BREAKERS` in `spend/policy.ts`); refused, like `STORE`. */
     BREAKER_FAILURES: z.string().optional(),
@@ -433,6 +436,7 @@ const envSchema = z
 
 /** `pnpm migrate` needs only the database. */
 const migrateEnvSchema = z.object({ DATABASE_URL: databaseUrl });
+const seedEnvSchema = z.object({ DATABASE_URL: databaseUrl, SEARCH_MODEL_URL: searchModelUrl });
 
 export type Env = z.input<typeof envSchema>;
 
@@ -650,6 +654,21 @@ export function parseMigrateConfig(env: Record<string, string | undefined>): {
   databaseUrl: string;
 } {
   return { databaseUrl: parseEnv(migrateEnvSchema, env).DATABASE_URL };
+}
+
+/**
+ * The config of `pnpm seed`: the database, and the search model, so each seeded listing gets its
+ * vector at once and search finds it before the facilitator's next start (ADR 0014).
+ */
+export function parseSeedConfig(env: Record<string, string | undefined>): {
+  databaseUrl: string;
+  searchModel: { url: string; timeoutMs: number };
+} {
+  const e = parseEnv(seedEnvSchema, env);
+  return {
+    databaseUrl: e.DATABASE_URL,
+    searchModel: { url: e.SEARCH_MODEL_URL, timeoutMs: SEARCH_MODEL_TIMEOUT_MS },
+  };
 }
 
 /** `pnpm keys` reads the plans as the service does, so `plan` sets only one the service knows. */
