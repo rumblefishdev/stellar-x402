@@ -114,7 +114,11 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
         if (card === undefined)
           throw new Error("the catalog holds no card for the listing written");
         const text = meaningText(card);
-        await store.writeVector(card, await embed(text), sha256(text));
+        const textHash = sha256(text);
+        // A write that left the card's text as it was keeps its vector; a vector of another
+        // model waits for the next start's pass, which knows the model.
+        if (card.model !== null && card.textHash === textHash) return;
+        await store.writeVector(card, await embed(text), textHash);
       } catch (error) {
         logger.warn("search_vector_failed", { resourceUrl: key.resourceUrl, error });
         metrics.increment("search_vector_failures_total");

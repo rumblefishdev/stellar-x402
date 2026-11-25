@@ -259,6 +259,18 @@ describe("a listing's vector after the catalog writes it (0120 E)", () => {
     expect(state.maxInFlight).toBe(1);
   });
 
+  it("asks the model nothing when the listing's text is the one its vector was made from", async () => {
+    await list("one", { description: "Weather one" });
+    const first = fakeEmbedder();
+    await vectors(first.embedder).listed(key("one"));
+    const again = fakeEmbedder();
+    await vectors(again.embedder).listed(key("one"));
+    expect(again.state.calls).toEqual([]);
+    await list("one", { description: "Weather one, hourly" }, 2);
+    await vectors(again.embedder).listed(key("one"));
+    expect(again.state.calls).toHaveLength(1);
+  });
+
   it("logs and counts a failure, and resolves: the listing stays stored", async () => {
     await list("one", { description: "Weather one" });
     const { embedder } = fakeEmbedder(() => true);
