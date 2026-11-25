@@ -633,7 +633,7 @@ describe("cataloger", () => {
   // 0120 point E: the vector is computed after the catalog's write, and its failure is the
   // vectors' own (logged and counted there): the listing stands.
   it("computes the vector of a listing it wrote, and only of one it wrote (0120 E)", async () => {
-    const listed = vi.fn(async (_key: unknown) => {});
+    const listed = vi.fn(async () => {});
     const { cataloger, list } = setup({ vectors: { listed } } as Partial<CatalogerDeps>);
     await cataloger.onSuccess(record(valid), "settle");
     const [entry] = await list();

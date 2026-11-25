@@ -15,8 +15,10 @@ export async function startServer(options: { modelDir: string; port: number }) {
       response.writeHead(status, { "content-type": "application/json" });
       response.end(JSON.stringify(body));
     };
-    if (request.method === "GET" && request.url === "/health") return answer(200, { model: MODEL_ID });
-    if (request.method !== "POST" || request.url !== "/embed") return answer(404, { error: "not_found" });
+    if (request.method === "GET" && request.url === "/health")
+      return answer(200, { model: MODEL_ID });
+    if (request.method !== "POST" || request.url !== "/embed")
+      return answer(404, { error: "not_found" });
     let body: unknown;
     try {
       const chunks: Buffer[] = [];
@@ -38,6 +40,9 @@ export async function startServer(options: { modelDir: string; port: number }) {
   const { port } = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+    close: () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
   };
 }
