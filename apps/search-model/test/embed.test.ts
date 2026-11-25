@@ -29,17 +29,17 @@ describe("cutText (0120 C, B: the text is cut at 2,000 characters)", () => {
   });
 });
 
-describe("cutTokens (0120 C: at most 512 tokens, the closing one kept)", () => {
+describe("cutTokens (0120 C: at most 512 tokens for a listing, the closing one kept)", () => {
   const ids = (length: number) =>
     Array.from({ length }, (_, i) => (i === length - 1 ? 102 : 1_000 + i));
 
   it.each([0, 1, 511, 512])("keeps %i tokens as they are", (length) => {
-    expect(cutTokens(ids(length))).toEqual(ids(length));
+    expect(cutTokens(ids(length), 512)).toEqual(ids(length));
   });
 
   it.each([513, 600, 5_000])("cuts %i tokens to the first 511 and the closing one", (length) => {
     const all = ids(length);
-    const cut = cutTokens(all);
+    const cut = cutTokens(all, 512);
     expect(cut).toHaveLength(512);
     expect(cut.slice(0, 511)).toEqual(all.slice(0, 511));
     expect(cut[511]).toBe(102);
@@ -48,8 +48,22 @@ describe("cutTokens (0120 C: at most 512 tokens, the closing one kept)", () => {
   it("leaves the tokens it was given as they were", () => {
     const all = ids(600);
     const copy = [...all];
-    cutTokens(all);
+    cutTokens(all, 512);
     expect(all).toEqual(copy);
+  });
+});
+
+describe("cutTokens for a query (0120 W250: at most 256 tokens)", () => {
+  const ids = (length: number) =>
+    Array.from({ length }, (_, i) => (i === length - 1 ? 102 : 1_000 + i));
+
+  it("keeps 256 tokens and cuts 257 to the first 255 and the closing one", () => {
+    expect(cutTokens(ids(256), 256)).toEqual(ids(256));
+    const all = ids(257);
+    const cut = cutTokens(all, 256);
+    expect(cut).toHaveLength(256);
+    expect(cut.slice(0, 255)).toEqual(all.slice(0, 255));
+    expect(cut[255]).toBe(102);
   });
 });
 

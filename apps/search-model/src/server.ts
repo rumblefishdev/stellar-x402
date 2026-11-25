@@ -4,7 +4,8 @@ import { loadModel } from "./embed.js";
 import { MODEL_ID } from "./model.js";
 
 /**
- * The search model's HTTP server (ADR 0014): `POST /embed` with `{"text": "..."}` answers
+ * The search model's HTTP server (ADR 0014): `POST /embed` with `{"text": "...", "kind": "query"}`
+ * (`kind` is `"listing"` when left out) answers
  * `{"model", "vector"}`; `GET /health` answers 200 once the model is loaded. It reaches nothing
  * and holds no secret: the facilitator calls it over the environment's internal network.
  */
@@ -27,10 +28,11 @@ export async function startServer(options: { modelDir: string; port: number }) {
     } catch {
       return answer(400, { error: "body_not_json" });
     }
-    const text = (body as { text?: unknown } | null)?.text;
+    const { text, kind = "listing" } = (body ?? {}) as { text?: unknown; kind?: unknown };
     if (typeof text !== "string") return answer(400, { error: "text_not_a_string" });
+    if (kind !== "listing" && kind !== "query") return answer(400, { error: "unknown_kind" });
     try {
-      answer(200, { model: MODEL_ID, vector: await embed(text) });
+      answer(200, { model: MODEL_ID, vector: await embed(text, kind) });
     } catch (error) {
       console.error(JSON.stringify({ event: "embed_failed", error: String(error) }));
       answer(500, { error: "embed_failed" });

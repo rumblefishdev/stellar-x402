@@ -52,14 +52,17 @@ describe("search model client (0120 D)", () => {
       json(response, 200, { model: "granite-test", vector: VECTOR }),
     );
     const client = createSearchModelClient({ url: model.url, timeoutMs: 2_000 });
-    await expect(client.embed("weather in Kraków")).resolves.toEqual({
+    await expect(client.embed("weather in Kraków", "query")).resolves.toEqual({
       model: "granite-test",
       vector: VECTOR,
     });
     expect(model.requests).toHaveLength(1);
     expect(model.requests[0]).toMatchObject({ method: "POST", url: "/embed" });
     expect(model.requests[0]!.type).toMatch(/^application\/json/);
-    expect(JSON.parse(model.requests[0]!.body)).toEqual({ text: "weather in Kraków" });
+    expect(JSON.parse(model.requests[0]!.body)).toEqual({
+      text: "weather in Kraków",
+      kind: "query",
+    });
   });
 
   it("rejects when the container does not answer within the timeout, without waiting for it", async () => {
@@ -68,7 +71,7 @@ describe("search model client (0120 D)", () => {
     });
     const client = createSearchModelClient({ url: model.url, timeoutMs: 100 });
     const started = Date.now();
-    await expect(client.embed("weather")).rejects.toThrow();
+    await expect(client.embed("weather", "listing")).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
@@ -80,7 +83,7 @@ describe("search model client (0120 D)", () => {
     });
     const client = createSearchModelClient({ url: model.url, timeoutMs: 100 });
     const started = Date.now();
-    await expect(client.embed("weather")).rejects.toThrow();
+    await expect(client.embed("weather", "listing")).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
@@ -92,7 +95,7 @@ describe("search model client (0120 D)", () => {
   ])("rejects an answer of %i", async (status, body) => {
     const model = await stub((_request, _body, response) => json(response, status, body));
     const client = createSearchModelClient({ url: model.url, timeoutMs: 2_000 });
-    await expect(client.embed("weather")).rejects.toThrow();
+    await expect(client.embed("weather", "listing")).rejects.toThrow();
   });
 
   it("rejects when no container listens", async () => {
@@ -100,7 +103,7 @@ describe("search model client (0120 D)", () => {
     const url = model.url;
     for (const server of servers.splice(0)) await new Promise((resolve) => server.close(resolve));
     const client = createSearchModelClient({ url, timeoutMs: 2_000 });
-    await expect(client.embed("weather")).rejects.toThrow();
+    await expect(client.embed("weather", "listing")).rejects.toThrow();
   });
 
   // Not in point D's text; "errors are always loud": a 200 that isn't the contract's answer is a
@@ -120,7 +123,7 @@ describe("search model client (0120 D)", () => {
       response.end(body);
     });
     const client = createSearchModelClient({ url: model.url, timeoutMs: 2_000 });
-    await expect(client.embed("weather")).rejects.toThrow();
+    await expect(client.embed("weather", "listing")).rejects.toThrow();
   });
 });
 

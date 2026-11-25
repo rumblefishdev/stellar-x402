@@ -9,17 +9,25 @@ const DIMS = 384;
 const MAX_CHARS = 2_000;
 /** The model reads at most 512 tokens (its `max_position_embeddings` is 514, two are reserved). */
 const MAX_TOKENS = 512;
+/**
+ * A query is cut at 256 tokens, about 1,200 characters: a long query then costs about half as
+ * much, and the queries measured (at most 31 tokens) are never cut (task 0120, W250).
+ */
+const MAX_QUERY_TOKENS = 256;
 
 /** The text's first 2,000 characters, counted as Unicode code points so a cut never splits one. */
 export function cutText(text: string): string {
   return Array.from(text).slice(0, MAX_CHARS).join("");
 }
 
-/** At most 512 tokens: a longer text keeps its first 511 and its closing token. */
-export function cutTokens(ids: number[]): number[] {
-  if (ids.length <= MAX_TOKENS) return ids;
-  return [...ids.slice(0, MAX_TOKENS - 1), ids[ids.length - 1]!];
+/** At most `max` tokens: a longer text keeps its first `max - 1` and its closing token. */
+export function cutTokens(ids: number[], max: number): number[] {
+  if (ids.length <= max) return ids;
+  return [...ids.slice(0, max - 1), ids[ids.length - 1]!];
 }
+
+/** What a text is: a listing's, read up to the model's 512 tokens, or a query, up to 256. */
+export type TextKind = "listing" | "query";
 
 /**
  * The text's vector from the model's output: the first token's row (granite pools by CLS,
@@ -32,7 +40,9 @@ export function clsVector(hidden: Float32Array, dims: number): Float32Array {
 }
 
 /** Loads the model from `modelDir` and returns the function that embeds one text. */
-export async function loadModel(modelDir: string): Promise<(text: string) => Promise<number[]>> {
+export async function loadModel(
+  modelDir: string,
+): Promise<(text: string, kind: TextKind) => Promise<number[]>> {
   const tokenizer = new Tokenizer(
     JSON.parse(await readFile(join(modelDir, "tokenizer.json"), "utf8")),
     JSON.parse(await readFile(join(modelDir, "tokenizer_config.json"), "utf8")),
@@ -42,8 +52,9 @@ export async function loadModel(modelDir: string): Promise<(text: string) => Pro
     intraOpNumThreads: 1,
     interOpNumThreads: 1,
   });
-  return async (text) => {
-    const ids = cutTokens(tokenizer.encode(cutText(text)).ids);
+  return async (text, kind) => {
+    const max = kind === "query" ? MAX_QUERY_TOKENS : MAX_TOKENS;
+    const ids = cutTokens(tokenizer.encode(cutText(text)).ids, max);
     const shape = [1, ids.length];
     const output = await session.run({
       input_ids: new Tensor("int64", BigInt64Array.from(ids, BigInt), shape),

@@ -76,8 +76,10 @@ The measurements are in
   - the query's words are OR-ed, so a long sentence still matches, and ranked by `ts_rank_cd`.
 - **Meaning.**
   - The model is `ibm-granite/granite-embedding-30m-english`: 30M parameters, 384 dimensions,
-    Apache-2.0, CLS pooling, no query prefix, inputs cut at 512 tokens. Listings and queries are
-    embedded the same way and the vectors normalized. The meaning part reads the fields joined,
+    Apache-2.0, CLS pooling, no query prefix. A listing is cut at 512 tokens, a query at 256
+    (about 1,200 characters), so a long query costs about half as much; the queries measured (at
+    most 31 tokens) are never cut. Listings and queries are otherwise embedded the same way and
+    the vectors normalized. The meaning part reads the fields joined,
     cut at 2,000 characters.
   - Vectors, from `pgvector`, on the listing's search card: `embedding`, one vector per listing,
     with `model`, the model that made it, and `text_hash`, the hash of the text it was made from.

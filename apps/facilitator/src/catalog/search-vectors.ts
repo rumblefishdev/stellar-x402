@@ -57,7 +57,7 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
   // listing at a time and a query's vector waits behind one listing at most.
   let turn: Promise<unknown> = Promise.resolve();
   const embed = (text: string) => {
-    const answer = turn.then(() => embedder.embed(text));
+    const answer = turn.then(() => embedder.embed(text, "listing"));
     // The next one waits for this one to end, failed or not; its caller still gets the failure.
     turn = answer.catch(() => {});
     return answer;

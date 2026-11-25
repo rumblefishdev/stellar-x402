@@ -18,11 +18,11 @@ const ANSWER = z.object({
  */
 export function createSearchModelClient(opts: { url: string; timeoutMs: number }): Embedder {
   return {
-    async embed(text) {
+    async embed(text, kind) {
       const response = await fetch(`${opts.url}/embed`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, kind }),
         signal: AbortSignal.timeout(opts.timeoutMs),
       });
       const body = await response.text();

@@ -30,6 +30,19 @@ describe.skipIf(MODEL_DIR === undefined)("search model server (0120 C, needs MOD
     return (await response.json()) as { model: string; vector: number[] };
   };
 
+  it("reads a query only up to 256 tokens, a listing up to 512 (W250)", async () => {
+    const long = "weather forecast for every city and hour ".repeat(60);
+    const asQuery = await embed(JSON.stringify({ text: long, kind: "query" }));
+    const asListing = await embed(JSON.stringify({ text: long }));
+    const vectorIn = async (response: Response) =>
+      ((await response.json()) as { vector: number[] }).vector;
+    const [query, listing] = [await vectorIn(asQuery), await vectorIn(asListing)];
+    expect(query).not.toEqual(listing);
+    const short = "weather in Warsaw";
+    const shortQuery = await embed(JSON.stringify({ text: short, kind: "query" }));
+    expect(await vectorIn(shortQuery)).toEqual((await vectorOf(short)).vector);
+  });
+
   it("answers its health check", async () => {
     expect((await fetch(`${server.url}/health`)).status).toBe(200);
   });
@@ -82,6 +95,7 @@ describe.skipIf(MODEL_DIR === undefined)("search model server (0120 C, needs MOD
     ["a text that is null", JSON.stringify({ text: null })],
     ["a text that is a list", JSON.stringify({ text: ["weather"] })],
     ["a body that isn't JSON", "weather"],
+    ["a kind it doesn't know", JSON.stringify({ text: "weather", kind: "tool" })],
   ])("answers 400 to %s", async (_name, body) => {
     expect((await embed(body)).status).toBe(400);
   });

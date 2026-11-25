@@ -175,7 +175,7 @@ export function discoverySearch(
     }
     let meaning: Embedding | undefined;
     try {
-      meaning = await embedder.embed(parsed.search.text);
+      meaning = await embedder.embed(parsed.search.text, "query");
     } catch (error) {
       logger.warn("search_words_only", { error });
       metrics.increment("search_words_only_total");
