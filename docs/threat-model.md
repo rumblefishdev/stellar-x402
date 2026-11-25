@@ -807,7 +807,8 @@ listings that sellers write. Its first part ranks by words alone; the part by me
   every occurrence: a description of "weather" 62 times, inside its 500-character limit, ranks 31
   for `weather` against 1 for a listing named "Weather"; a URL path of the word 250 times, inside
   the 2,048-character URL limit, ranks 250. A listing costs one small settlement, or a seed entry.
-- **Mitigation:** None while search ranks by words alone, so that part is not deployed by itself.
+- **Mitigation:** None while search ranks by words alone. Testnet production serves it so, as an
+  accepted risk, until the meaning part lands.
   Once the meaning part lands, the words weigh a fifth of a listing's score and count only by
   their rank among matches (ADR 0014), which bounds what repetition buys.
 - **Residual risk:** When the model is down, search falls back to words alone and repetition wins
