@@ -726,7 +726,8 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   hot key is each account's only signer with every threshold at 0, so a thief can also lock us out
   of the channels; we rebuild under a new key (runbook, "lost access"). Revisited when the float
   and reserves pass 500 XLM or before `upto` reaches mainnet. Upgrades: TPM-bound credentials,
-  OpenBao on its own machine, a second key at high (ADR 0015's B0).
+  OpenBao on its own machine, a second key in KMS in a separate AWS account with both keys needed
+  for high (ADR 0015's B0).
 
 #### A stolen key charges open `upto` authorizations
 
