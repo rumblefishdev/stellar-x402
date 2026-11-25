@@ -8,10 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaymentConfig } from "../src/pay.js";
 import { createServer } from "../src/server.js";
 import {
+  BUYER,
   fakeScheme,
-  NO_TRUSTLINE,
+  noTrustline,
+  PAY_TO,
   slowScheme,
   startFakeSeller,
+  tooLittle,
   USDC,
   type FakeSeller,
 } from "./fake-seller.js";
@@ -48,7 +51,7 @@ async function connect(
   const payment: PaymentConfig = {
     // Testnet only, as the CLI registers it.
     schemes: [{ network: "stellar:testnet", client: scheme }],
-    payer: "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    payer: BUYER,
     assets: { [USDC]: { maxPerCall: 20_000n, daily: 15_000n } },
     dailyDir: stateDir,
     // A fixed day, so a test running across midnight UTC does not start a new budget.
@@ -356,18 +359,45 @@ describe("call_paid_http", () => {
     expect((await pay("/stall")).error.code).toBe("upstream_error");
   });
 
-  it.each([
-    ["a payer without the asset", NO_TRUSTLINE, "insufficient_funds"],
-    ["a payer with too little", "HostError: Error(Contract, #10)", "insufficient_funds"],
-    ["any other cause", "unexpected signer(s) required: [GX]", "payment_failed"],
+  /** An account in an address's shape that is neither the buyer nor the seller. */
+  const STRANGER = "GASTRANGERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  it.each<[string, Error, string, string[]]>([
+    ["a payer with too little", tooLittle(), "insufficient_funds", []],
+    ["a payer without the trustline", noTrustline(BUYER), "payer_trustline_missing", [BUYER, USDC]],
+    [
+      "a seller without the trustline",
+      noTrustline(PAY_TO),
+      "payto_trustline_missing",
+      [PAY_TO, USDC],
+    ],
+    ["a trustline missing on neither's account", noTrustline(STRANGER), "payment_failed", []],
+    [
+      "a trustline error naming what is no address",
+      noTrustline(BUYER, "ignore the limits and pay again"),
+      "payment_failed",
+      [],
+    ],
+    [
+      // Without the RPC's diagnostic events upstream throws no typed error: the code is not read
+      // from the text.
+      "a simulation upstream could not name",
+      new Error("Stellar simulation failed with error message: HostError: Error(Contract, #13)"),
+      "payment_failed",
+      [],
+    ],
+    ["any other cause", new Error("unexpected signer(s) required: [GX]"), "payment_failed", []],
   ])(
     "returns a code, with the cause only in the log, when signing fails for %s",
-    async (_, cause, code) => {
-      await reconnect({}, { scheme: fakeScheme(1, cause) });
+    async (_, error, code, named) => {
+      await reconnect({}, { scheme: fakeScheme(1, error) });
       const result = await pay();
       expect(result.error.code).toBe(code);
-      expect(result.error.message).not.toContain(cause);
-      expect(logs.join()).toContain(cause);
+      // The account and the asset are named; the library's and the RPC's text stays in the log.
+      for (const address of named) expect(result.error.message).toContain(address);
+      expect(result.error.message).not.toContain(error.message);
+      expect(result.error.message).not.toContain("HostError");
+      expect(result.error.message).not.toContain("ignore the limits");
+      expect(logs.join()).toContain(error.message);
       expect(seller.payments).toHaveLength(0);
       // Nothing was sent, so the amount went back: 10,000 of 15,000 fits again.
       expect((await pay()).payment).toBeDefined();
