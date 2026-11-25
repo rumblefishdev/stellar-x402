@@ -1224,7 +1224,7 @@ describe("PostgreSQL stores", () => {
     await db.empty();
     const { rows: columns } = await pool.query(
       `SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute
-        WHERE attrelid = 'catalog_search'::regclass AND attname IN ('model', 'text_hash', 'embedding')
+        WHERE attrelid = 'catalog_search'::regclass AND attname IN ('model', 'embedding')
         ORDER BY attname`,
     );
     expect(columns).toEqual([

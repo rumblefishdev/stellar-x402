@@ -52,7 +52,7 @@ The measurements are in
   One TypeScript function, `searchFields` in `@stellar-x402/bazaar`, builds the fields from the
   stored listing, next to the validator that knows its shape. They go into the listing's search
   card: a row of its own table, `catalog_search`, one per catalog listing, which the words part,
-  the meaning part and the text's hash all read, so they can't disagree about what a listing says.
+  the meaning part and the vector's write all read, so they can't disagree about what a listing says.
   The catalog's write stores the listing and its card in one statement, so search finds what the
   catalog holds from the moment it holds it. Each release, as it starts, rewrites every card once
   in the background with its own rules, so a change to the rules, the listings stored before cards
@@ -82,7 +82,7 @@ The measurements are in
     the vectors normalized. The meaning part reads the fields joined,
     cut at 2,000 characters.
   - Vectors, from `pgvector`, on the listing's search card: `embedding`, one vector per listing,
-    with `model`, the model that made it, and `text_hash`, the hash of the text it was made from.
+    with `model`, the model that made it; the write that changes the card's text clears both.
     Search reads only vectors of the current model.
   - Search compares the query's vector with every listing's that passes the filters (an exact
     scan, no index).

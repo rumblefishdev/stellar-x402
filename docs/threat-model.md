@@ -840,4 +840,25 @@ search model can't be used.
   `search-words-only` fires. Nothing restarts an overloaded model: a restart would drop every
   query in its queue and leave search on words alone while the model loads, about 12 s.
 - **Residual risk:** A client within its limit can keep search on words alone for every client,
-  and a hung model stays hung until an operator restarts it.
+  and a hung model stays hung until an operator restarts it. A query is cut at 256 tokens, which
+  halves a long query's cost. The model computes a query its caller gave up on, so its backlog
+  outlasts a burst. A listing cataloged while the model fails gets no vector until the next start,
+  and search by meaning leaves it out until then.
+
+#### Ranking by meaning
+
+- **Attack:** A seller writes a listing whose text sits close to many queries, so it crosses the
+  0.60 floor for searches it doesn't serve. Meaning weighs four fifths of the score.
+- **Mitigation:** None beyond the floor and the fusion; the floor and the weights come from 0134's
+  40 queries.
+- **Residual risk:** Not measured. Task 0135's labelled set is where it would show.
+
+#### The model's files and runtime
+
+- **Attack:** The model's files come from Hugging Face at a pinned revision when the image is
+  built, and onnxruntime's binaries from npm. A changed file at the source reaches the image that
+  also holds the payment code.
+- **Mitigation:** The revision is pinned, the npm lockfile holds integrity hashes, the container
+  is read-only, without capabilities and on a network with no way out, and onnxruntime's
+  telemetry is off (`ORT_DISABLE_TELEMETRY`).
+- **Residual risk:** No hash of our own checks the model's files.
