@@ -27,6 +27,7 @@ import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
 import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
 import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 type EmfModule = typeof import("../src/adapters/emf-metrics.js");
 type EmfWriter = ReturnType<EmfModule["emfMetrics"]>;
@@ -100,6 +101,7 @@ describe("facilitator boot", () => {
     });
     app = await start({
       config,
+      embedder: noSearchModel,
       logger,
       metrics: memoryMetrics(),
       stores: db.stores(),

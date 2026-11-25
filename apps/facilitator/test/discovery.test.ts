@@ -15,6 +15,7 @@ import type { Settle } from "../src/settlement/settle.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 /** The network `parseConfig` defaults to: the one the route below settles on. */
 const SERVED = STELLAR_NETWORKS.testnet;
@@ -191,6 +192,7 @@ describe("GET /discovery/resources", () => {
     await seed(stores);
     app = await start({
       config,
+      embedder: noSearchModel,
       logger,
       metrics,
       stores,

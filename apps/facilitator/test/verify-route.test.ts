@@ -19,6 +19,7 @@ import {
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
 import { signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -57,6 +58,7 @@ describe("POST /verify", () => {
     const logger = jsonLogger("debug", (line) => lines.push(line));
     app = await start({
       config,
+      embedder: noSearchModel,
       logger,
       metrics,
       stores: db.stores(),

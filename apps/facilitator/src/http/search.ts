@@ -146,7 +146,7 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
  */
 export function discoverySearch(
   catalog: CatalogStore,
-  embedder: Embedder | undefined,
+  embedder: Embedder,
   logger: Logger,
   metrics: ProcessMetrics,
 ): RequestHandler {
@@ -175,7 +175,6 @@ export function discoverySearch(
     }
     let meaning: Embedding | undefined;
     try {
-      if (embedder === undefined) throw new Error("no search model is configured");
       meaning = await embedder.embed(parsed.search.text);
     } catch (error) {
       logger.warn("search_words_only", { error });

@@ -16,6 +16,7 @@ import type { Verify } from "../src/settlement/verify.js";
 import { start, type Started } from "../src/start.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 const SERVED = STELLAR_NETWORKS.testnet;
 const OTHER = STELLAR_NETWORKS.pubnet;
@@ -201,6 +202,7 @@ describe("GET /discovery/search", () => {
     await seed(stores);
     app = await start({
       config,
+      embedder: noSearchModel,
       logger,
       metrics,
       stores,

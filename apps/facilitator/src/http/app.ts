@@ -62,8 +62,8 @@ export interface AppDeps {
   drain?: () => Promise<void>;
   /** The facilitator key's signer as `/health` reports it (0036); tests may leave it out. */
   signerState?: () => SignerState;
-  /** The search model (ADR 0014); without it, `/discovery/search` ranks by words alone. */
-  embedder?: Embedder;
+  /** The search model (ADR 0014); `/discovery/search` ranks by words alone while it fails. */
+  embedder: Embedder;
 }
 
 /** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */

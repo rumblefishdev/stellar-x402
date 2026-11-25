@@ -12,6 +12,7 @@ import { memoryMetrics } from "../src/metrics.js";
 import type { RateLimitStore, Stores } from "../src/ports/index.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 const db = testDatabase();
 beforeEach(db.empty);
@@ -44,6 +45,7 @@ async function serve(env: Record<string, string> = {}, stores: Stores = db.store
   const lines: string[] = [];
   app = await start({
     config,
+    embedder: noSearchModel,
     logger: jsonLogger("debug", (line) => lines.push(line)),
     metrics: memoryMetrics(),
     stores,

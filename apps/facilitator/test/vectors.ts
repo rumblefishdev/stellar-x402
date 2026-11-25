@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
-import type { CatalogKey } from "../src/ports/index.js";
+import type { CatalogKey, Embedder } from "../src/ports/index.js";
 
 /** The model's vector size (ADR 0014: granite-embedding-30m-english, 384 dimensions). */
 export const DIMS = 384;
@@ -91,3 +91,13 @@ export function sameVector(actual: number[] | null, expected: number[]): boolean
   if (actual === null || actual.length !== expected.length) return false;
   return actual.every((value, i) => Math.abs(value - expected[i]!) < 1e-6);
 }
+
+/**
+ * A search model that is down, for tests that don't search by meaning: `/discovery/search` then
+ * ranks by words alone, as it does while the model fails (ADR 0014).
+ */
+export const noSearchModel: Embedder = {
+  embed: async () => {
+    throw new Error("no search model in this test");
+  },
+};

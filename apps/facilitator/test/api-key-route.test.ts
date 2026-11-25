@@ -13,6 +13,7 @@ import type { Verify } from "../src/settlement/verify.js";
 import { start, type Started } from "../src/start.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 const db = testDatabase();
 beforeEach(db.empty);
@@ -86,6 +87,7 @@ async function serve(network: Network, env: Record<string, string> = {}) {
   const lines: string[] = [];
   app = await start({
     config,
+    embedder: noSearchModel,
     logger: jsonLogger("debug", (line) => lines.push(line)),
     metrics: memoryMetrics(),
     stores,
