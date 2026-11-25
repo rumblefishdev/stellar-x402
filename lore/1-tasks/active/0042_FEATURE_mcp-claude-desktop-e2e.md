@@ -7,7 +7,7 @@ owner: bstruzyk
 milestone: 2
 related_adr: []
 related_tasks: ["0037", "0032", "0041", "0063", "0137", "0026", "0044", "0069"]
-tags: [mcp, dev-tools, e2e, priority-medium, effort-small]
+tags: [mcp, dev-tools, e2e, priority-medium, effort-medium]
 links: []
 history:
   - date: "2026-10-13"
@@ -28,6 +28,12 @@ history:
     note: >
       Replanned: the run must work for any README reader on any day, so the seller stays up on our
       server instead of a tunnel; the agent searches (0137) instead of listing.
+  - date: "2026-11-25"
+    status: active
+    who: karolkow
+    note: >
+      Review of the plan: the 402 must name https, the seller's check stays out of the
+      facilitator's watchdog, its own network, and reset recovery is part of the task.
 ---
 
 # A seller that always answers in the testnet catalog, found and paid from Claude Desktop
@@ -52,8 +58,16 @@ pay, any day.
   or the payment never reaches our catalog. It has no Dockerfile yet.
 - The server's tunnel is managed in Cloudflare (`--token-file`), so the seller's hostname is added
   there by whoever holds the zone; the server's owner reviews and deploys (0026).
-- The seller needs no rate limit of its own: the facilitator limits `/verify` per client
-  (`apps/facilitator/README.md`, `RATE_LIMIT_VERIFY`).
+- Behind the tunnel Express sees plain http, so without a public URL the 402 names an `http://`
+  resource, which the cataloger refuses (`packages/seller-fetch/src/guard.ts`, `not_https`): the
+  seller takes its public origin from the environment. The listing from 0136 was https because it
+  came from the Rust seller, not this example.
+- The seller gets its own Compose network with `cloudflared` only, not `edge`, and calls our
+  facilitator at its public URL, so it is a client like any other.
+- The watchdog restarts the facilitator when the facilitator's healthcheck fails
+  (`deploy/libexec/x402-watchdog`), so the seller's check stays out of it.
+- A testnet reset removes the listing, the seller's account and its trustline, and 0069 may drop a
+  listing nobody pays for; keeping the listing alive is part of this task.
 - 0037 proved list then pay over MCP stdio, and 0137 search then pay, both with the SDK client; this
   task is the same path in Claude Desktop against the deployed catalog.
 - Dead listings are removed by 0069, not here.
@@ -61,9 +75,11 @@ pay, any day.
 ## Acceptance Criteria
 
 - [ ] `examples/http-api` runs on the production server next to the facilitator, at its own public
-      https hostname, settling through our facilitator, and is listed in the testnet catalog
+      https hostname, settling through our facilitator; its 402 names an `https://` resource, and it
+      is listed in the testnet catalog
 - [ ] The README's catalog line (`apps/mcp-local/README.md`, today
       `https://your-catalog.example.com`) names our catalog's testnet URL
 - [ ] Given the README's config in Claude Desktop, when an agent searches the catalog, then it finds
       that seller and pays it on testnet; the transaction hash is recorded here
-- [ ] The seller is covered by the facilitator's health check or an equivalent one: it answers 402
+- [ ] A probe apart from the facilitator's healthcheck alarms when the seller stops answering a 402
+      with our `payTo` on `stellar:testnet`
