@@ -23,8 +23,9 @@ services:
       # cloudflare/x402.tf in soroban-infrastructure routes to facilitator:4021: change both or
       # neither.
       PORT: "4021"
-      # /metrics for the metrics agent, on the `metrics` network only (deploy/metrics; 0139).
-      # deploy/metrics/prometheus.yml scrapes facilitator:9464: change both or neither.
+      # /metrics for the metrics agent, which reaches it over the `metrics` network; no port is
+      # published (deploy/metrics; 0139). deploy/metrics/prometheus.yml scrapes facilitator:9464,
+      # and deploy/test/metrics.test.ts holds the two together.
       METRICS_PORT: "9464"
       CLIENT_IP: cloudflare
       DATABASE_URL_FILE: /run/secrets/database-url.testnet
