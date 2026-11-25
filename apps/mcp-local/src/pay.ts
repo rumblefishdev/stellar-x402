@@ -6,6 +6,8 @@ import {
   STELLAR_ASSET_ADDRESS_REGEX,
   STELLAR_DESTINATION_ADDRESS_REGEX,
   TrustlineMissingError,
+  USDC_PUBNET_ADDRESS,
+  USDC_TESTNET_ADDRESS,
 } from "@x402/stellar";
 import { z } from "zod";
 import { checkUrl, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
@@ -83,6 +85,22 @@ function dailyDatabaseFailed(error: unknown): ToolError {
 }
 
 /**
+ * The classic assets behind upstream's default asset contracts, as `changeTrust` takes them: a
+ * contract's id is a hash, so it can't be read back from the id. `pay.test.ts` checks each against
+ * its id.
+ */
+export const CLASSIC_ASSETS: Readonly<Record<string, string>> = {
+  [USDC_TESTNET_ADDRESS]: "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+  [USDC_PUBNET_ADDRESS]: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+};
+
+/** An asset contract as a message names it: the classic asset too, when it is a known one. */
+function assetName(asset: string): string {
+  const classic = CLASSIC_ASSETS[asset];
+  return classic ? `${classic} (the asset contract ${asset})` : `the asset contract ${asset}`;
+}
+
+/**
  * The tool error for a payment that could not be signed. `@x402/stellar` simulates before it signs
  * and names what the asset contract refused: a missing trustline, the payer's or the seller's, or a
  * balance too low. Any other failure, and a simulation it could not name, is `payment_failed`.
@@ -103,21 +121,23 @@ function signingFailure(error: Error, payer: string, payTo: string | undefined):
     STELLAR_DESTINATION_ADDRESS_REGEX.test(error.account) &&
     STELLAR_ASSET_ADDRESS_REGEX.test(error.asset)
   ) {
+    const asset = assetName(error.asset);
     // The asset contract stops at its first failure, the payer's side first, so a payer without a
     // trustline says nothing about the seller's.
     if (error.account === payer) {
       return new ToolError(
         "payer_trustline_missing",
-        `The payer ${error.account} has no trustline to the asset ${error.asset} and must add one ` +
-          "before it can pay. The seller's account was not checked. Nothing was sent.",
+        `The payer ${error.account} has no trustline to ${asset} and must add one before it can ` +
+          "pay. The seller's account was not checked. Nothing was sent.",
         detail,
       );
     }
+    // As the facilitator's refusal says: the SAC reports an account that doesn't exist the same way.
     if (error.account === payTo) {
       return new ToolError(
         "payto_trustline_missing",
-        `The seller's account ${error.account} has no trustline to the asset ${error.asset}, so it ` +
-          "cannot be paid in it; only the seller can add one. Nothing was sent.",
+        `The seller's account ${error.account} has no trustline to ${asset}: the account must ` +
+          "exist and hold one, and only the seller can add it. Nothing was sent.",
         detail,
       );
     }

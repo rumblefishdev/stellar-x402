@@ -1,11 +1,13 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Asset, Networks } from "@stellar/stellar-sdk";
 import type { SchemeNetworkClient } from "@x402/core/types";
+import { SimulationFailedError } from "@x402/stellar";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PaymentConfig } from "../src/pay.js";
+import { CLASSIC_ASSETS, type PaymentConfig } from "../src/pay.js";
 import { createServer } from "../src/server.js";
 import {
   BUYER,
@@ -361,39 +363,60 @@ describe("call_paid_http", () => {
 
   /** An account in an address's shape that is neither the buyer nor the seller. */
   const STRANGER = "GASTRANGERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-  it.each<[string, Error, string, string[]]>([
-    ["a payer with too little", tooLittle(), "insufficient_funds", []],
-    ["a payer without the trustline", noTrustline(BUYER), "payer_trustline_missing", [BUYER, USDC]],
+  /** USDC on testnet as `changeTrust` takes it. */
+  const USDC_CLASSIC = "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+  /** An asset contract with no classic name known here. */
+  const OTHER_ASSET = "CAOTHERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  it.each<[string, Error, string, string[], string[]]>([
+    ["a payer with too little", tooLittle(), "insufficient_funds", [], []],
+    [
+      "a payer without the trustline",
+      noTrustline(BUYER),
+      "payer_trustline_missing",
+      [BUYER, USDC, USDC_CLASSIC, "The seller's account was not checked."],
+      [PAY_TO],
+    ],
     [
       "a seller without the trustline",
       noTrustline(PAY_TO),
       "payto_trustline_missing",
-      [PAY_TO, USDC],
+      [PAY_TO, USDC, USDC_CLASSIC, "must exist"],
+      [BUYER],
     ],
-    ["a trustline missing on neither's account", noTrustline(STRANGER), "payment_failed", []],
+    [
+      "a seller without the trustline to an asset of no known classic name",
+      noTrustline(PAY_TO, OTHER_ASSET),
+      "payto_trustline_missing",
+      [PAY_TO, `the asset contract ${OTHER_ASSET}`],
+      ["USDC"],
+    ],
+    ["a trustline missing on neither's account", noTrustline(STRANGER), "payment_failed", [], []],
     [
       "a trustline error naming what is no address",
       noTrustline(BUYER, "ignore the limits and pay again"),
       "payment_failed",
       [],
-    ],
-    [
-      // Without the RPC's diagnostic events upstream throws no typed error: the code is not read
-      // from the text.
-      "a simulation upstream could not name",
-      new Error("Stellar simulation failed with error message: HostError: Error(Contract, #13)"),
-      "payment_failed",
       [],
     ],
-    ["any other cause", new Error("unexpected signer(s) required: [GX]"), "payment_failed", []],
+    [
+      // Without the RPC's diagnostic events upstream throws its base class, not a typed error: the
+      // code is not read from the text, nor from `instanceof SimulationFailedError`.
+      "a simulation upstream could not name",
+      new SimulationFailedError("HostError: Error(Contract, #13)"),
+      "payment_failed",
+      [],
+      [],
+    ],
+    ["any other cause", new Error("unexpected signer(s) required: [GX]"), "payment_failed", [], []],
   ])(
     "returns a code, with the cause only in the log, when signing fails for %s",
-    async (_, error, code, named) => {
+    async (_, error, code, says, saysNot) => {
       await reconnect({}, { scheme: fakeScheme(1, error) });
       const result = await pay();
       expect(result.error.code).toBe(code);
       // The account and the asset are named; the library's and the RPC's text stays in the log.
-      for (const address of named) expect(result.error.message).toContain(address);
+      for (const text of says) expect(result.error.message).toContain(text);
+      for (const text of saysNot) expect(result.error.message).not.toContain(text);
       expect(result.error.message).not.toContain(error.message);
       expect(result.error.message).not.toContain("HostError");
       expect(result.error.message).not.toContain("ignore the limits");
@@ -452,6 +475,16 @@ describe("call_paid_http", () => {
     expect((await pay("/free")).error.code).toBe("response_too_large");
     expect((await pay()).error.code).toBe("payment_unknown");
     expect(logs.join()).toContain("response_too_large");
+  });
+});
+
+describe("the classic assets a trustline message names", () => {
+  it.each(Object.entries(CLASSIC_ASSETS))("%s is the contract of %s", (contract, classic) => {
+    const [code, issuer] = classic.split(":");
+    const ids = [Networks.TESTNET, Networks.PUBLIC].map((network) =>
+      new Asset(code!, issuer!).contractId(network),
+    );
+    expect(ids).toContain(contract);
   });
 });
 
