@@ -1,8 +1,10 @@
 # Monitoring
 
-The facilitator's metrics and alarms live in CloudWatch, in `eu-central-1` on the team's shared
-AWS account (ADR 0011, task 0027). Alarms go through SNS and Amazon Q Developer to the Slack
-channel `#stellar-x402-bot`. Every alarm's description ends with `Runbook: docs/monitoring.md,
+The facilitator's metrics are Prometheus series on the monitoring VM `monitoring-hel1-01`, and
+its rules send through Alertmanager; CloudWatch, in `eu-central-1` on the team's shared AWS
+account, keeps the logs, the alarms that must work without the VM, and the heartbeat that says
+when the VM goes quiet (ADR 0011, tasks 0027 and 0139). Both reach the Slack channel
+`#stellar-x402-bot`, CloudWatch's through SNS and Amazon Q Developer. Every alarm's description ends with `Runbook: docs/monitoring.md,
 <alarm>`, which points at a section below.
 
 - The metrics, with their names, units and dimensions: [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts),
@@ -462,10 +464,11 @@ mean submissions don't land.
 
 1. The `reconcile_finished` event and the record's `settlement_hashes` for its attempts.
 2. The `fee-raised` and `send-retry` counts around that time (counts only, task 0125), and the
-   RPC ([rpc-stalled](#rpc-stalled)). In Logs Insights on `/x402/production/metrics`:
+   RPC ([rpc-stalled](#rpc-stalled)). In Prometheus on the VM
+   (`ssh -L 9090:localhost:9090 monitoring`):
 
    ```
-   filter type in ["fee-raised", "send-retry"] | stats sum(pool_events_total) by type, bin(5m)
+   sum by (type) (increase(pool_events_total{project="x402",type=~"fee-raised|send-retry"}[5m]))
    ```
 
 ### landed-after-expired
@@ -755,7 +758,8 @@ Prometheus rules have paged no one since then. Its own stack, `X402-production-H
    ```
 
 3. Meanwhile, the server's agent keeps a few hours of samples in its write-ahead log, so the
-   metrics come back with the VM; the CloudWatch alarms and the logs still cover the facilitator.
+   metrics come back with the VM. Until then no rule runs: the logs still reach CloudWatch, and
+   the alarms that stay there (below) still fire, but nothing reads the facilitator's metrics.
 
 ## Log volume
 
@@ -780,8 +784,9 @@ alarms compare them with two numbers per network in `watch.protocol` in
 `infra/envs/production.json`: `expected`, the protocol we have checked the facilitator against,
 and `supported`, the highest Core version we have checked the SDK and the RPC against.
 `supported` is never below `expected`. On 2026-11-09 testnet was 30/30 and mainnet 29/30: mainnet
-runs 29, its Core supports 30, and testnet has run 30 since 2026-11-03, when an older SDK stopped
-reading its ledgers, which no alarm saw (task 0111 moved the SDK to 16.4.1).
+ran 29, its Core supported 30, and testnet has run 30 since 2026-11-03, when an older SDK stopped
+reading its ledgers, which no alarm saw (task 0111 moved the SDK to 16.4.1). Mainnet moved to 30
+on 2026-11-23, `protocol-changed-pubnet` fired at 17:11 UTC, and since #242 both are 30/30.
 
 ### protocol-changed
 
@@ -839,8 +844,8 @@ Alarms stack builds those alone, so no check is both a rule and an alarm (`route
   which: `facilitator-silent`, `gauge-stale`, `textfile-stale` (for `probe-silent`) and
   `server-silent` (for the agent, `telemetry-silent` in CloudWatch).
 - What stays in CloudWatch, 18 alarms in production: the off-server check's (`balance-low`,
-  `balance-critical`, `watch-errors`, `watch-no-invocations`, `protocol-changed`,
-  `protocol-upgrade-coming`) and the uptime probe's (`uptime`, `uptime-flapping`), the log path's
+  `balance-critical`, `watch-errors`, `watch-no-invocations`, and `protocol-changed` and
+  `protocol-upgrade-coming`, one of each for testnet and one for mainnet) and the uptime probe's (`uptime`, `uptime-flapping`), the log path's
   (`telemetry-silent`, `log-volume-app`, `log-volume-metrics`, `emf-validation`, `emf-parsing`, for
   the host probe's EMF lines), and `audit-disk`, `certificate` and `credentials-stale`, which must
   page when the VM can't. Besides them, `monitoring-heartbeat`, its own stack.
@@ -872,11 +877,15 @@ The agent has failed to scrape one of its targets (`job`) for 5 minutes.
 
 ### agent-behind
 
-The metrics agent on ch-prod-01 is over 5 minutes behind in sending to the VM
+The metrics agent on ch-prod-01 is over 2 minutes behind in sending to the VM
 (`prometheus_remote_storage_queue_highest_timestamp_seconds` against
 `..._queue_highest_sent_timestamp_seconds`), or the VM refused samples the agent then dropped
 (`prometheus_remote_storage_samples_failed_total`), for 5 minutes. The agent still looks up, so
-`server-silent` stays quiet while the rules read old or missing data. On the server,
+`server-silent` stays quiet while the rules read old or missing data. These series reach the VM
+through the queue they measure, so a sample saying "L seconds behind" arrives L seconds late:
+past 5 minutes behind, the VM's lookback no longer reads them, and a lag that long shows as
+`server-silent` instead. One refused batch fires this about 5 minutes later, and it holds for
+about 10 more, until the batch leaves the 15-minute window. On the server,
 `/var/log/x402/metrics/agent.log` names the `remote_write` error: a 4xx refused samples, a 5xx or a
 timeout the VM or the way to it; then Caddy's log on the VM.
 
