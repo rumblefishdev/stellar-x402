@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import { INFRA_ROOT } from "../src/lib/names.js";
-import { buildRules, ruleFile, staysInCloudWatch } from "../src/lib/rules.js";
+import { buildRules, ruleFile } from "../src/lib/rules.js";
 import { allOn, everyRow, production, synth } from "./fixtures.js";
 
 const checksOf = (c = allOn()) => {
@@ -40,12 +40,38 @@ test("CloudWatch keeps exactly the rows that make no rule and stay, so no check 
   // Karol's point 1 on #211: the split lives in rules.ts alone, and the switch turns off exactly
   // what moved.
   const { made, skipped } = checksOf();
-  const stays = new Set(skipped.filter((s) => staysInCloudWatch(s.why)).map((s) => s.check));
+  const stays = new Set(skipped.filter((s) => s.to === "cloudwatch").map((s) => s.check));
   const kept = synth(allOn()).x.alarms.alarms.records.map((r) =>
     r.alarmName.replace(/^x402-production-/, "").replace(/-(testnet|pubnet)(?=-|$)/, ""),
   );
   expect(new Set(kept)).toEqual(stays);
   expect(kept.filter((check) => made.has(check))).toEqual([]);
+});
+
+test("a row a server rule replaces names a rule that is made (0139)", () => {
+  // Oskar's review of #242: the CloudWatch row is gone after the switch, so a dropped or misspelt
+  // replacement would leave its check with nothing.
+  const { rules, skipped } = checksOf();
+  const replaced = skipped.filter((s) => s.to === "replaced");
+  expect(replaced.map((s) => s.why).sort()).toEqual([
+    "x402-facilitator-silent",
+    "x402-gauge-stale",
+    "x402-textfile-stale",
+  ]);
+  for (const s of replaced) expect(rules.map((r) => r.alert)).toContain(s.why);
+});
+
+test("every check a rule sends has its runbook section in docs/monitoring.md (0139)", () => {
+  // Each description ends "Runbook: docs/monitoring.md, <check>" (Oskar's review of #242). The
+  // groups on in production: a group's sections come with the change that turns it on (0026 for
+  // backups and snapshots, 0089 for channelHeld), and this fails until they do.
+  const doc = readFileSync(join(INFRA_ROOT, "../docs/monitoring.md"), "utf8");
+  const sections = new Set([...doc.matchAll(/^### ([a-z0-9-]+)$/gm)].map((m) => m[1]!));
+  const named = buildRules(production()).rules.flatMap((r) => [
+    ...r.annotations.description.matchAll(/Runbook: docs\/monitoring\.md, ([a-z0-9-]+)\./g),
+  ]);
+  expect(named.length).toBeGreaterThan(30);
+  expect([...new Set(named.map((m) => m[1]!))].filter((c) => !sections.has(c))).toEqual([]);
 });
 
 test("pubnet adds alert instances, not rules", () => {

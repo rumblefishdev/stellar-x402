@@ -44,8 +44,18 @@ export interface Rule {
   readonly annotations: { readonly description: string };
 }
 
-/** Why a row makes no rule: it stays in CloudWatch, or a server rule replaces it. */
-export type Skip = { readonly check: string; readonly why: string };
+/**
+ * Where `route` sends a row: a rule of its own, CloudWatch, or a server rule that replaces it.
+ * Typed, so the split never hangs on a reason's wording (Oskar's review of #242).
+ */
+export type Target = "rule" | "cloudwatch" | "replaced";
+
+/** Why a row makes no rule: it stays in CloudWatch, or a server rule (`why`) replaces it. */
+export type Skip = {
+  readonly check: string;
+  readonly to: Exclude<Target, "rule">;
+  readonly why: string;
+};
 
 const PROJECT_NAME = "x402";
 const PROJECT = `project="${PROJECT_NAME}"`;
@@ -67,6 +77,10 @@ const REPLACED: Record<string, string> = {
   "facilitator-silent": "x402-facilitator-silent",
   "gauges-silent": "x402-gauge-stale",
   "probe-silent": "x402-textfile-stale",
+};
+
+/** Silence rows with no Prometheus counterpart, which stay in CloudWatch. */
+const SILENCE_STAYS: Record<string, string> = {
   "telemetry-silent": "stays in CloudWatch: it watches the CloudWatch agent",
 };
 
@@ -139,23 +153,21 @@ export function route(
   base: string,
   spec: { qualifier?: string; signal: unknown },
   silence = false,
-): { check: string; why?: string } {
+): { check: string; to: "rule" } | Skip {
   const check = spec.qualifier ? `${base}-${spec.qualifier}` : base;
-  if (STAYS.has(base)) return { check, why: "stays in CloudWatch (ADR 0011, Alerts)" };
-  if (base === "gauges-silent") return { check, why: REPLACED[base]! };
+  const stays = (why: string) => ({ check, to: "cloudwatch" as const, why });
+  if (STAYS.has(base)) return stays("stays in CloudWatch (ADR 0011, Alerts)");
+  if (base === "gauges-silent") return { check, to: "replaced", why: REPLACED[base]! };
   const off = allSignals(spec.signal as Signal | MathSignal).find(
     (s) => !("catalog" in s) || byName(s.catalog)?.namespace === "x402-watch",
   );
-  if (off) return { check, why: "stays in CloudWatch: off the server or AWS's own metric" };
-  if (!silence) return { check };
+  if (off) return stays("stays in CloudWatch: off the server or AWS's own metric");
+  if (!silence) return { check, to: "rule" };
+  if (SILENCE_STAYS[base]) return stays(SILENCE_STAYS[base]);
   const by = REPLACED[base];
   if (!by) throw new Error(`${check}: a silence row needs a Prometheus replacement`);
-  return { check, why: by };
+  return { check, to: "replaced", why: by };
 }
-
-/** Whether `route` leaves the row a CloudWatch alarm. */
-export const staysInCloudWatch = (why: string | undefined): boolean =>
-  why?.startsWith("stays") ?? false;
 
 /**
  * CloudWatch's half since the switch (0139 step 7): `alarms` builds only the rows that stay, and
@@ -163,7 +175,7 @@ export const staysInCloudWatch = (why: string | undefined): boolean =>
  */
 export function keptInCloudWatch(alarms: Alarms): Alarms {
   const keeps = (base: string, spec: { qualifier?: string; signal: unknown }, silence = false) =>
-    staysInCloudWatch(route(base, spec, silence).why);
+    route(base, spec, silence).to === "cloudwatch";
   return {
     event: (base, spec) => void (keeps(base, spec) && alarms.event(base, spec)),
     level: (base, spec) => void (keeps(base, spec) && alarms.level(base, spec)),
@@ -266,12 +278,9 @@ export class RuleSet implements Alarms {
     silence = false,
   ): string | undefined {
     if (!this.groups[spec.group]) return undefined;
-    const { check, why } = route(base, spec, silence);
-    return why === undefined ? check : this.skip(check, why);
-  }
-
-  private skip(check: string, why: string): undefined {
-    if (!this.skipped.some((s) => s.check === check)) this.skipped.push({ check, why });
+    const routed = route(base, spec, silence);
+    if (routed.to === "rule") return routed.check;
+    if (!this.skipped.some((s) => s.check === routed.check)) this.skipped.push(routed);
     return undefined;
   }
 
@@ -444,13 +453,16 @@ export function serverRules(c: EnvironmentConfig): Rule[] {
 
   // The agent's own sending (Karol's point 2 on #211): a dead agent is server-silent, but one that
   // falls behind or has samples refused still looks up while the rules read old or missing data.
+  // These series reach the VM through the queue they measure, so a sample saying "L seconds
+  // behind" arrives about L seconds late: the threshold stays under the VM's 5-minute lookback
+  // (Prometheus's default), or the rule would read nothing when it is true (Oskar's review of #242).
   const agent = `${PROJECT},job="agent"`;
   rule(
     "agent-behind",
     "host",
-    `max(prometheus_remote_storage_queue_highest_timestamp_seconds{${agent}} - prometheus_remote_storage_queue_highest_sent_timestamp_seconds{${agent}}) > 300 or sum(increase(prometheus_remote_storage_samples_failed_total{${agent}}[15m])) > 0`,
+    `max(prometheus_remote_storage_queue_highest_timestamp_seconds{${agent}} - prometheus_remote_storage_queue_highest_sent_timestamp_seconds{${agent}}) > 120 or sum(increase(prometheus_remote_storage_samples_failed_total{${agent}}[15m])) > 0`,
     {
-      what: "The metrics agent on ch-prod-01 is over 5 minutes behind in sending to the VM, or the VM refused samples it then dropped: the rules read old or missing data while the agent still looks up.",
+      what: "The metrics agent on ch-prod-01 is over 2 minutes behind in sending to the VM, or the VM refused samples it then dropped: the rules read old or missing data while the agent still looks up. Past 5 minutes behind, its samples land outside the rules' lookback and server-silent fires instead.",
       next: "On the server: /var/log/x402/metrics/agent.log for remote_write errors (a 4xx names refused samples, a 5xx or timeout the VM or the way to it), then Caddy's log on the VM.",
       noData: "An agent that sends nothing is server-silent.",
     },
