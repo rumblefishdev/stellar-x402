@@ -282,7 +282,7 @@ describe("the units' output", () => {
     ]);
   });
 
-  test("the search model runs from the facilitator's image, capped, restarted, and waited for (ADR 0014)", () => {
+  test("the search model runs from the facilitator's image, capped, restarted, on its own network, never waited for (ADR 0014)", () => {
     const compose = read("production/compose.yaml");
     const model = compose.match(/^ {2}search-model:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? "";
     expect(model).toContain("image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}");
@@ -290,7 +290,8 @@ describe("the units' output", () => {
     expect(model).toContain("restart: unless-stopped");
     expect(model).toContain("mem_limit: 768m");
     expect(model).toContain("cpus: 1");
-    expect(compose).toMatch(/depends_on:\n\s+search-model:\n\s+condition: service_healthy/);
+    expect(compose).toMatch(/depends_on:\n\s+search-model:\n\s+condition: service_started/);
+    expect(model).toMatch(/networks:\n\s+- search\n/);
     expect(read("../apps/facilitator/Dockerfile")).toContain("ENV ORT_DISABLE_TELEMETRY=1");
   });
 

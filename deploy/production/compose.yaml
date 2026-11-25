@@ -42,11 +42,11 @@ services:
       OPENBAO_ROLE_ID_FILE: /run/secrets/approle-role-id.testnet
       OPENBAO_SECRET_ID_FILE: /run/secrets/approle-secret-id.testnet
       SEARCH_MODEL_URL: http://search-model:8080
-    # Starts once the model answers (ADR 0014), so a model that never starts keeps the facilitator
-    # from starting too.
+    # Starts the model with it but never waits for it (ADR 0014): a model that can't start, as on a
+    # rollback to an image without one, leaves search on words alone, not /settle down.
     depends_on:
       search-model:
-        condition: service_healthy
+        condition: service_started
     secrets:
       - database-url.testnet
       - rpc-urls.testnet
@@ -59,6 +59,7 @@ services:
       - edge
       - db
       - metrics
+      - search
     # Liveness only (ADR 0011); the deploy reads the body with the same one-liner.
     healthcheck:
       test:
@@ -86,9 +87,10 @@ services:
     cpus: 1
     environment:
       PORT: "8080"
+    # The facilitator's only: the model reaches no database.
     networks:
-      - db
-    # 200 only once the model is loaded, which the facilitator waits for.
+      - search
+    # 200 only once the model is loaded.
     healthcheck:
       test:
         - CMD
@@ -162,20 +164,27 @@ services:
 # daemon.json) is taken whole by another project's network. These sit outside it and outside
 # docker0's 172.17.0.0/16; each /28 leaves 13 addresses for containers after Docker's gateway
 # (.1, .17), room for mainnet's services. A network added here needs one too, or it fails the
-# same way, and only on the server: a /28 from 172.31.200.0/24, the next free 172.31.200.32/28.
+# same way, and only on the server: a /28 from 172.31.200.0/24, the next free 172.31.200.48/28.
 networks:
   edge:
     name: x402-production-edge
     ipam:
       config:
         - subnet: 172.31.200.0/28
-  # No route out: the facilitator, the search model, the databases and the migration services only.
+  # No route out: the facilitator, the databases and the migration services only.
   db:
     name: x402-production-db
     internal: true
     ipam:
       config:
         - subnet: 172.31.200.16/28
+  # No route out: the facilitator and the search model only (ADR 0014).
+  search:
+    name: x402-production-search
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.200.32/28
   # The metrics agent's (deploy/metrics/compose.yaml), which makes it; the facilitator joins it so
   # the agent scrapes /metrics with no port published. The agent's project must be up first.
   metrics:

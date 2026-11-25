@@ -101,7 +101,8 @@ The measurements are in
     environment's internal network. It runs from the facilitator's image with a command of its
     own, as the migrations do, so one digest deploys both. The image's build fetches the model's
     files at the pinned revision, so nothing is downloaded when it starts.
-  - The facilitator starts only once the model's container is healthy.
+  - The facilitator starts the model's container but never waits for it: a model that can't start
+    leaves search on words alone, and `/settle` up.
   - The server is our own Node process on `onnxruntime-node` 1.31.1, with the model's own
     tokenizer read by `@huggingface/tokenizers`: no LGPL dependency
     (`docs/scf/milestone-1-license-audit.md`).
@@ -304,8 +305,8 @@ The measurements are in
 
 - Production, CI and local compose switch to the pgvector image pinned as above, and one
   more container, limited to 768 MiB, which ADR 0011's totals now count.
-- The facilitator starts only once the model's container is healthy, so a model that never
-  starts keeps the facilitator, and `/settle`, from starting too.
+- A model that never starts, as on a rollback to an image from before this one, leaves search on
+  words alone and fires `search-words-only`; the facilitator and `/settle` start as before.
 - The cards are a table of their own, added with a `CREATE TABLE` that touches no catalog row. A
   catalog column computed by PostgreSQL was the first shape: adding it rewrote the catalog under
   its lock (285–576 ms for 2,500 listings, 5.5 s for 35,000), and so would every later change to

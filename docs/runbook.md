@@ -117,9 +117,9 @@ deploy.
 
    `x402@production` starts `digest.good`, so the new image isn't running yet. If step 2 ran
    before the approval, approve the waiting `deploy` job now. When the new compose file runs a
-   service only the new image holds, as the search model did (ADR 0014), `digest.good` can't
-   start: skip `start x402@production` and approve the deploy, which starts the new image. The
-   facilitator is down until that deploy ends. If step 1's deploy failed,
+   service only the new image holds, as the search model does (ADR 0014), that service fails on
+   `digest.good` while the facilitator runs: search ranks by words alone until the deploy starts
+   the new image. If step 1's deploy failed,
    **Run workflow** on `deploy/production` again now.
 
 Then check that each container kept what its compose file drops (task 0091):
