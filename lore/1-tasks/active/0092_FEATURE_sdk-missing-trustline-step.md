@@ -91,10 +91,9 @@ is the one missing.
 - [x] Given a missing trustline, the payer's or `payTo`'s, when MCP's `pay` fails, then its result
       names that account and the asset, not `insufficient_funds`, and a test covers it
       (`pay.test.ts`, "when signing fails for a payer without the trustline" and "a seller without
-      the trustline"; on testnet E-14 and E-14d, not run yet)
+      the trustline"; on testnet E-14 and E-14d)
 - [x] Given a balance too low (`#10`), when MCP's `pay` fails, then it still answers
-      `insufficient_funds` (`pay.test.ts`, "a payer with too little"; on testnet E-14b, not run
-      yet)
+      `insufficient_funds` (`pay.test.ts`, "a payer with too little"; on testnet E-14b)
 - [ ] Given any other simulation failure, when the SDK builds the payment, then the error is
       unchanged
 
@@ -112,6 +111,11 @@ The MCP part, in `apps/mcp-local`:
 - `test/pay.test.ts`: the signing-failure table grows from three rows to seven.
 - `e2e/test/after-signing.ts`: E-14 expects `payer_trustline_missing` with the account and the
   asset named; E-14d is new, a seller whose `payTo` has no trustline.
+
+Testnet run on 2026-11-25, on commit c1c4df80 (`e2e/results/testnet-results.json`): 26 scenarios,
+124 rows, none failed. E-14 (the payer's trustline), E-14b (a balance too low) and E-14d (the
+seller's trustline) each got their code from the real `ExactStellarScheme`, with the account and
+the asset in the tool's text and the RPC's text in the log only.
 
 The SDK criteria (1, 2 and 5) are built with 0102's buyer helper, which moves this code.
 
@@ -133,8 +137,8 @@ The SDK criteria (1, 2 and 5) are built with 0102's buyer helper, which moves th
    throws the typed errors only when the RPC sends the contract's diagnostic events; without them
    it is a plain `SimulationFailedError` with `#10` or `#13` in its text. The task says to tell by
    type, so no regex stays as a second way: such a failure used to read `insufficient_funds` and
-   now reads `payment_failed`, with the cause in the log. E-14 and E-14b show whether testnet's RPC
-   sends the events.
+   now reads `payment_failed`, with the cause in the log. Testnet's public RPC sends the events:
+   E-14, E-14b and E-14d got the typed errors on 2026-11-25.
 4. **The account and the asset reach the agent only in an address's shape.** The message is what a
    model reads. Upstream takes both from the simulation, but `PaymentConfig.schemes` takes any
    scheme, so a `TrustlineMissingError` whose fields are other text is `payment_failed`.
