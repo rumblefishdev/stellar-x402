@@ -52,6 +52,14 @@ history:
       (soroban-infrastructure#19), the alarm on since 12:48 UTC, drilled by stopping
       Alertmanager (ALARM 20 minutes later, docs/monitoring.md, Drills). The switch's plan and
       drill are in [G-switch-plan](notes/G-switch-plan.md).
+  - date: "2026-11-25"
+    status: active
+    who: claude
+    note: >
+      The switch: promotions 7 (#251) and 8 (#253, #241 alone), the rules on the VM at
+      b7f08ac0 (soroban-infrastructure#20, #21), #242's alarms deploy deleting 31. Every rule
+      drilled the same day; the heartbeat drilled again after Amazon Q's Slack token, inactive
+      since 2026-11-20, was authorized again. AC 2 to 4 met; the cost check starts 2026-11-26.
 ---
 
 # Carry out the monitoring decision for the facilitator, with every alarm fired again
@@ -86,12 +94,14 @@ losing an alarm that protects money or a payment.
 
 - [ ] Given a full month (or a measured week scaled to one), when x402's CloudWatch bill is read,
       then it is at or under $8 a month, with the monitoring VM on CPX12 (0138's target)
-- [ ] Given every alarm in `docs/monitoring.md`, when the drill runs, then each has fired once in
-      the new setup, and the drill is recorded
-- [ ] The switch is one change, with no period running both the old alarms and the new rules,
-      and every rule's drill follows it the same day
+- [x] Given every alarm in `docs/monitoring.md`, when the drill runs, then each has fired once in
+      the new setup, and the drill is recorded (2026-11-25; `agent-behind`, `disk-root`, `memory`
+      and `agent-certificate` not fired live, each with its reason in docs/monitoring.md)
+- [x] The switch is one change, with no period running both the old alarms and the new rules,
+      and every rule's drill follows it the same day (2026-11-25: rules on 13:43, 31 alarms gone
+      13:45 UTC, drill 14:00 to 15:24)
 - [x] Given the monitoring VM or its Alertmanager stops, then a CloudWatch alarm fires from
-      outside it, shown once (2026-11-24, docs/monitoring.md, Drills)
+      outside it, shown once (2026-11-25; on 2026-11-24 it fired but never reached Slack)
 - [ ] `docs/monitoring.md` and the runbook describe the new setup, and ADR 0011 matches it
 
 ## Design Decisions
