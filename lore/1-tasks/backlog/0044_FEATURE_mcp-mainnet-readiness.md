@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 2
 related_adr: []
-related_tasks: ["0037", "0043", "0068", "0092"]
+related_tasks: ["0037", "0043", "0068", "0092", "0102"]
 tags: [mcp, dev-tools, mainnet, security, priority-medium, effort-large]
 links: []
 history:
@@ -20,6 +20,12 @@ history:
     who: karolkow
     note: >
       An architecture review narrowed a rewrite of the paid round trip to this first step.
+  - date: "2026-11-25"
+    status: backlog
+    who: akot
+    note: >
+      0102 proposes to do the first step itself, in the SDK the paid round trip moves to; noted
+      under "First step". Waiting for karolkow's word in PR #246.
 ---
 
 # Prepare the MCP server for mainnet: assets, networks, payee allowlist, key storage
@@ -93,6 +99,10 @@ on the money path. The `pay.test.ts` tests go through a fake seller and never mo
   prevented one (be5d836). No ordering fix since 2026-10-15, so nothing here is breaking today.
 - Stays: `x402Client`'s hooks and `refusal`, `paid`, `signingError`, because
   `selectPaymentRequirements` is private. `preview.ts` stays stricter by design.
+- **Proposed to move to 0102** (akot, 2026-11-25, PR #246): 0102 moves `pay.ts`'s paid round trip
+  into `@stellar-x402/sdk` (its PR 1, a move only) and then does this step there (its PR 2), under
+  the same `pay.test.ts`. Done here first, the step would be written twice. If agreed, this
+  section closes when that PR merges.
 - Lost from the wrapper, none in use: the `onPaymentRequired` hook, the recovery retry and the
   "Payment already attempted" guard. Keep the `Access-Control-Expose-Headers` request line.
 

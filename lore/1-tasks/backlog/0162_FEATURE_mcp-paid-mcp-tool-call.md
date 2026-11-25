@@ -4,7 +4,7 @@ title: "Pay for a seller's MCP tool from the MCP server: call_paid_mcp_tool"
 type: FEATURE
 status: backlog
 related_adr: []
-related_tasks: ["0037", "0137", "0041", "0044"]
+related_tasks: ["0037", "0137", "0041", "0044", "0102", "0163"]
 tags: [mcp, dev-tools, priority-low, effort-medium]
 links: []
 history:
@@ -14,6 +14,12 @@ history:
     note: >
       Spawned from 0137: search returns sellers' paid MCP tools, which call_paid_http can't pay.
       0037 left this tool out of scope; no task carried it on.
+  - date: "2026-11-25"
+    status: backlog
+    who: akot
+    note: >
+      Noted under "Context" what 0102 and 0163 change for this tool: the limits move to the SDK,
+      and the client it needs is exported with this task.
 ---
 
 # Pay for a seller's MCP tool from the MCP server: `call_paid_mcp_tool`
@@ -37,6 +43,9 @@ search result of type `mcp` is as usable as an HTTP one.
 - 0137's search tool description says MCP tools are listed but not paid; this task changes that
   sentence.
 - 0041 (two example integrations) may use a paid MCP seller as its second example.
+- 0102 moves `call_paid_http`'s limits and error codes into `@stellar-x402/sdk`, built as a
+  client made per call, which `wrapMCPClientWithPayment` takes. In M2 only its `fetch` is public;
+  0163 exports the client itself when this task starts, so the limits here are the same code.
 
 ## Implementation Plan
 
