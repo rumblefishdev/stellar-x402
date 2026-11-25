@@ -2,7 +2,7 @@
 id: "0055"
 title: "Let mcp-local e2e and conformance servers pick their own port"
 type: BUG
-status: active
+status: completed
 owner: bstruzyk
 milestone: 2
 related_adr: []
@@ -18,6 +18,14 @@ history:
     status: active
     who: bstruzyk
     note: "Started."
+  - date: "2026-11-25"
+    status: completed
+    who: bstruzyk
+    note: >
+      PR #239 merged. The example seller and the conformance proxy accept PORT 0 and log the port
+      they bound; proxy.test.ts and the mcp-local e2e read it from that line, and both freePort()
+      helpers are gone. examples/http-api 14 tests (1 new file), proxy.test.ts 17; facilitator
+      untouched, its 1271 tests pass. No follow-up tasks.
 ---
 
 # Let mcp-local e2e and conformance servers pick their own port
@@ -96,3 +104,22 @@ reading the port back. No other probe-and-close helper is left in the repo (chec
    `/` in the seller's): stdout can come in chunks cut mid-number, and a bare `(\d+)` would
    take `543` of `54321`. 0052's `listeningPort` guards the same way by parsing whole lines only.
 
+## Issues Encountered
+
+- **A port read from a chunk cut mid-number**: the first `proxy.test.ts` pattern was
+  `/port (\d+)/`, which can match `543` of `54321` when stdout arrives in pieces. Found by
+  comparing with 0052's `listeningPort`; fixed before the PR (decision 4).
+
+**Modified tests:**
+
+- `examples/http-api/test/config.test.ts`: `PORT=0` moved from the refused cases to a new
+  "accepts PORT 0" test. Intentional: 0 is now valid.
+- `conformance/test/proxy.test.ts`: "refuses to start without a target" became a four-row table
+  (no target, no port, a non-numeric port, a port past 65535) on `PORT=0`, each row also checking
+  the message on stderr. The 502 test points at a server that drops connections instead of a
+  probed port. Intentional: the probe is what the task removes.
+
+## Future Work
+
+None. The mcp-local e2e (`test:testnet`) runs by hand and was not run for this task; it uses the
+same seller start line that `examples/http-api/test/index.test.ts` now checks in `pnpm test`.
