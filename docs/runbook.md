@@ -935,11 +935,32 @@ not here yet).
 2. **Decide whether this server stays.** A new key in an OpenBao that someone else can read is
    stolen the same way.
 
-   | What leaked                                                                     | Then                                                                                                                                                                                                                 |
-   | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | A credential, and you know which (a secret ID or token seen outside the server) | The server stays. Step 3 cuts that credential off.                                                                                                                                                                   |
-   | Root on the server, code in the facilitator's container, or you don't know      | The server doesn't stay. Stop here: a clean server, set up with "Before the first deploy" and OpenBao's steps 1–6, and every secret the server held rotated ([Credentials](#credentials)). Then steps 6 and 7 below. |
-   | OpenBao's disk, with no break-in, and the restore failed                        | The server stays. OpenBao's steps 1–5 make a new `stellar-testnet` at version 1; skip step 3.                                                                                                                        |
+   | What happened                                                                                                                                     | Then                                                                                                                                                                                                                                                                       |
+   | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | A secret ID or token seen outside the server, and OpenBao's audit log shows every signature came from the facilitator's token at its settle times | Not this section: the key wasn't used. OpenBao has no network (`network_mode: none`), so a credential can't sign from outside the server. Cut it off with step 3's revoke, destroy and new secret ID lines only, and keep the accounts.                                    |
+   | A signature the facilitator didn't make, root on the server, code in the facilitator's container, or you don't know                               | The server doesn't stay: whoever signed was on the server or in the container. Stop here: a clean server, set up with "Before the first deploy" and OpenBao's steps 1–6, and every secret the server held rotated ([Credentials](#credentials)). Then steps 6 and 7 below. |
+   | OpenBao's disk, with no break-in, and the restore failed                                                                                          | The server stays. OpenBao's steps 1–5 make a new `stellar-testnet` at version 1, with the two changes below; skip step 3.                                                                                                                                                  |
+
+   On a server that was set up once, two of OpenBao's steps change:
+
+   - **Step 3 updates the backup secret, it doesn't create it.** `create-secret` fails on the
+     existing `x402/production/openbao-backup`. Write the new seal key, recovery key and seal
+     config into it and keep its Borg and Storage Box fields, with the variables of step 3:
+
+     ```sh
+     id=x402/production/openbao-backup
+     cur=$(aws secretsmanager get-secret-value --region eu-central-1 --secret-id $id --query SecretString --output text)
+     new=$(printf %s "$cur" | seal_key=$seal_key recovery_key=$(printf %s "$init" | jq -r '.recovery_keys_b64[0]') \
+       sha=$(printf %s "$seal_key" | shasum -a 256 | cut -d' ' -f1) \
+       seal_config=$(sed -n '/^seal "static"/,/^}/p' deploy/openbao/config.hcl) \
+       jq -c '.seal_key_hex = env.seal_key | .seal_key_sha256 = env.sha | .recovery_key = env.recovery_key
+         | .seal_config = env.seal_config | .updated = (now | todate)')
+     printf %s "$new" | aws secretsmanager put-secret-value --region eu-central-1 --secret-id $id \
+       --secret-string file:///dev/stdin --query VersionId --output text
+     ```
+
+   - **Then the snapshots' AppRole again:** "OpenBao snapshots → Setting it up", step 4. The old
+     one went with the old storage, so every nightly snapshot fails until it runs.
 
 3. **A new version of the key, and new credentials.** In a root shell with a root token ([A new
    root token](#openbao)), one line at a time, as in OpenBao's step 4. The key keeps its name, so
@@ -997,10 +1018,20 @@ not here yet).
 
    `ready`, `listed` and `signer: "ok"`, and one paid request settles.
 
+   Two mistakes stop the start instead, before `/health` exists, so the check above has nothing
+   to talk to: a malformed version (`VERSION`, `v2`, `0`) fails the config check, and an address
+   that isn't the channels' signer fails `checkChannels` with `facilitator-not-signer`. `x402@`
+   restarts until systemd gives up (5 starts in 5 minutes). Read why in
+   `journalctl -u x402@production`, fix `.env`, then
+   `sudo systemctl reset-failed x402@production` and start it again.
+
 7. **The alarms on the new fee account:** a pull request that changes `feeAccounts` in
-   `infra/envs/production.json`, then `make diff-production-watch` and `make deploy-production-watch`
-   in `infra/`. Until then `balance-low` and `balance-critical` read the old account and fire as it
-   drains: expected. The facilitator doesn't wait for this.
+   `infra/envs/production.json`, then in `infra/` both stacks that hold the address:
+   `make diff-production-watch` and `make deploy-production-watch` (what Watch reads), then
+   `make diff-production-alarms` and `make deploy-production-alarms` (the text of `balance-low`
+   and `balance-critical`, "Top up <account>"). Until both run, those alarms read the old account
+   and fire as it drains, and their text tells whoever is on call to top up the abandoned account
+   the thief holds: don't. The facilitator doesn't wait for this.
 
 **After it:**
 
