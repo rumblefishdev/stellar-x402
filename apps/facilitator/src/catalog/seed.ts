@@ -10,11 +10,12 @@ import { SELLER_USER_AGENT } from "./seller-check.js";
  */
 export const SEED_FILE_BYTES = 512 * 1024;
 /**
- * The wait after each request the seed sends a host: 20 a minute, below the 30 checks a minute a
- * host's budget allows checks after payments (ADR 0008), which keep their share (decision 12). A
+ * The wait after each request the seed sends a host: 60 a minute, so the largest measured file
+ * (581 URLs, 2026-11-23) is seeded in about 10 minutes. Checks after payments, which peaked at 3 a
+ * minute across all sellers (testnet, 2026-11-03 to 11-25), keep their own budget (decision 12). A
  * URL costs one request, a second when its 402 declares another method or an MCP tool.
  */
-export const REQUEST_GAP_MS = 3_000;
+export const REQUEST_GAP_MS = 1_000;
 /** The robots.txt size a parser must read, RFC 9309 §2.5. */
 const ROBOTS_BYTES = 500 * 1024;
 /** Our robot's name in robots.txt groups: the product token of `SELLER_USER_AGENT`. */

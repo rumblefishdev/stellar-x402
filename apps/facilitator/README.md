@@ -967,8 +967,8 @@ catalog:
    on that same 402, so a seeded listing passes the same gates. Only when the 402 declares another
    method, or an MCP tool, is the seller asked once more that way. It has no `ledger` and its
    attempt rows no `payer`; a listing a settlement wrote keeps its `ledger`.
-4. Hosts run at once; within a host the seed waits 3 s after each request, 20 a minute, below the
-   30 checks a minute a host's checks after payments may use. A URL that fails never stops the
+4. Hosts run at once; within a host the seed waits 1 s after each request, 60 a minute, so a host
+   of 581 URLs takes about 10 minutes. A URL that fails never stops the
    next, nor a host the others.
 
 The seed follows each host's `robots.txt` (RFC 9309) under the name `stellar-bazaar`: a URL it
