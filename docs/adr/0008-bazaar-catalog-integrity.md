@@ -34,8 +34,8 @@ settlement.
     would start, for each Stellar account its 402 names, on either network. A seeded listing has no
     settlement, so no `ledger`, and its attempt rows no `payer`. Nothing is read from another
     catalog. The seed follows each host's `robots.txt` (RFC 9309) for every URL it asks, its file
-    included: a disallowed URL is skipped and reported, and a host whose `robots.txt` answers 5xx or not at
-    all is not asked.
+    included: a disallowed URL is skipped and reported, and a host whose `robots.txt` answers
+    neither 200 nor 4xx (a redirect included: none is followed), or not at all, is not asked.
   - Nothing else is indexed, and there is no registration endpoint: a seller is listed after its
     first paid call, its own included (task 0063), or by the seed.
 - **Who may change a listing (task 0063).**

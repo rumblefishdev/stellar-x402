@@ -973,8 +973,8 @@ catalog:
 
 The seed follows each host's `robots.txt` (RFC 9309) under the name `stellar-bazaar`: a URL it
 disallows is skipped and reported as `robots`, and a host that disallows its `/.well-known/x402`
-is not read at all; a 4xx means no rules; a 5xx or no answer means the
-host is not asked. Every request says `User-Agent: stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
+is not read at all; a 4xx means no rules; any other answer than 200, a redirect included (redirects are
+not followed), or no answer means the host is not asked. Every request says `User-Agent: stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
 so a seller can block it by name. The report goes to stdout: a tab-separated line per URL and
 account (URL, method, network, `payTo`, outcome, reason, detail), a line per skipped entry
 (outcome `skipped`), a line per host, the totals, and each `payTo` seen on more than one host. As
