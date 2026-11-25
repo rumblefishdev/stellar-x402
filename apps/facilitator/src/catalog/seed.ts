@@ -154,8 +154,8 @@ async function readFile402(origin: string, listLocal: boolean): Promise<unknown>
 
 /**
  * The host's robots.txt rules for our robot (0155, owner 2026-11-23), by RFC 9309: a 4xx means no
- * rules (§2.3.1.3); a 5xx, or no answer at all, means every URL is off limits (§2.3.1.4), so the
- * host is not asked. A redirect is not followed, as for every seller request: measured hosts that
+ * rules (§2.3.1.3); any other answer than 200 (a 5xx, §2.3.1.4), or no answer at all, means every
+ * URL is off limits, so the host is not asked. A redirect is not followed, as for every seller request: measured hosts that
  * redirect robots.txt redirect their `/.well-known/x402` too, so they are not seeded either way.
  */
 async function readRobots(

@@ -5,7 +5,6 @@ import type { PaymentRequirements } from "@x402/core/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCataloger, type Cataloger } from "../src/catalog/cataloger.js";
 import {
-  REQUEST_GAP_MS,
   SEED_FILE_BYTES,
   fileResources,
   parseHosts,
@@ -184,7 +183,7 @@ describe("seedHosts (0155)", () => {
     ]);
     expect((await store.list({ limit: 10, offset: 0 })).total).toBe(1);
     // /a cost one request: its 402 named the listing and was the check's answer.
-    expect(wait.mock.calls).toEqual([[REQUEST_GAP_MS]]);
+    expect(wait.mock.calls).toEqual([[1_000]]); // decision 12 (W237): a request a second
     expect(seller.userAgents[0]).toBe(SELLER_USER_AGENT);
   });
 
@@ -269,7 +268,7 @@ describe("seedHosts (0155)", () => {
     const cataloger = { seed: async () => ({ results: [], requests: 2 }) } as unknown as Cataloger;
     const wait = vi.fn(async () => {});
     await seedHosts([seller.url], cataloger, { listLocal: true, wait });
-    expect(wait.mock.calls).toEqual([[2 * REQUEST_GAP_MS]]);
+    expect(wait.mock.calls).toEqual([[2_000]]);
   });
 
   it("asks nothing of a host whose robots.txt answers a server error (RFC 9309 §2.3.1.4)", async () => {
@@ -342,6 +341,21 @@ describe("the seed's report (0155 decision 12)", () => {
       },
     ]);
     expect(line).toBe("https://a.example/1\tGET\t\t\tnot_askable\tnot_402\tstatus 404 [2J  ok ");
+  });
+
+  it("counts a second request robots.txt disallowed among the host's robots.txt refusals", () => {
+    const lines = reportLines([
+      {
+        origin: "https://a.example",
+        file: "ok",
+        listed: 1,
+        skipped: [{ entry: "https://a.example/b", method: "GET", reason: "robots" }],
+        results: [
+          { url: "https://a.example/a", method: "GET", outcome: "skipped", reason: "robots" },
+        ],
+      },
+    ]);
+    expect(lines.find((line) => line.startsWith("host "))).toContain("2 refused by robots.txt");
   });
 
   it("prints a line per result, then totals and every payTo on more than one host", () => {
