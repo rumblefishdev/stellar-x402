@@ -61,7 +61,7 @@ describe("feeSettings (AD-10)", () => {
     for (const name of ["MAX_FEE_STROOPS", "INCLUSION_FEE_STROOPS"]) {
       expect(() => parseConfig({ ...env, [name]: tooLarge }), name).toThrow(ConfigError);
     }
-    // Every spend budget must hold one settlement at the ceiling.
+    // Every spend budget, an account plan's included, must hold one settlement at the ceiling.
     const max = String(Number.MAX_SAFE_INTEGER);
     const budgets = Object.fromEntries(
       [
@@ -71,9 +71,11 @@ describe("feeSettings (AD-10)", () => {
         "SPEND_PER_ASSET_STROOPS",
         "SPEND_PER_ASSET_OTHER_STROOPS",
         "SPEND_TIER_OTHER_STROOPS",
+        "SPEND_FREE_STROOPS",
       ].map((name) => [name, max]),
     );
-    expect(() => parseConfig({ ...env, ...budgets, MAX_FEE_STROOPS: max })).not.toThrow();
+    const plans = { ACCOUNT_PLANS: `free:1000:${max}` };
+    expect(() => parseConfig({ ...env, ...budgets, ...plans, MAX_FEE_STROOPS: max })).not.toThrow();
   });
 });
 

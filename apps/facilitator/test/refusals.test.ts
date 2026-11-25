@@ -162,6 +162,18 @@ describe("verifyWithRefusals (0086)", () => {
     expect(await store.get(key)).toBeUndefined();
   });
 
+  // 0157, from the review of #210: a payment for another network is that network's to record, and
+  // this process's store has no record of it to answer from.
+  it("leaves another network's payment to the checks alone, recording nothing", async () => {
+    const { inner, verify, store } = setup();
+    const pubnet = { ...requirements, network: STELLAR_NETWORKS.pubnet };
+    expect(await verify(payload(), pubnet)).toEqual(feeRefusal);
+    expect(await verify(payload(), pubnet)).toEqual(feeRefusal);
+    expect(inner).toHaveBeenCalledTimes(2);
+    expect(await store.get(key)).toBeUndefined();
+    expect(await store.get(`${STELLAR_NETWORKS.pubnet}:${payer}:7`)).toBeUndefined();
+  });
+
   it("answers a refusal as before when another record answers for the key", async () => {
     const { verify, store } = setup();
     const { claimed } = await store.claim({

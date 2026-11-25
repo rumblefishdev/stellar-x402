@@ -12,8 +12,9 @@ import {
 } from "@stellar/stellar-sdk";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { RpcUnavailableError } from "@stellar-x402/signer-pool";
+import { FakeRpc } from "@stellar-x402/signer-pool/testing";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { memoryMetrics } from "../src/metrics.js";
 import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "../src/settlement/nonce-used.js";
 import type { FindMissingTrustline, MissingTrustline } from "../src/settlement/trustline.js";
@@ -21,20 +22,26 @@ import {
   AMOUNT_ZERO_REASON,
   CHANNEL_ACCOUNT_REASON,
   EXPIRATION_TOO_FAR_REASON,
+  FEE_EXCEEDS_MAXIMUM,
   MUXED_FACILITATOR_REASON,
   PAYER_AUTH_REASON,
+  PAY_TO_BALANCE_MISSING,
   UpstreamTimeoutError,
   createChecker,
   createVerifier,
   signedLedgers,
   type UpstreamVerifier,
   type VerifierDeps,
+  type VerifyTrace,
 } from "../src/settlement/verify.js";
+import { createAssetKinds } from "../src/spend/asset-kinds.js";
 
 const network = STELLAR_NETWORKS.testnet;
 const asset = StrKey.encodeContract(Buffer.alloc(32, 7));
 const payer = Keypair.random().publicKey();
 const payTo = Keypair.random().publicKey();
+/** A contract's `payTo`, a smart wallet's: a SAC keeps its balance in an entry of its own. */
+const contractPayTo = StrKey.encodeContract(Buffer.alloc(32, 9));
 const channel = Keypair.random().publicKey();
 const otherChannel = Keypair.random().publicKey();
 const facilitator = Keypair.random().publicKey();
@@ -81,13 +88,16 @@ interface Shape {
   txSource?: Account | MuxedAccount;
   opSource?: string;
   from?: string;
+  to?: string;
   auth?: xdr.SorobanAuthorizationEntry[];
+  /** The Soroban data the buyer's client put in from its simulation. */
+  sorobanData?: xdr.SorobanTransactionData;
 }
 
 /** An `exact` payload: a `transfer` from the payer, signed for `CURRENT + MIN_VALIDITY`. */
 function payload(shape: Shape = {}): PaymentPayload {
   const from = shape.from ?? payer;
-  const transaction = new TransactionBuilder(shape.txSource ?? new Account(payer, "1"), {
+  const builder = new TransactionBuilder(shape.txSource ?? new Account(payer, "1"), {
     fee: "100",
     networkPassphrase: Networks.TESTNET,
   })
@@ -97,21 +107,92 @@ function payload(shape: Shape = {}): PaymentPayload {
         function: "transfer",
         args: [
           nativeToScVal(from, { type: "address" }),
-          nativeToScVal(payTo, { type: "address" }),
+          nativeToScVal(shape.to ?? payTo, { type: "address" }),
           nativeToScVal(1000n, { type: "i128" }),
         ],
         auth: shape.auth ?? [authEntry(from, CURRENT + MIN_VALIDITY)],
         source: shape.opSource,
       }),
     )
-    .setTimeout(60)
-    .build();
+    .setTimeout(60);
+  if (shape.sorobanData) builder.setSorobanData(shape.sorobanData);
+  const transaction = builder.build();
   return {
     x402Version: 2,
     // Differs from the requirements, so the tests see which one reaches upstream.
     accepted: { ...requirements, amount: "1" },
     payload: { transaction: transaction.toXDR() },
   };
+}
+
+/** A persistent contract-data key of `contract`. */
+const dataKey = (contract: string, key: xdr.ScVal) =>
+  xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: new Address(contract).toScAddress(),
+      key,
+      durability: xdr.ContractDataDurability.persistent(),
+    }),
+  );
+/** The key of `holder`'s balance in a SAC: its `DataKey::Balance(Address)`. */
+const balanceKey = (token: string, holder: string) =>
+  dataKey(token, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Balance"), new Address(holder).toScVal()]));
+
+/**
+ * `FakeRpc` that also answers contract data: the tokens' instances and the balances it holds. A
+ * read of a balance throws while `balanceReads` is `down`, and never answers while it is `hung`.
+ */
+class LedgerRpc extends FakeRpc {
+  private readonly data = new Map<string, xdr.LedgerEntryData>();
+  balanceReads: "up" | "down" | "hung" = "up";
+
+  constructor() {
+    super({});
+  }
+
+  /** Deploys `token`, a SAC or a wasm token. */
+  token(token: string, kind: "sac" | "wasm") {
+    const executable =
+      kind === "sac"
+        ? xdr.ContractExecutable.contractExecutableStellarAsset()
+        : xdr.ContractExecutable.contractExecutableWasm(Buffer.alloc(32, 1));
+    this.put(
+      dataKey(token, xdr.ScVal.scvLedgerKeyContractInstance()),
+      xdr.ScVal.scvContractInstance(new xdr.ScContractInstance({ executable, storage: null })),
+    );
+  }
+
+  /** Gives `holder` a balance of `token`; its value isn't read. */
+  balance(token: string, holder: string) {
+    this.put(balanceKey(token, holder), xdr.ScVal.scvVoid());
+  }
+
+  private put(key: xdr.LedgerKey, val: xdr.ScVal) {
+    const data = key.contractData();
+    const entry = new xdr.ContractDataEntry({
+      ext: new xdr.ExtensionPoint(0),
+      contract: data.contract(),
+      key: data.key(),
+      durability: data.durability(),
+      val,
+    });
+    this.data.set(key.toXDR("base64"), xdr.LedgerEntryData.contractData(entry));
+  }
+
+  override async getLedgerEntries(...keys: xdr.LedgerKey[]) {
+    const answer = await super.getLedgerEntries(...keys);
+    const balance = keys.some(
+      (key) =>
+        key.switch().name === "contractData" && key.contractData().key().switch().name === "scvVec",
+    );
+    if (balance && this.balanceReads === "down") throw new Error("rpc down");
+    if (balance && this.balanceReads === "hung") return new Promise<never>(() => {});
+    const entries = keys.flatMap((key) => {
+      const val = this.data.get(key.toXDR("base64"));
+      return val ? [{ key, val, lastModifiedLedgerSeq: 1 }] : [];
+    });
+    return { ...answer, entries: [...answer.entries, ...entries] };
+  }
 }
 
 function setup(
@@ -124,6 +205,7 @@ function setup(
   const missingTrustline = vi.fn<FindMissingTrustline>(async () => missing);
   const nonceUsed = vi.fn<IsNonceUsed>(async () => false);
   const metrics = memoryMetrics();
+  const rpc = new LedgerRpc();
   const verify = createVerifier({
     network,
     upstream,
@@ -135,9 +217,12 @@ function setup(
     missingTrustline,
     nonceUsed,
     metrics: metrics.for({ network }),
+    // No token is known: each one's kind is read from the ledger, as for any token but USDC.
+    assets: createAssetKinds({ rpc, known: [] }),
+    rpc,
     ...deps,
   });
-  return { verify, upstream, latestLedger, missingTrustline, nonceUsed, metrics };
+  return { verify, upstream, latestLedger, missingTrustline, nonceUsed, metrics, rpc };
 }
 
 const rejected = (invalidReason: string) =>
@@ -246,6 +331,121 @@ describe("createVerifier", () => {
     });
   });
 
+  describe("upstream's fee refusal of a payment that creates payTo's balance (0107)", () => {
+    const feeRefusal = {
+      isValid: false,
+      invalidReason: FEE_EXCEEDS_MAXIMUM,
+      invalidMessage: "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops",
+      payer,
+    };
+    const toContract = { ...requirements, payTo: contractPayTo };
+    const toContractPayload = () => payload({ to: contractPayTo });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("says payTo has no balance of the SAC token yet, and how the seller makes one", async () => {
+      const { verify, rpc } = setup(feeRefusal);
+      rpc.token(asset, "sac");
+      const trace: VerifyTrace = {};
+      await expect(verify(toContractPayload(), toContract, trace)).resolves.toEqual({
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_pay_to_balance_missing",
+        invalidMessage:
+          "payTo has no balance of this token yet, and its first payment, which creates one, " +
+          "costs more than the facilitator pays: send payTo a first amount of the token from " +
+          "your own account, then pay again",
+        payer,
+      });
+      expect(PAY_TO_BALANCE_MISSING).toBe("invalid_exact_stellar_pay_to_balance_missing");
+      // The token's instance, for its kind, then payTo's balance.
+      expect(rpc.calls.getLedgerEntries).toBe(2);
+      // The answer names no amount; upstream's message, with the fee, is for the logs.
+      expect(trace.upstreamMessage).toBe(feeRefusal.invalidMessage);
+    });
+
+    it.each([
+      ["a G-address payTo", requirements, "sac", false, 0],
+      ["a wasm token, whose balance key isn't known", toContract, "wasm", false, 1],
+      ["a payTo that holds a balance already", toContract, "sac", true, 2],
+      // The kind's read finds no instance: an unconfirmed `wasm`, never taken for a SAC.
+      ["a token whose kind the ledger doesn't show", toContract, undefined, false, 1],
+    ] as const)("leaves upstream's answer as it is for %s", async (_, paid, kind, held, reads) => {
+      const { verify, rpc } = setup(feeRefusal);
+      if (kind) rpc.token(asset, kind);
+      if (held) rpc.balance(asset, contractPayTo);
+      const trace: VerifyTrace = {};
+      await expect(verify(payload({ to: paid.payTo }), paid, trace)).resolves.toEqual(feeRefusal);
+      expect(rpc.calls.getLedgerEntries ?? 0).toBe(reads);
+      // The answer still has upstream's message, so the logs need no other.
+      expect(trace.upstreamMessage).toBeUndefined();
+    });
+
+    it("names the archived entries instead when the transaction lists some (0066)", async () => {
+      const { verify, rpc } = setup(feeRefusal);
+      rpc.token(asset, "sac");
+      const archived = balanceKey(asset, payer);
+      const sorobanData = new xdr.SorobanTransactionData({
+        ext: new xdr.SorobanTransactionDataExt(
+          1,
+          new xdr.SorobanResourcesExtV0({ archivedSorobanEntries: [0] }),
+        ),
+        resources: new xdr.SorobanResources({
+          footprint: new xdr.LedgerFootprint({
+            readOnly: [],
+            readWrite: [archived, balanceKey(asset, contractPayTo)],
+          }),
+          instructions: 0,
+          diskReadBytes: 0,
+          writeBytes: 0,
+        }),
+        resourceFee: xdr.Int64.fromString("300000"),
+      });
+      await expect(
+        verify(payload({ to: contractPayTo, sorobanData }), toContract),
+      ).resolves.toEqual({
+        ...feeRefusal,
+        invalidMessage:
+          `${feeRefusal.invalidMessage}; the payment's transaction lists 1 archived entry to ` +
+          `restore: ${archived.toXDR("base64")}`,
+      });
+      expect(rpc.calls.getLedgerEntries).toBeUndefined();
+    });
+
+    it.each(["down", "hung"] as const)(
+      "leaves upstream's answer as it is, within 3 s, when the RPC is %s",
+      async (state) => {
+        vi.useFakeTimers();
+        const { verify, rpc } = setup(feeRefusal);
+        rpc.token(asset, "sac");
+        rpc.balanceReads = state;
+        const answer = verify(toContractPayload(), toContract);
+        await vi.advanceTimersByTimeAsync(3_000);
+        await expect(answer).resolves.toEqual(feeRefusal);
+      },
+    );
+
+    it("reads no entry for a payment it accepts, nor for another refusal", async () => {
+      // A normal `/verify` costs no extra RPC call.
+      const accepted = setup();
+      accepted.rpc.token(asset, "sac");
+      await expect(accepted.verify(toContractPayload(), toContract)).resolves.toEqual({
+        isValid: true,
+        payer,
+      });
+      expect(accepted.rpc.calls.getLedgerEntries).toBeUndefined();
+      const wrongAmount = {
+        ...feeRefusal,
+        invalidReason: "invalid_exact_stellar_payload_wrong_amount",
+      };
+      const other = setup(wrongAmount);
+      other.rpc.token(asset, "sac");
+      await expect(other.verify(toContractPayload(), toContract)).resolves.toEqual(wrongAmount);
+      expect(other.rpc.calls.getLedgerEntries).toBeUndefined();
+    });
+  });
+
   it("passes upstream's payer on only when it is a string", async () => {
     // Upstream reads `payer` from `from` before any signature check; the client picks its type.
     for (const notString of [5, 5n]) {
@@ -294,6 +494,8 @@ describe("createVerifier", () => {
       latestLedger: async () => CURRENT,
       missingTrustline: async () => undefined,
       nonceUsed: async () => false,
+      assets: { kind: async () => "wasm" },
+      rpc: new FakeRpc({}),
       upstreamTimeoutMs: 20,
     });
     await expect(verify(payload(), requirements)).rejects.toThrow(UpstreamTimeoutError);
@@ -516,6 +718,8 @@ describe("createVerifier", () => {
         latestLedger: async () => CURRENT,
         missingTrustline: async () => undefined,
         nonceUsed: async () => false,
+        assets: { kind: async () => "wasm" },
+        rpc: new FakeRpc({}),
       });
       const { verified } = await check(payload(), requirements);
       expect(verified).toMatchObject({

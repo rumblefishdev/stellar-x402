@@ -9,8 +9,8 @@
 # the runbook's own GRANT lines. Then: the deploy's probe answers within its 60 s, Docker's
 # healthcheck turns healthy, the container runs as the compose file limits it, a call to the
 # hub's contract with no bearer is refused with 401 invalid_token, the role issues, shows and
-# revokes a key from inside the container and reads no other table, and a stop ends the process
-# with 0.
+# revokes a key, reads the account's plan and use and reads no other table, all from inside the
+# container, and a stop ends the process with 0.
 # Docker installed from a snap can't start a container with no-new-privileges (its AppArmor
 # profile refuses the exec: "operation not permitted"), so there the check takes that one option
 # off every service it starts and says so. CI's and the server's Docker keep it.
@@ -58,7 +58,7 @@ migrate_owner=$(sed -n 's/^.*x402-creds "\$env" database-url\.testnet:\([0-9]*\)
 postgres_owner=$(sed -n 's/^ExecStartPre=.*x402-creds .*postgres-password\.testnet:\([0-9]*\).*/\1/p' ../systemd/x402-db-testnet@.service)
 # The runbook's grants, so the role here is the one an admin makes.
 grants=$(sed -n 's/^ *\(GRANT .* TO x402_portal;\)$/\1/p' "$runbook")
-[ "$(printf '%s\n' "$grants" | grep -c .)" -ge 3 ] || fail "no GRANT lines for x402_portal in docs/runbook.md"
+[ "$(printf '%s\n' "$grants" | grep -c .)" -ge 4 ] || fail "no GRANT lines for x402_portal in docs/runbook.md"
 probe=$(sed -n 's/^probe="\(.*\)"$/\1/p' ../libexec/x402-portal-deploy)
 [ -n "$probe" ] || fail "no probe in libexec/x402-portal-deploy"
 
@@ -202,7 +202,7 @@ pc exec -T portal node --input-type=module -e "
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import pg from 'pg';
-import { PostgresSealedKeyStore } from '@stellar-x402/api-keys';
+import { PostgresAccountPlanStore, PostgresAccountUsageReader, PostgresSealedKeyStore } from '@stellar-x402/api-keys';
 const pool = new pg.Pool({ connectionString: readFileSync(process.env.DATABASE_URL_FILE, 'utf8') });
 const store = new PostgresSealedKeyStore(pool);
 const owner = 'discord:123456789012345678';
@@ -213,14 +213,17 @@ expect('show', (await store.keysOf(owner)).active?.sealed?.toString() === 'seale
 expect('revoke', await store.revoke(owner, 2));
 expect('the copy goes with the key', (await store.keysOf(owner)).lastRevokedAt === 2);
 const refused = async (sql) => pool.query(sql).then(() => false, (e) => e.code === '42501');
+expect('no plan for an account without a row', (await new PostgresAccountPlanStore(pool).planOf(owner)) === undefined);
+expect('no payments for an account without any', (await new PostgresAccountUsageReader(pool).paymentsSince(owner, 0)) === 0);
 const { rows } = await pool.query(
-  \"SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN ('api_keys', 'api_key_copies')\");
+  \"SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN ('api_keys', 'api_key_copies', 'account_plans')\");
 expect('other tables exist', rows.length > 0);
 for (const { tablename } of rows) expect('no read of ' + tablename, await refused('SELECT 1 FROM ' + tablename));
 expect('no delete of a key', await refused('DELETE FROM api_keys'));
 expect('no new owner for a key', await refused(\"UPDATE api_keys SET owner = 'discord:1'\"));
+expect('no change to a plan', await refused(\"UPDATE account_plans SET plan = 'pro'\"));
 expect('no change to a copy', await refused(\"UPDATE api_key_copies SET sealed = 'x'\"));
-console.log('the role issues, shows and revokes, and reads none of the other', rows.length, 'tables');
+console.log('the role issues, shows and revokes, reads the plan and the use, and reads none of the other', rows.length, 'tables');
 await pool.end();"
 
 pc stop portal

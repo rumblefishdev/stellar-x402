@@ -45,7 +45,7 @@ export interface PrunerDeps {
   spend: Pick<SpendStore, "prune" | "pruneScopes">;
   rateLimits: Pick<RateLimitStore, "prune">;
   catalogAttempts: Pick<CatalogAttemptStore, "prune">;
-  /** The longest window any spend budget sums. */
+  /** The longest window any limit sums. */
   spendWindowMs: number;
   rateLimitWindowMs: number;
   logger: Logger;
@@ -69,7 +69,8 @@ export interface Pruner {
 
 /**
  * Deletes spend reservations and rate-limit windows no budget or limit counts any more (0050),
- * listing attempts past their 30 days (0063), and `refused` settlements past their hour (0086).
+ * listing attempts past their 30 days (0063), and `refused` settlements once their expiration
+ * ledger has closed, an hour after the refusal at the earliest (0086, 0156).
  * Every process runs one: the deletes skip rows another holds, so pruners never wait on each
  * other or on a request, and a pruner that stops costs disk, not latency. A failure is logged
  * and counted, and the next tick tries again.

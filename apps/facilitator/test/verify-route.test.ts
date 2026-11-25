@@ -10,7 +10,12 @@ import { memoryMetrics } from "../src/metrics.js";
 import { start, type Started } from "../src/start.js";
 import { StoreUnavailableError } from "../src/settlement/refusals.js";
 import { PAYTO_TRUSTLINE_REASON } from "../src/settlement/trustline.js";
-import { UpstreamTimeoutError, type Verify } from "../src/settlement/verify.js";
+import {
+  PAY_TO_BALANCE_MISSING,
+  PAY_TO_BALANCE_MISSING_MESSAGE,
+  UpstreamTimeoutError,
+  type Verify,
+} from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
 import { signerEnv } from "./fake-openbao.js";
@@ -154,6 +159,24 @@ describe("POST /verify", () => {
     await post(request);
     const verified = lines.map((line) => JSON.parse(line)).filter((l) => l.event === "verified");
     expect(verified.map((l) => l.message)).toEqual([invalidMessage, undefined]);
+  });
+
+  // 0107 decision 31: our refusal names no amount, so the fee upstream measured is kept in the log
+  // alone (0157, from Oskar's review of #236).
+  it("logs the fee of a payment creating payTo's balance, which its answer doesn't name", async () => {
+    const upstreamMessage = "simulation-derived fee 128027 stroops exceeds ceiling 100000 stroops";
+    verify.mockImplementationOnce(async (_payload, _requirements, trace) => {
+      trace!.upstreamMessage = upstreamMessage;
+      return {
+        isValid: false,
+        invalidReason: PAY_TO_BALANCE_MISSING,
+        invalidMessage: PAY_TO_BALANCE_MISSING_MESSAGE,
+      };
+    });
+    const response = await post(request);
+    expect(JSON.stringify(await response.json())).not.toContain("128027");
+    const verified = lines.map((line) => JSON.parse(line)).find((l) => l.event === "verified");
+    expect(verified).toMatchObject({ invalidReason: PAY_TO_BALANCE_MISSING, upstreamMessage });
   });
 
   it.each([

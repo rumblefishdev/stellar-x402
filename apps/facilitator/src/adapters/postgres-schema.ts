@@ -345,13 +345,49 @@ CREATE INDEX catalog_search_words ON catalog_search USING gin (words);
 `,
   },
   {
+    // 0107: the plan the operator gives an account (a key's owner) by hand; one without a row is
+    // on `free`, and the plans themselves are config. `account_usage` is the account's payments as
+    // `reserve` counts them: each `account:<owner>` scope row, which `release` deletes. It finds
+    // the account's scope in `spend_scopes`, whose row `reserve` writes with the scope rows, so
+    // the window index serves one owner's scope rows: over the scope rows alone the owner is an
+    // expression no index serves, and the read scanned them all (about 90 ms at 3,000,000 rows).
+    // The owner's own row is still found by a scan of `spend_scopes`, for the same reason: 0.5 ms
+    // at 72 rows, 1.5 ms at 3,500 and 5.5 ms at 50,000 (measured in the review of #236), on a
+    // table that holds a row per account and per breaker scope on a network that requires a key.
+    // A view that also gave `scope` would let the read name it and use the primary key (0.4 ms at
+    // any size). `pruneScopes` keeps the row while the scope has a reservation in the
+    // pruner's horizon, which the quota's own count needs to cover the month. One race is left:
+    // a `pruneScopes` statement that began before the next `reserve` of an account idle for the
+    // whole horizon committed still deletes the account's row, and the view then misses its
+    // payments until a later `reserve` writes the row again; the store's count, which enforces
+    // the quota, reads the scope rows and is unaffected. The portal reads the two with `SELECT`
+    // on them alone: the view reads its tables as the view's owner. A new table and a view, so
+    // the release before keeps working: it reads neither. The view takes ACCESS SHARE on the two
+    // spend tables, which no write waits for and which waits for none. A later migration that
+    // changes a column it reads must drop the view and make it again.
+    name: "0018_account_plans",
+    sql: `
+CREATE TABLE account_plans (
+  owner text PRIMARY KEY,
+  plan text NOT NULL,
+  set_at bigint NOT NULL,
+  set_by text NOT NULL,
+  note text
+);
+CREATE VIEW account_usage AS
+  SELECT substr(s.scope, length('account:') + 1) AS owner, rs.at
+  FROM spend_scopes s JOIN spend_reservation_scopes rs ON rs.scope = s.scope
+  WHERE s.scope LIKE 'account:%';
+`,
+  },
+  {
     // 0120: each card's vector (ADR 0014), with the model that made it and the hash of the text it
     // was made from, so a vector of another model or of an older text reads as stale. NULL until
     // the facilitator writes it. pgvector's extension lives in `public`, so every schema sees the
     // type. The vector is kept in the row (`PLAIN`), as pgvector's README suggests for an exact
     // scan: a 384-number vector fits a page. Nullable columns without a default change only the
     // catalog, and the release before never reads them.
-    name: "0018_catalog_search_vector",
+    name: "0019_catalog_search_vector",
     sql: `
 CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
 ALTER TABLE catalog_search

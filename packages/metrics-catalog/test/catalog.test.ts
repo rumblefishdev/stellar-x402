@@ -113,10 +113,11 @@ describe("CATALOG", () => {
     ]);
   });
 
-  test("spend_budget_nearing_total: one set without budget, when budget in asset/other/global", () => {
+  test("spend_budget_nearing_total: one set without budget, when budget in asset/other/free/global", () => {
+    // The shared budgets only: an account's is its holder's alone, nothing to act on (0107).
     const m = def("spend_budget_nearing_total");
     expect(m.scope).toBe("network");
-    expect(m.sets).toEqual([{ dims: [], when: { budget: ["asset", "other", "global"] } }]);
+    expect(m.sets).toEqual([{ dims: [], when: { budget: ["asset", "other", "free", "global"] } }]);
   });
 
   test("settlement outcomes and sweeps are billed by result and outcome", () => {
@@ -397,7 +398,7 @@ describe("effectiveSets", () => {
     ]);
     expect(effectiveSets(def("signer_failures_total"))).toEqual([{ dims: ["network"] }]);
     expect(effectiveSets(def("spend_budget_nearing_total"))).toEqual([
-      { dims: ["network"], when: { budget: ["asset", "other", "global"] } },
+      { dims: ["network"], when: { budget: ["asset", "other", "free", "global"] } },
     ]);
   });
 

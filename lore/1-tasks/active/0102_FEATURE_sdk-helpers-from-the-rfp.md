@@ -2,7 +2,8 @@
 id: "0102"
 title: "Build the TypeScript SDK helpers the RFP asks for"
 type: FEATURE
-status: backlog
+status: active
+owner: akot
 milestone: 2
 related_adr: ["0001"]
 related_tasks: ["0101", "0041", "0092", "0136", "0140", "0132"]
@@ -15,6 +16,12 @@ history:
     note: >
       The RFP requires SDK helpers and two examples, and no task built them; only an empty package
       stood for them until 0101 removes it.
+  - date: "2026-11-25"
+    status: active
+    who: akot
+    note: >
+      Started. First step is the helper list per party (seller, buyer, agent), agreed with the
+      owner before any package code; 0092 follows for the buyer helper's missing-trustline error.
 ---
 
 # Build the TypeScript SDK helpers the RFP asks for

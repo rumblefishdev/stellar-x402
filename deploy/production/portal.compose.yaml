@@ -27,7 +27,8 @@ services:
       CLIENT_IP: cloudflare
       HUB_TOKEN_SECRET_FILE: /run/secrets/portal-hub-token-secret
       KEY_ENCRYPTION_KEY_FILE: /run/secrets/portal-key-encryption-key
-      # The role `x402_portal`, which reads and writes the registry's two tables and nothing else
+      # The role `x402_portal`, which reads and writes the registry's two tables and reads every
+      # account's plan row and payment times (`account_plans`, `account_usage`), nothing else
       # (runbook, The portal's backend).
       DATABASE_URL_FILE: /run/secrets/portal-database-url
     secrets:
