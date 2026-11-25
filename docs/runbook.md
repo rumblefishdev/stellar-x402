@@ -935,17 +935,21 @@ not here yet).
 2. **Decide whether this server stays.** A new key in an OpenBao that someone else can read is
    stolen the same way.
 
-   | What happened                                                                                                                                     | Then                                                                                                                                                                                                                                                                       |
-   | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | A secret ID or token seen outside the server, and OpenBao's audit log shows every signature came from the facilitator's token at its settle times | Not this section: the key wasn't used. OpenBao has no network (`network_mode: none`), so a credential can't sign from outside the server. Cut it off with step 3's revoke, destroy and new secret ID lines only, and keep the accounts.                                    |
-   | A signature the facilitator didn't make, root on the server, code in the facilitator's container, or you don't know                               | The server doesn't stay: whoever signed was on the server or in the container. Stop here: a clean server, set up with "Before the first deploy" and OpenBao's steps 1–6, and every secret the server held rotated ([Credentials](#credentials)). Then steps 6 and 7 below. |
-   | OpenBao's disk, with no break-in, and the restore failed                                                                                          | The server stays. OpenBao's steps 1–5 make a new `stellar-testnet` at version 1, with the two changes below; skip step 3.                                                                                                                                                  |
+   | What happened                                                                                                                                     | Then                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+   | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | A secret ID or token seen outside the server, and OpenBao's audit log shows every signature came from the facilitator's token at its settle times | Not this section: the key wasn't used. OpenBao has no network (`network_mode: none`), so a credential can't sign from outside the server. Keep the accounts and cut off the one that leaked: testnet's secret ID or an AppRole token, step 3's `revoke-prefix`, `destroy` and new secret ID lines; a root token, by its accessor ([A lost shell](#openbao)); the snapshots' secret ID, step 3's `destroy` loop on `x402-snapshot`, then a new one with step 4 of "OpenBao snapshots → Setting it up". Then start `x402@production` again: step 1 stopped it, and it reads a new secret ID only at a start. |
+   | A signature the facilitator didn't make, root on the server, code in the facilitator's container, or you don't know                               | The server doesn't stay: whoever signed was on the server or in the container. Stop here: a clean server, set up with "Before the first deploy" and OpenBao's steps 1–6 with the two changes below, and every secret the server held rotated ([Credentials](#credentials)). Then steps 6 and 7 below.                                                                                                                                                                                                                                                                                                      |
+   | OpenBao's disk, with no break-in, and the restore failed                                                                                          | The server stays. OpenBao starts over with new volumes, as its "Setting it up" says (stop `x402-openbao`, `compose down`, the two volumes removed and made again): the failed restore's Raft data makes `init` refuse, and a running OpenBao keeps the old seal key, so the next restart can't unseal. Then OpenBao's steps 1–5 make a new `stellar-testnet` at version 1, with the two changes below; skip step 3.                                                                                                                                                                                        |
 
-   On a server that was set up once, two of OpenBao's steps change:
+   The backup secret lives in AWS, so it outlives any server: in the last two rows it already
+   exists, and two of OpenBao's steps change:
 
    - **Step 3 updates the backup secret, it doesn't create it.** `create-secret` fails on the
-     existing `x402/production/openbao-backup`. Write the new seal key, recovery key and seal
-     config into it and keep its Borg and Storage Box fields, with the variables of step 3:
+     existing `x402/production/openbao-backup`. Never delete it and create it again: its Borg
+     passphrase and key export are the only copy of them off the server, and the backups need
+     them. Write the new seal key,
+     recovery key and seal config into it and keep its Borg and Storage Box fields, with the
+     variables of step 3:
 
      ```sh
      id=x402/production/openbao-backup
@@ -1003,7 +1007,8 @@ not here yet).
      ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
    ```
 
-6. **Start it, and check the signer.** A wrong version or address doesn't stop the start: the
+6. **Start it, and check the signer.** A well-formed version, or an address the channels accept,
+   doesn't stop the start, even when it's wrong: the
    facilitator runs, `/health` says `signer: failed`, the log has `signer_failed` with its reason
    (`address_mismatch` for a wrong address, `error` for a version below `min_encryption_version`,
    which OpenBao answers with a 500, `denied` for a credential), and every settle fails until it
@@ -1021,8 +1026,10 @@ not here yet).
    Two mistakes stop the start instead, before `/health` exists, so the check above has nothing
    to talk to: a malformed version (`VERSION`, `v2`, `0`) fails the config check, and an address
    that isn't the channels' signer fails `checkChannels` with `facilitator-not-signer`. `x402@`
-   restarts until systemd gives up (5 starts in 5 minutes). Read why in
-   `journalctl -u x402@production`, fix `.env`, then
+   restarts until systemd gives up (5 starts in 5 minutes). The journal has only systemd's
+   `status=1/FAILURE`; the reason (`startup_failed`, `facilitator-not-signer`) is in the
+   facilitator's own log, as in [The watchdog](#the-watchdog):
+   `sudo tail -n 20 /var/log/x402/production/facilitator.log`. Fix `.env`, then
    `sudo systemctl reset-failed x402@production` and start it again.
 
 7. **The alarms on the new fee account:** a pull request that changes `feeAccounts` in
