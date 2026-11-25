@@ -1074,6 +1074,16 @@ reset-failed x402@production`, the agent, the credentials timer and the probe ti
 - **What happened:** ALARM at 13:11:33, 20 minutes 39 seconds after the stop, not the 10 to 15
   that two empty 5-minute periods suggest: CloudWatch waits for late data before it reads a
   period as missing. Alertmanager started at 13:11:50; OK at 13:13:33.
+- **Shown once:** the ALARM went out as one publish to `x402-production-alarms` at 13:11:33,
+  delivered once to its one subscription, the Slack channel's Amazon Q endpoint
+  (`NumberOfNotificationsDelivered` 1, `NumberOfNotificationsFailed` 0), and the OK as one more
+  at 13:13:33. The alarm sends nothing while it stays in ALARM, so a longer outage is still one
+  message.
+- **Why stopping Alertmanager covers the VM and Prometheus:** the alarm reads only the heartbeat
+  topic's `NumberOfMessagesPublished`. Prometheus evaluates the `Watchdog` and Alertmanager
+  publishes it, so a stopped Prometheus (no alert to send), a stopped Alertmanager (nobody to
+  send it) and a stopped VM (neither) all end the same way: no publish. The drill stopped the
+  last link in that chain.
 - **What it shows:** the topic's count, the alarm's missing-data rule and its path to Slack. A
   broken credential, the other cause, was seen for real at 11:43–11:46 before the helper's
   `HOME` fix: `NotificationsFailed` posted it to Slack (soroban-infrastructure#19).
