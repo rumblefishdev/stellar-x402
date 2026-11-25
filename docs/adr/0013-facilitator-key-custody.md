@@ -21,7 +21,7 @@
   a local copy, task 0026); 2026-11-09 (the audit log disk alarm at 90%, after the server's disk
   alarm at 80%: on the server the audit volume shares `/` with everything else, so the two
   thresholds give a warning and then a last call instead of one doubled message; task 0027
-  decision 73)
+  decision 73); 2026-11-23 (pubnet's measured typical settlement beside ADR 0003's, task 0107)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -206,6 +206,9 @@
 - **The fee float is 100 XLM, with the alarm at 25 XLM, and no upper limit.** That is about 24,000
   typical `exact` settlements (~41,200 stroops each, ADR 0003), and about 5 days to act after the
   alarm at 1,000 settlements a day, before 0024's floor stops settlement at 5 XLM. Testnet uses the same numbers for now.
+  Measured on pubnet since (task 0107, 2026-11-23): a USDC `exact` settlement between two
+  accounts is charged 12,203 stroops, so the float is about 82,000 of them and the days to act
+  about three times as many; 41,200 came from testnet runs before today's `exact` transfer (0093).
   - **Top-ups are by hand.** Testnet: Friendbot, which only creates accounts, so a short script in
     the 0026 runbook funds a fresh account and merges it into the fee account. Mainnet:
     a withdrawal from the company's exchange account to the fee account; who makes it is named

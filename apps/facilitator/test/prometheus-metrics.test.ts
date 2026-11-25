@@ -135,17 +135,20 @@ describe("prometheus adapter", () => {
   });
 
   it("counts a line only when a when on a label that is no dim holds", () => {
-    // `budget` is no dim of spend_budget_nearing_total: payer and pay_to write no metric.
+    // `budget` is no dim of spend_budget_nearing_total: payer, pay_to and an account write no
+    // metric; the free plan's shared budget does (0107).
     const { m, scrape } = setup();
     const net = m.for({ network: NET });
     net.increment("spend_budget_nearing_total", { budget: "payer" });
     net.increment("spend_budget_nearing_total", { budget: "pay_to" });
+    net.increment("spend_budget_nearing_total", { budget: "account" });
     net.increment("spend_budget_nearing_total", {});
     const series = `spend_budget_nearing_total{network="${NET}"}`;
     expect(scrape().get(series)).toBe(0);
     net.increment("spend_budget_nearing_total", { budget: "global" });
     net.increment("spend_budget_nearing_total", { budget: "asset" });
-    expect(scrape().get(series)).toBe(2);
+    net.increment("spend_budget_nearing_total", { budget: "free" });
+    expect(scrape().get(series)).toBe(3);
     // A when on a dim still counts every value, written as the label.
     const reason = "settle_exact_stellar_fee_exceeds_maximum";
     net.increment("settlement_refused_after_verify_total", { stage: "check", reason });

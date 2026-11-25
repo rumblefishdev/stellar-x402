@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 2
 related_adr: []
-related_tasks: ["0156", "0086", "0074"]
+related_tasks: ["0156", "0086", "0074", "0107", "0126"]
 tags: [facilitator, payments, tests, priority-low, effort-small]
 links: ["https://github.com/rumblefishdev/stellar-x402/pull/210", "https://github.com/rumblefishdev/stellar-x402/pull/219"]
 history:
@@ -42,8 +42,30 @@ comments left from before 0086 landed. None of them blocks a deploy.
   pruner, since a tick waits on the real RPC before `spend.prune`. Check without network timing,
   e.g. the test RPC's `getLatestLedger` count staying flat. Coordinate with 0074 (timing tests).
 
+From Oskar's review of #236 (0107, 2026-11-24), checked by mutation: each change below passed the
+whole facilitator suite (52 files, 1,339 tests).
+
+- **The composed service on a network that requires a key**: every `compose()` test builds a
+  testnet config, so nothing protects `main.ts`'s keyed wiring. Add a `compose()` test with a
+  pubnet `Config` built directly, past `parseConfig`'s refusal, as `api-key-route.test.ts` does
+  (`{ ...parseConfig({...}), network }`): a `/settle` with a key reserves `account:<owner>` under a
+  plan from `ACCOUNT_PLANS` and from an `account_plans` row, a settlement without a caller is
+  refused, and the pruner's window is the keyed one (62 days kept). The four changes that pass
+  today: `spendWindowMs: config.spend.windowMs` (the month's rows would go after 7 days, so a
+  quota would count a week), `keyed: false`, the default plans in place of
+  `config.spend.accountPlans`, and `plans: { planOf: async () => undefined }`. **Before 0126
+  starts**: it rewrites `compose()` for two networks.
+- **`upstreamMessage` in the `verified` and `settled` lines**: deleting the field from either
+  `logger.info` in `http/app.ts` fails no test, and for
+  `invalid_exact_stellar_pay_to_balance_missing` it is the only place the fee upstream measured
+  remains (0107 decision 31). Add a fee-refusal stub to `verify-route.test.ts` and
+  `settle-route.test.ts` (SAC kind, contract `payTo`, empty `getLedgerEntries`) that asserts the
+  field in the line.
+
 ## Acceptance Criteria
 
+- [ ] Reverting any of the four keyed wirings in `main.ts` fails a test (before 0126 starts)
+- [ ] Removing `upstreamMessage` from the `verified` or the `settled` line fails a test
 - [ ] Removing `verifyWithRefusals` from `main.ts` fails a test
 - [ ] Removing the network guard in `verifyWithRefusals` fails a test
 - [ ] No comment or doc says #205 hasn't landed or that refused records go after the hour alone

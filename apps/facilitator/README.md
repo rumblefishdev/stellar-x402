@@ -36,12 +36,12 @@ shape has to be made in the document too, and the hub's copy replaced.
   120), so size the set for such stalls next to the load: with two channels, two of them make
   every new `/settle` wait for a channel until its budget ends. No metric shows a held channel
   yet (0089).
-- `NETWORK=stellar:pubnet` refuses to start until a deploy can't reuse a channel left open (0090),
-  each API key owner's settlements count in a fee budget of its own (0107), a failing signer
-  raises an alarm (0027) and the hot key's reach is decided again (0048). The spend budgets bound
-  the loss, but self-payments from many cheap addresses can still use up the shared budgets for
-  every seller (see "Shared budgets used up by self-payments" below). Pubnet's callers already
-  need an API key (0105, "API keys on pubnet" below).
+- `NETWORK=stellar:pubnet` refuses to start until the hot key's reach is decided again (0048).
+  The rest of what it waited for has landed: a deploy can't reuse a channel left open (0090), a
+  failing signer raises an alarm (0027; pubnet gets its own once infra's `networks`, in
+  `infra/envs/production.json`, lists it), and each API key owner's settlements count in an
+  account of its own (0107, "Accounts and plans" below), so self-payments from many cheap
+  addresses can't use up a budget other sellers need.
 
 ## Callers and rate limits
 
@@ -137,23 +137,26 @@ not `NETWORK`, so it holds in a process that serves both networks (0126).
 - **A key has an owner**, `<kind>:<id>`: `operator:<name>` for a key the operator issues by hand,
   `discord:<id>` for one the portal issues (0106). An owner has one active key at a time. The rate
   limiter counts a pubnet request under its owner (`settle:key:operator:acme`), with the same
-  budgets as an IP's, and `/settle` hands the owner to the spend policy, which will give each
-  owner a fee budget of its own (0107). Until then a pubnet settlement counts in the budgets
-  below, like any other. The count is the owner's, not the key's: a replaced key continues it.
+  budgets as an IP's, and `/settle` hands the owner to the spend policy, which counts the
+  settlement in the owner's account ("Accounts and plans" below). Both counts are the owner's,
+  not the key's: a replaced key continues them.
   The `verified`, `settled` and `rate_limited` log lines name the owner (`caller`, `owner`); no
   line carries a key or its hash.
 - **A revocation holds from the next request**, on every instance: the registry is read on each
   pubnet request, one primary-key lookup on a pool of its own, and nothing caches it. If the
   registry can't be read the answer is a 500 and nothing is let in.
 - **The operator's script** issues, revokes and lists keys by hand, over the same registry the
-  portal will write. It needs only `DATABASE_URL` (or `DATABASE_URL_FILE`), of the network whose
-  callers the key is for, on a migrated schema:
+  portal will write, and sets an account's plan ("Accounts and plans" below). It needs only
+  `DATABASE_URL` (or `DATABASE_URL_FILE`), of the network whose callers the key or the plan is
+  for, on a migrated schema, and `ACCOUNT_PLANS` where the service has it set:
 
   ```sh
   pnpm --filter @stellar-x402/facilitator keys issue acme-weather   # prints the key, once
   pnpm --filter @stellar-x402/facilitator keys revoke acme-weather  # holds from the next request
   pnpm --filter @stellar-x402/facilitator keys revoke discord:412345678901234567
   pnpm --filter @stellar-x402/facilitator keys list
+  pnpm --filter @stellar-x402/facilitator keys plan discord:412345678901234567 basic asked on Discord
+  pnpm --filter @stellar-x402/facilitator keys plans
   ```
 
   `pnpm keys` runs the built `dist/keys.js`, as the image does (`node dist/keys.js …`); from a
@@ -162,8 +165,13 @@ not `NETWORK`, so it holds in a process that serves both networks (0126).
   active key is refused until it is revoked, so replacing a key is `revoke`, then `issue`, and the
   owner has no key in between. `revoke` takes a name or a whole owner, so it also revokes a key the
   portal issued. `list` prints each key's owner, state, times and the first 12 hex digits of its
-  hash. The new key is printed to stdout and nowhere else; errors go to stderr with exit code 1.
-  The production compose file has no service for it yet: pubnet's services come with 0126.
+  hash. `plan` takes a whole owner and a plan `ACCOUNT_PLANS` names, and refuses any other plan,
+  since the service would read that account as on `free`; the rest of the line is the note of
+  why, kept on one line. It replaces the account's row, which records when and by whom:
+  `operator:$USER`, or `operator:unknown` when `$USER` is unset or isn't a name an owner can
+  carry. `plans` prints every row: owner, plan, when, by whom and the note. The new key is printed
+  to stdout and nowhere else; errors go to stderr with exit code 1. The production compose file
+  has no service for it yet: pubnet's services come with 0126 (runbook, "Account plans").
 
 ## Spend budgets and breakers
 
@@ -194,7 +202,9 @@ A store that doesn't answer within the settle budget refuses the settlement
 Every budget sums the fees of one rolling window, `SPEND_WINDOW_MS` (24 h). A known asset is a
 configured SAC: USDC on its network. Every other token, a self-issued SAC as much as a wasm token,
 is an other asset: anyone can mint one, so it gets the low tier. This limits spend, not acceptance:
-any SEP-41 token still settles.
+any SEP-41 token still settles. The payer, `payTo`, asset and tier budgets are for a settlement
+without an API key, every testnet one; a settlement with a key counts in its account, `free` and
+`global` instead ("Accounts and plans" below).
 
 | Setting                         | Default     | XLM | Budget                                                                                                |
 | ------------------------------- | ----------- | --- | ----------------------------------------------------------------------------------------------------- |
@@ -204,6 +214,7 @@ any SEP-41 token still settles.
 | `SPEND_PER_ASSET_STROOPS`       | 250 000 000 | 25  | one known asset                                                                                       |
 | `SPEND_PER_ASSET_OTHER_STROOPS` | 20 000 000  | 2   | one other asset                                                                                       |
 | `SPEND_TIER_OTHER_STROOPS`      | 100 000 000 | 10  | every other asset together, so junk tokens can't use up `global`                                      |
+| `SPEND_FREE_STROOPS`            | 250 000 000 | 25  | every account on the free plan together (0107); at most `global` where a key is required              |
 | `SPEND_FLOOR_STROOPS`           | 50 000 000  | 5   | not a budget: `/settle` refuses while the fee account can spend less (ADR 0013)                       |
 | `SPEND_BALANCE_INTERVAL_MS`     | 30 000      |     | how often the fee account's balance is read; a reading 10 intervals old (at least 5 min) fails closed |
 | `SPEND_WINDOW_MS`               | 86 400 000  |     | the window of every budget                                                                            |
@@ -214,6 +225,71 @@ payment, and the facilitator refuses to start with one. `global` stays below the
 100 XLM float less its 25 XLM alarm, so one window can't empty the fee account. The defaults are
 the same on testnet and at the pubnet start. `BREAKER_FAILURES` and `BREAKER_COOLDOWN_MS` are no
 longer read; a leftover one refuses to start, like `STORE`.
+
+### Accounts and plans
+
+On a network that requires an API key (pubnet), a settlement counts in its caller's account, the
+key's owner, and not in the payer, `payTo`, asset or tier budgets: another caller's payments could
+fill those for this one (task 0107, [ADR 0007](../../docs/adr/0007-fee-abuse-containment.md)'s
+amendment of 2026-11-23). Its limits, narrowest first:
+
+1. **The account's payments this month**, against its plan's quota. A payment is a settlement the
+   network charged a fee for, a failed one too, or one still in flight. One that ends with no fee
+   charged, sent but never included, stops counting then, so the count the hub shows can go
+   down. A refusal before the send, a repeat of a payment already answered and `/verify` count
+   nothing. The month is the calendar month in UTC, from the 1st at 00:00:00Z, which belongs to
+   the new month, and a payment counts in the month its reservation was made, however late it
+   ends.
+2. **The account's fees in the last 24 h**, against its plan's fee budget. The seller isn't shown
+   it: it bounds what one account costs us in a day, whatever its payments cost, so no account
+   takes another's room in `global`. A free account whose payments all cost the ceiling stops
+   after 80 in 24 h, not after 1,000.
+3. **`free`**, for an account on the free plan: every such account together, so many Discord
+   accounts use up only the free traffic, never the room of the accounts the operator raised.
+4. **`global`**, as for every settlement.
+
+| Plan    | Payments a month | Fee budget per 24 h | XLM |
+| ------- | ---------------- | ------------------- | --- |
+| `free`  | 1 000            | 20 000 000          | 2   |
+| `basic` | 10 000           | 25 000 000          | 2.5 |
+| `pro`   | 100 000          | 100 000 000         | 10  |
+
+- **The plans are config**, `ACCOUNT_PLANS`: `<name>:<payments a month>:<fee stroops per 24 h>`,
+  comma-separated, with a `free` plan, by default
+  `free:1000:20000000,basic:10000:25000000,pro:100000:100000000`. The 24 h is the spend window,
+  `SPEND_WINDOW_MS` (24 h by default), as for every budget. Each plan's fee budget is at least
+  `MAX_FEE_STROOPS`, as every budget is. The portal reads the same setting to show an account its
+  quota ([its README](../portal/README.md)): give both services the same text.
+- **An account's plan is a row** in `account_plans` (migration `0018_account_plans`), set by the
+  operator's `keys plan` after the seller writes to us. An account without one is on `free`. A row
+  naming a plan the config no longer has counts as `free`, logged as `account_plan_unknown`
+  (error). The plan and the count are the account's, not the key's, so both survive a revoke and
+  a new key.
+- **`global` holds `free` and every raised account's fee budget** (0107 decision 5): then no
+  account, attacked or with a leaked key, takes more than its own budget for 24 h from the others,
+  and `global` is a backstop that doesn't fill. The config checks only that `SPEND_FREE_STROOPS`
+  is at most `SPEND_GLOBAL_STROOPS`, and only on a network that requires a key, the one network
+  where anything counts in `free`; the rest is the operator's check when granting a plan
+  ([runbook](../../docs/runbook.md), "Account plans"). At the defaults `global` keeps 25 XLM per
+  24 h beside `free`: ten `basic` accounts, or two `pro` and two `basic`.
+- **Whoever's request sends the payment pays for it.** A reopened payment (a repeat after a
+  "nothing sent" answer) counts in the account of the request that reopens it, under a
+  reservation of its own. That request gives up the earlier claim's reservation before it
+  reserves, without waiting for that claim's `onFinal`, so a payment counts once however often it
+  was reopened. A spend refusal, quota included, doesn't reopen.
+- **The plan is read with each settlement**, from the registry's pool. A read that fails refuses
+  as the store does, `settle_exact_stellar_spend_store_unavailable`, and is counted under `op`
+  `plan`. A pubnet settlement with no caller is refused with `settle_exact_stellar_refused`,
+  logged as `spend_caller_missing` (error): only `/settle` settles, and it always passes the
+  caller, so only a bug can send one.
+- **The count runs under `global`'s lock**, so it is every reserve's wait. Measured with 100,000
+  reservations in one account's month (a `pro` account at its quota), it added about 12 ms to a
+  reserve (task 0107, 2026-11-23); a `free` account counts at most 1,000.
+- **The store keeps a month of reservations.** On a network that requires a key the pruner keeps
+  them for twice the longest window, the 31-day month: 62 days, against 7 elsewhere.
+- **No nearing log, metric or alarm per account:** an account near its quota or budget is its
+  holder's alone, so `spend_budget_nearing` is for the shared budgets, `free` among them. A
+  refusal is still logged, `spend_limit_reached` with the account's scope (below).
 
 ### Breakers
 
@@ -245,8 +321,16 @@ The policy is fixed in code (`src/spend/policy.ts`), not config.
 
 `/settle` answers 200 with `success: false` and one of the reasons in "`/settle` answers": the
 payment is ended and nothing was sent. A spend reason names the narrowest budget that is full,
-never an address, an amount or a reset time. What to do:
+never an address or an amount, and only the monthly quota a reset time. What to do:
 
+- `…_quota_exhausted` (pubnet): your account has used its plan's payments this month.
+  `errorMessage` says how many and until when, and `extra.resetsAt` is that instant, the next
+  month's start (`2026-12-01T00:00:00Z`). Your account settles again from then, or once the
+  operator raises its plan: write to us. A buyer then signs a new payment, as below.
+- `…_spend_limit_account` (pubnet): your account's fee budget for the last 24 h is used up: its
+  payments cost more than usual, which a buyer's wallet can cause. It frees up as the 24 h roll.
+- `…_spend_limit_free` (pubnet): every account on the free plan together has used the free
+  plan's budget for the last 24 h. An account on a raised plan still settles.
 - `…_spend_limit_payer`: that buyer has used its budget for the window. Ask it to pay again later.
 - `…_spend_limit_pay_to`: your `payTo`'s budget in this asset is full. It counts the fees of
   every payment to you, so other parties paying you, Sybil payers among them, can fill it as well
@@ -264,6 +348,12 @@ is, settles once the store or the balance is back ("Nothing sent", under "`/sett
 
 The window rolls: a budget frees up as the oldest fees in it pass 24 h, not all at once.
 
+**Past its quota**, an account's `/verify` still passes, since `/verify` checks no budget and
+spends nothing, so your server serves the resource and only `/settle` refuses. `@x402/express`
+2.31.0 then withholds the response it held back for that payment. Your buyers' payments count in
+your account, whoever pays you, so a buyer can use up your month at the price of its purchases,
+which you receive; the operator raises your plan when you write to us.
+
 ### Shared budgets used up by self-payments
 
 Per-payer and per-`payTo` budgets bound one address, but addresses are free. Someone who pays
@@ -274,40 +364,52 @@ succeeds, so no breaker opens, and USDC is then refused for every seller until t
 The loss stops at 25 XLM for USDC and 10 XLM for other tokens per window. That bounds the rate,
 not the sum: an attack kept up for under three days takes the float from 100 XLM to its 5 XLM floor,
 and `facilitator_underfunded` then refuses every payment until a top-up. This is accepted on
-testnet. On pubnet callers present API keys (0105), and each owner's settlements will count in a
-fee budget of its own (0107): see the threat model, "Shared budget exhaustion by Sybil
-self-payments".
+testnet. On pubnet a settlement counts in its caller's account, `free` and `global`, never in
+`asset:` or `tier:other` ("Accounts and plans"), so the same attack needs many Discord accounts
+and fills only `free`: see the threat model, "Shared budget exhaustion by Sybil self-payments".
 
 The signal is `spend_budget_nearing` (warn, counted in `spend_budget_nearing_total{budget}`) at
-80 %. It fires for every budget; for this attack, watch `asset`, `other` and `global`. Then:
+80 %. It fires for every budget but an account's; for this attack, watch `asset`, `other`, `free`
+and `global`. Then:
 
-1. Look at the settlements of the last hours: the `settled` log lines name each payer, and the
-   `settlements` table holds each payment's `payTo` and amount (`payment_requirements`). An attack
-   looks like many new payers paying few `payTo`s in 1-unit amounts. Real traffic looks like many
-   `payTo`s and the prices their resources ask.
-2. If it is real traffic, raise the budget (`SPEND_PER_ASSET_STROOPS`, or `SPEND_GLOBAL_STROOPS`)
-   and restart. A higher budget is a higher worst-case loss per window: keep `global` below the
-   float less its alarm, and top up the float to match.
+1. Look at the settlements of the last hours: the `settled` log lines name each payer, and on
+   pubnet the caller's `owner`, and the `settlements` table holds each payment's `payTo` and
+   amount (`payment_requirements`). An attack looks like many new payers paying few `payTo`s in
+   1-unit amounts, on pubnet under many owners. Real traffic looks like many `payTo`s and the
+   prices their resources ask.
+2. If it is real traffic, raise the budget (`SPEND_PER_ASSET_STROOPS`, on pubnet
+   `SPEND_FREE_STROOPS`, or `SPEND_GLOBAL_STROOPS`) and restart. A higher budget is a higher
+   worst-case loss per window: keep `global` below the float less its alarm, and top up the float
+   to match.
 3. If it is an attack, raising the budget only raises what it costs us. Leave it: the window rolls
    and the budget frees up once the payments stop. Tell sellers who ask to wait or use another
-   facilitator. If it goes on for more than a day, watch the float: at up to 35 XLM a day it
-   reaches ADR 0013's alarm at 25 XLM in about two days, and the floor in under three.
+   facilitator. If it goes on for more than a day, watch the float. On testnet, at up to 35 XLM a
+   day it reaches ADR 0013's alarm at 25 XLM in about two days, and the floor in under three. On
+   pubnet the attack fills only `free`, at up to 25 XLM a day: the alarm in about 3 days.
 
 ### Metrics and logs
 
 Labels come from closed sets; addresses are in log lines only.
 
 - `spend_refused_total{reason}`: every refusal, by reason.
-- `spend_budget_nearing_total{budget}`, `budget` being `global`, `payer`, `pay_to`, `asset` or
-  `other`; log `spend_budget_nearing` with the scope, at most once per scope in 15 minutes.
-- log `spend_limit_reached` (info) with the settlement key and the budget's scope, for each
-  refusal by a budget.
+- `spend_budget_nearing_total{budget}`, `budget` being `global`, `payer`, `pay_to`, `asset`,
+  `other` or `free`; log `spend_budget_nearing` with the scope, at most once per scope in 15
+  minutes. Never for an account's limits. Only `asset`, `other`, `free` and `global` write the
+  metric's series, which the `budget-nearing` alarm reads.
+- log `spend_limit_reached` (info) with the settlement key, the budget's scope and `limit`:
+  `stroops` for a fee budget, `count` for an account's quota, for each refusal by a budget.
+- log `spend_caller_missing` (error): a pubnet settlement with no caller, refused (above).
+- log `account_plan_unknown` (error) with the owner and the plan its row names, which the config
+  doesn't have: the account is counted as `free` until the plan is set again or put back in
+  `ACCOUNT_PLANS`.
 - `spend_breaker_opened_total{breaker}`; log `spend_breaker_opened` with the scope and its end.
 - `spend_failure_attributed_total{fault}`: `payer`, `pay_to`, `asset` or `ours`. Log
   `spend_failure_ours` (warn) with the failure cause, for a failure charged to us, and
   `spend_asset_kind_unconfirmed` (warn) for a failure blamed on a token whose kind couldn't be
   read: it opens no asset breaker, since a SAC must never get one.
-- `spend_store_failures_total{op}` (`breaker`, `reserve`, `release`); log `spend_store_failed`.
+- `spend_store_failures_total{op}` (`breaker`, `reserve`, `release`, `plan`: the account's plan
+  read); log `spend_store_failed`. The `store-outage` alarm sums every `op`, so a failed plan read
+  raises it too.
 - `spend_commit_unmatched_total{state}`; log `spend_commit_unmatched` (error): a fee was paid that
   counts against no budget.
 - `balance_read_failures_total`; log `balance_read_failed`. Logs `facilitator_underfunded`
@@ -350,6 +452,8 @@ Labels come from closed sets; addresses are in log lines only.
   for one scan of it, and a group past its 1.5 s fails the run, unretried. The release before never writes `refused`, and
   reads such a record as not final: during the deploy, an old process answers a repeat of a
   refused payment `settlement_pending` until its budget ends, and never settles it.
+  `0018_account_plans` (0107) adds each account's plan and the view `account_usage` the portal
+  reads an account's payments through; the release before reads neither.
 - An online migration (ADR 0012) commits step by step, so `pnpm migrate` after a stopped or
   failed run continues from the next step. It logs `migration_step` after each step and
   `migration_backfill` every 50 backfill batches. A backfill writes about 1.2 GiB of WAL per
@@ -513,6 +617,32 @@ Upstream's client simulates before it signs, so its users get the same `Error(Co
 the client and never reach `/verify`. These answers are for a client that builds its own payload,
 and for a trustline removed after signing.
 
+After upstream's `invalid_exact_stellar_payload_fee_exceeds_maximum` for a payment whose
+transaction lists no archived entries ("Restoring archived entries" below), it reads whether
+`payTo` holds a balance of the token, when the token is a Stellar Asset Contract and `payTo` a
+contract (`C…`) (task 0107):
+
+| `invalidReason`                                | meaning                                                                                                        | what to do                                                                                      |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `invalid_exact_stellar_pay_to_balance_missing` | `payTo` has no balance of this token yet, and the payment that creates it costs more than the facilitator pays | the seller sends `payTo` a first amount of the token from its own account; the buyer pays again |
+
+The new balance's rent is what puts the fee over the ceiling, and the facilitator doesn't pay it
+([ADR 0007](../../docs/adr/0007-fee-abuse-containment.md)'s amendment of 2026-11-23). On pubnet a
+USDC payment to a fresh C-address balance has a fee of about 443,000 stroops and is charged about
+382,000, against the 250,000 ceiling; on testnet the first XLM payment to a fresh contract had a fee of 128,027
+(2026-11-24; USDC wasn't measured there), under it, so only a lower `MAX_FEE_STROOPS` shows the
+refusal there. `invalidMessage` names no account or amount: the
+fee upstream measured is in the `verified` and `settled` lines' `upstreamMessage`, not in
+`message`. An account (`G…`) holds a SAC's token in its trustline, or XLM in itself, so a
+G-address `payTo` never gets this reason, and another token keeps upstream's, since its balance's
+key isn't known. Only this path reads the entry, within 3 s, so no other `/verify` costs the call;
+a read that fails or takes longer keeps upstream's reason. `/settle`'s check before the claim
+gives the same reason. The refusal is recorded like the others (task 0086), so once the balance
+exists the buyer signs a new payment, after the refused one's `extra.expirationLedger`. Tried on
+testnet on 2026-11-24 with a local facilitator at `MAX_FEE_STROOPS=100000`: the refusal, one
+transfer from the seller's own account that created the balance, then a payment that settled
+(`test/live/pay-to-balance-missing.ts`, its results in `test/live/results/`).
+
 ## `/settle` answers
 
 Every outcome is a 200 with an x402 `SettleResponse`. A 400 is a malformed request. A 503 comes
@@ -555,6 +685,9 @@ unlocks one response.
 | `settle_exact_stellar_spend_limit_asset`             | —                       | this asset used its fee budget for the window                                                        | sign a new payment in another asset, as below                                               |
 | `settle_exact_stellar_spend_limit_other`             | —                       | all tokens but the known ones used their shared fee budget                                           | sign a new payment in a known asset (USDC), as below                                        |
 | `settle_exact_stellar_spend_limit_global`            | —                       | the facilitator used its fee budget for the window                                                   | wait, or use another facilitator; a new payment as below                                    |
+| `settle_exact_stellar_quota_exhausted`               | —                       | your account used its plan's payments this month (pubnet); `extra.resetsAt` is when it resets        | from `extra.resetsAt`, or once the operator raises your plan, a new payment as below        |
+| `settle_exact_stellar_spend_limit_account`           | —                       | your account's fees used its plan's fee budget for the last 24 h (pubnet)                            | wait for the 24 h to roll; a new payment as below                                           |
+| `settle_exact_stellar_spend_limit_free`              | —                       | the free plan's accounts together used their shared fee budget for the last 24 h (pubnet)            | wait, or ask the operator for a higher plan; a new payment as below                         |
 | `settle_exact_stellar_breaker_open_payer`            | —                       | this payer's settlements failed on chain too often                                                   | the buyer waits, then signs a new payment as below                                          |
 | `settle_exact_stellar_breaker_open_pay_to`           | —                       | settlements to this `payTo` failed on chain too often                                                | wait, and check what fails with the operator                                                |
 | `settle_exact_stellar_breaker_open_asset`            | —                       | this token's settlements failed on chain too often                                                   | sign a new payment in another asset, as below                                               |
@@ -587,7 +720,9 @@ needs a new payment (a new nonce), but only once this one can't land ("Ended", b
   message names archived entries
   (`the payment's transaction lists N archived entries to restore: <LedgerKey XDR>, …`), restore
   them and sign a new payment once this one can't land ([below](#restoring-archived-entries)); one
-  that names none may still touch archived state its transaction doesn't list.
+  that names none may still touch archived state its transaction doesn't list. A payment that
+  would create a C-address `payTo`'s balance of a SAC token gets
+  `invalid_exact_stellar_pay_to_balance_missing` instead ("`/verify` answers", above).
   `invalid_exact_stellar_signature_expiration_too_far` comes from our three checks: the resource's
   `maxTimeoutSeconds` above 300 s at the default cap ("at most 300 is allowed", which stays
   refused, so the resource must ask for less), the auth's own expiry past the cap ("at most 66 are

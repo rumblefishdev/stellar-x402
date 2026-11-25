@@ -74,6 +74,8 @@ const BUDGET_KINDS: Record<BudgetKind, true> = {
   asset: true,
   other: true,
   global: true,
+  account: true,
+  free: true,
 };
 
 /**
@@ -141,7 +143,8 @@ describe("the catalog's closed lists match their sources (0027)", () => {
       SETTLE_REASONS.breakerOpenPayTo,
       SETTLE_REASONS.breakerOpenAsset,
       SETTLE_REASONS.refused,
-      ...(Object.keys(BUDGET_KINDS) as BudgetKind[]).map(spendLimitReason),
+      ...(Object.keys(BUDGET_KINDS) as BudgetKind[]).map((kind) => spendLimitReason(kind)),
+      spendLimitReason("account", "count"),
     ];
     expect(listed("spend_refused_total", "reason")).toEqual(refusals.sort());
   });

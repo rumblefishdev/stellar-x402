@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { ConfigError } from "../src/config.js";
-import { apiKeyHash } from "@stellar-x402/api-keys";
+import { PostgresAccountPlanStore, apiKeyHash } from "@stellar-x402/api-keys";
 import { KeysError, keysMain } from "../src/main.js";
 import { testDatabase } from "./database.js";
 
@@ -10,8 +10,14 @@ beforeEach(db.empty);
 
 /** Runs the script on the test database and resolves what it printed, line by line. */
 async function keys(...argv: string[]): Promise<string[]> {
+  return keysAs(undefined, ...argv);
+}
+
+/** {@link keys}, run by the login `user` (`$USER`). */
+async function keysAs(user: string | undefined, ...argv: string[]): Promise<string[]> {
   const lines: string[] = [];
-  await keysMain(argv, { DATABASE_URL: db.urlFor(db.schema) }, (line) => lines.push(line));
+  const env = { DATABASE_URL: db.urlFor(db.schema), ...(user !== undefined && { USER: user }) };
+  await keysMain(argv, env, (line) => lines.push(line));
   return lines;
 }
 
@@ -29,6 +35,9 @@ const rows = async (): Promise<string[]> =>
       "SELECT row_to_json(api_keys)::text AS row FROM api_keys ORDER BY created_at, key_hash",
     )
   ).rows.map(({ row }) => row);
+
+/** An instant as the script prints it (`toISOString`), as regular expression text. */
+const ISO = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z";
 
 describe("the operator's API key script (0105)", () => {
   it("issues an operator a key, prints it once, and stores only its hash", async () => {
@@ -100,14 +109,13 @@ describe("the operator's API key script (0105)", () => {
     const second = keyOf(await keys("issue", "acme"));
     const listed = await keys("list");
     expect(listed).toHaveLength(2);
-    const iso = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z";
     expect(listed[0]).toMatch(
       new RegExp(
-        `^operator:acme\\trevoked\\tissued ${iso}\\trevoked ${iso}\\tsha256 [0-9a-f]{12}$`,
+        `^operator:acme\\trevoked\\tissued ${ISO}\\trevoked ${ISO}\\tsha256 [0-9a-f]{12}$`,
       ),
     );
     expect(listed[1]).toMatch(
-      new RegExp(`^operator:acme\\tactive\\tissued ${iso}\\t-\\tsha256 [0-9a-f]{12}$`),
+      new RegExp(`^operator:acme\\tactive\\tissued ${ISO}\\t-\\tsha256 [0-9a-f]{12}$`),
     );
     // The start of each hash tells two keys of one owner apart.
     expect(listed[0]).toContain(apiKeyHash(first).slice(0, 12));
@@ -129,6 +137,12 @@ describe("the operator's API key script (0105)", () => {
     [["revoke", "Acme"], "an owner that can't be in the registry"],
     [["revoke", "acme", "extra"], "an argument too many"],
     [["list", "extra"], "an argument too many"],
+    [["plan"], "no owner"],
+    [["plan", "discord:1"], "no plan"],
+    [["plan", "discord:1", "gold"], "a plan the config doesn't name"],
+    [["plan", "Discord:1", "basic"], "an owner that can't be in the registry"],
+    [["plan", "acme", "basic"], "a bare name: a plan takes the whole owner"],
+    [["plans", "extra"], "an argument too many"],
     [["rotate", "acme"], "a command it doesn't have"],
     [[], "no command"],
   ])("refuses %j (%s) with its usage, before it connects", async (argv) => {
@@ -160,5 +174,68 @@ describe("the operator's API key script (0105)", () => {
       await pool.end();
       await db.pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
     }
+  });
+});
+
+describe("the operator's plan commands (0107)", () => {
+  const plans = () => new PostgresAccountPlanStore(db.pool).listPlans();
+
+  it("sets an account's plan, with who set it, when and why, and prints the row", async () => {
+    const printed = await keysAs("akot", "plan", "discord:1", "basic", "asked", "on", "Discord");
+    expect(printed).toEqual([
+      expect.stringMatching(
+        new RegExp(`^discord:1\\tbasic\\tset ${ISO}\\tby operator:akot\\tasked on Discord$`),
+      ),
+    ]);
+    expect(await plans()).toEqual([
+      {
+        owner: "discord:1",
+        plan: "basic",
+        setAt: expect.any(Number),
+        setBy: "operator:akot",
+        note: "asked on Discord",
+      },
+    ]);
+    // A plan set again replaces the row, note included.
+    expect(await keysAs("akot", "plan", "discord:1", "pro")).toEqual([
+      expect.stringMatching(new RegExp(`^discord:1\\tpro\\tset ${ISO}\\tby operator:akot\\t-$`)),
+    ]);
+    expect(await plans()).toEqual([
+      { owner: "discord:1", plan: "pro", setAt: expect.any(Number), setBy: "operator:akot" },
+    ]);
+  });
+
+  it.each([
+    ["no login", undefined],
+    ["an empty login", ""],
+    ["a login no owner could carry", "Adam Kot"],
+  ])(
+    "records the setter as operator:unknown for %s, and still sets the plan",
+    async (_why, user) => {
+      await keysAs(user, "plan", "operator:acme", "pro");
+      expect(await plans()).toMatchObject([
+        { owner: "operator:acme", plan: "pro", setBy: "operator:unknown" },
+      ]);
+    },
+  );
+
+  it("refuses a plan the config doesn't name with its usage, and stores nothing", async () => {
+    const error = await keys("plan", "discord:1", "gold").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(KeysError);
+    expect((error as KeysError).message).toMatch(/^usage:/);
+    expect((error as KeysError).message).toContain("free, basic, pro");
+    expect(await plans()).toEqual([]);
+  });
+
+  it("lists every account's plan by owner", async () => {
+    expect(await keys("plans")).toEqual(["no plans"]);
+    await keysAs("akot", "plan", "operator:acme", "pro", "partner");
+    await keysAs("akot", "plan", "discord:1", "basic");
+    expect(await keys("plans")).toEqual([
+      expect.stringMatching(new RegExp(`^discord:1\\tbasic\\tset ${ISO}\\tby operator:akot\\t-$`)),
+      expect.stringMatching(
+        new RegExp(`^operator:acme\\tpro\\tset ${ISO}\\tby operator:akot\\tpartner$`),
+      ),
+    ]);
   });
 });

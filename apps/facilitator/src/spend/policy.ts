@@ -1,3 +1,11 @@
+import {
+  FREE_PLAN,
+  monthEnd,
+  monthStart,
+  utcInstant,
+  type AccountPlan,
+  type AccountPlanStore,
+} from "@stellar-x402/api-keys";
 import type { Logger } from "../logger.js";
 import type { NetworkMetrics } from "../metrics.js";
 import type { BreakerBackoff, ScopeUsage, SpendScope, SpendStore } from "../ports/index.js";
@@ -13,6 +21,7 @@ import {
   payerScope,
   spendLimitReason,
   spendLimits,
+  type AccountBudget,
   type SpendBudgets,
 } from "./limits.js";
 
@@ -84,29 +93,53 @@ const NEARING_SCOPES_MAX = 10_000;
 
 /**
  * Checks the balance floor and the breakers before a settlement is submitted, then reserves its
- * fee ceiling against every budget that applies, all or none (S-design §5-§8). Fails closed: a
- * store that doesn't answer within the settle budget refuses the settlement.
+ * fee ceiling against every budget that applies, all or none (S-design §5-§8). A settlement with a
+ * caller, an API key's owner, counts in that owner's account by the plan the registry names for it
+ * (0107). Fails closed: a store that doesn't answer within the settle budget refuses the
+ * settlement.
  */
 export function createSpendPolicy(deps: {
   store: SpendStore;
   assets: AssetKinds;
   floor: BalanceFloor;
   budgets: SpendBudgets;
+  /** Each account's plan in the registry, read with the caller of every settlement that has one. */
+  plans: Pick<AccountPlanStore, "planOf">;
+  /** The plans the config defines, by name; `free` among them. */
+  accountPlans: ReadonlyMap<string, AccountPlan>;
+  /** The network requires an API key, so a settlement without a caller is a bug, and refused. */
+  keyed: boolean;
   logger: Logger;
   metrics: NetworkMetrics;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 }): SpendPolicy {
-  const { store, assets, floor, budgets, logger, metrics } = deps;
+  const { store, assets, floor, budgets, plans, accountPlans, keyed, logger, metrics } = deps;
   const now = deps.now ?? Date.now;
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   /** When each scope last reported nearing, oldest first (a `Map` keeps insertion order). */
   const nearingAt = new Map<SpendScope, number>();
+  const free = accountPlans.get(FREE_PLAN);
+  if (free === undefined) throw new RangeError(`the account plans have no ${FREE_PLAN} plan`);
 
-  const refuse = (errorReason: string): BeforeSubmitResult => {
+  const refuse = (errorReason: string, errorMessage?: string): BeforeSubmitResult => {
     metrics.increment("spend_refused_total", { reason: errorReason });
-    return { allow: false, errorReason };
+    return errorMessage === undefined
+      ? { allow: false, errorReason }
+      : { allow: false, errorReason, errorMessage };
+  };
+
+  /**
+   * The plan an account's row names, or `free` without one. A name the config no longer has
+   * counts as `free` too, and is logged: the operator removed a plan someone is still on.
+   */
+  const planNamed = (owner: string, name: string | undefined): AccountPlan => {
+    if (name === undefined) return free;
+    const plan = accountPlans.get(name);
+    if (plan !== undefined) return plan;
+    logger.error("account_plan_unknown", { owner, plan: name });
+    return free;
   };
 
   async function breakerRefusal(
@@ -128,9 +161,13 @@ export function createSpendPolicy(deps: {
     return undefined;
   }
 
-  /** Reports each budget at or past 80 %, at most once per scope in the cooldown. */
+  /**
+   * Reports each budget at or past 80 %, at most once per scope in the cooldown. Not an account's:
+   * a full one refuses only its own holder, so nothing for the operator to act on (S-design §9).
+   */
   function nearing(usage: ScopeUsage[], at: number) {
-    for (const { scope, usedStroops, maxStroops } of usage) {
+    for (const { scope, usedStroops, maxStroops, windowMs } of usage) {
+      if (budgetKind(scope) === "account") continue;
       if (usedStroops * 100n < maxStroops * NEARING_PERCENT) continue;
       const last = nearingAt.get(scope);
       if (last !== undefined && at - last < NEARING_COOLDOWN_MS) continue;
@@ -146,7 +183,7 @@ export function createSpendPolicy(deps: {
         scope,
         used: usedStroops,
         max: maxStroops,
-        windowMs: budgets.windowMs,
+        windowMs,
       });
       metrics.increment("spend_budget_nearing_total", { budget: budgetKind(scope) });
     }
@@ -185,7 +222,13 @@ export function createSpendPolicy(deps: {
     breakerRefusal,
 
     async beforeSubmit(ctx) {
-      const { key, payer, payTo, asset } = ctx;
+      const { key, payer, payTo, asset, caller } = ctx;
+      // Every request on a network that requires a key has a caller: a settlement without one
+      // would count in no account, so it is refused as the hook's bug it is (0107 decision 9).
+      if (keyed && caller === undefined) {
+        logger.error("spend_caller_missing", { key });
+        return refuse(SETTLE_REASONS.refused);
+      }
       if (floor.below()) return refuse(SETTLE_REASONS.facilitatorUnderfunded);
 
       let breaker: string | undefined;
@@ -199,11 +242,47 @@ export function createSpendPolicy(deps: {
       }
       if (breaker !== undefined) return refuse(breaker);
 
+      // The account of the request's own caller, on a reopen too: whoever's request sends the
+      // payment pays for it (0107 decision 9).
+      let account: AccountBudget | undefined;
+      if (caller !== undefined) {
+        let name: string | undefined;
+        try {
+          name = await plans.planOf(caller.owner);
+        } catch (error) {
+          // Fail closed, as for a breaker: nothing was reserved, and the payment reopens.
+          metrics.increment("spend_store_failures_total", { op: "plan" });
+          logger.warn("spend_store_failed", { op: "plan", key, error });
+          return refuse(SETTLE_REASONS.spendStoreUnavailable);
+        }
+        account = {
+          owner: caller.owner,
+          plan: planNamed(caller.owner, name),
+          monthStart: monthStart(ctx.now),
+        };
+      }
+
+      // A reopened record's earlier claim ended with nothing sent, so its reservation can never be
+      // charged. This claim gives it up before it reserves: that claim's `onFinal` may still be on
+      // its way, or never come (0073 decision 26), and until it does the one payment would count
+      // twice, in the account's month too. A reservation never made gets its `released` row, which
+      // also keeps that claim's late `reserve` out.
+      if (ctx.reopened > 0) {
+        try {
+          await store.release(reservationId(key, ctx.reopened - 1), ctx.now);
+        } catch (error) {
+          // Fail closed, as for a breaker: nothing was reserved, and the payment reopens.
+          metrics.increment("spend_store_failures_total", { op: "release" });
+          logger.warn("spend_store_failed", { op: "release", key, error });
+          return refuse(SETTLE_REASONS.spendStoreUnavailable);
+        }
+      }
+
       const id = reservationId(key, ctx.reopened);
       const reservation = {
         id,
         amount: ctx.maxFeeStroops,
-        limits: spendLimits({ payer, payTo, asset }, assets.tier(asset), budgets),
+        limits: spendLimits({ payer, payTo, asset, account }, assets.tier(asset), budgets),
         now: ctx.now,
       };
       for (let attempt = 1; ; attempt++) {
@@ -215,8 +294,14 @@ export function createSpendPolicy(deps: {
           }
           // Released: the record turned final while this call waited, so nothing may be sent.
           if ("released" in result) return refuse(SETTLE_REASONS.refused);
-          logger.info("spend_limit_reached", { key, scope: result.scope });
-          return refuse(spendLimitReason(budgetKind(result.scope)));
+          logger.info("spend_limit_reached", { key, scope: result.scope, limit: result.limit });
+          const reason = spendLimitReason(budgetKind(result.scope), result.limit);
+          // Only an account's limits have a count, so a quota refusal always has `account`.
+          const message =
+            reason === SETTLE_REASONS.quotaExhausted && account
+              ? quotaMessage(account.plan, ctx.now)
+              : LIMIT_MESSAGES[reason];
+          return refuse(reason, message);
         } catch (error) {
           // Busy or unreachable: nothing new was reserved, or the answer to a reservation that
           // landed was lost. A retry with the same id is a no-op for the latter.
@@ -226,8 +311,9 @@ export function createSpendPolicy(deps: {
           await sleep(RESERVE_RETRY_MS);
         }
       }
-      // A reservation whose answer was lost would count until it leaves the window: release it.
-      // The refusal ends the record without `onFinal`, so nothing else will.
+      // A reservation whose answer was lost would count until it leaves its windows, the account's
+      // month among them: release it. The refusal ends the record without `onFinal`, so only a
+      // reopen of the payment would.
       try {
         await store.release(id, now());
       } catch (error) {
@@ -301,12 +387,32 @@ export function createSpendPolicy(deps: {
 /**
  * One claim's reservation. A reopened record claims again while the earlier claim's `onFinal` may
  * still be on its way, so that call gives up only its own reservation, and a reserve is refused
- * after its own claim's release (0073 decisions 16, 26). A reservation no `onFinal` reaches counts
- * until it leaves the rolling window.
+ * after its own claim's release (0073 decisions 16, 26). The reopened claim gives up the one before
+ * it, so a payment holds one reservation at a time (0107). A reservation that neither an `onFinal`
+ * nor a reopen reaches counts until it leaves each window: 24 h of an account's fees and of the
+ * shared budgets, and the rest of the calendar month of an account's payments.
  */
 export function reservationId(key: string, reopened: number): string {
   return `${key}#${reopened}`;
 }
+
+/**
+ * What `/settle` says when an account's day or the free plan's shared budget is full; no account,
+ * address or amount (S-design §6). Every other budget's refusal has its reason alone, as before.
+ */
+const LIMIT_MESSAGES: Partial<Record<string, string>> = {
+  [SETTLE_REASONS.spendLimitAccount]:
+    "the account's fee allowance is used up for now: its payments cost more than usual; " +
+    "try again later",
+  [SETTLE_REASONS.spendLimitFree]:
+    "the free plan's shared allowance is used up for now; try again later, or contact us for a " +
+    "higher plan",
+};
+
+/** What `/settle` says when an account's month is used up: when the next one starts, after `now`. */
+const quotaMessage = (plan: AccountPlan, now: number) =>
+  `the account's monthly quota of ${plan.payments} payments is used up until ` +
+  `${utcInstant(monthEnd(now))}; contact us for a higher plan`;
 
 /** What `/verify` says for each open breaker; no address, amount or reset time (S-design §10). */
 const BREAKER_MESSAGES: Record<string, string> = {

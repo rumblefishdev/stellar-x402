@@ -1,6 +1,10 @@
 import type { AddressInfo } from "node:net";
-import type { OwnerKeys } from "@stellar-x402/api-keys";
-import { MemoryKeyStore } from "@stellar-x402/api-keys/testing";
+import { DEFAULT_ACCOUNT_PLANS, parseAccountPlans, type OwnerKeys } from "@stellar-x402/api-keys";
+import {
+  MemoryAccountPlanStore,
+  MemoryAccountUsage,
+  MemoryKeyStore,
+} from "@stellar-x402/api-keys/testing";
 import { afterEach } from "vitest";
 import { createApp, type AppDeps } from "../src/app.js";
 import { signHubToken, type Act } from "../src/hub-token.js";
@@ -50,6 +54,28 @@ export class TestStore extends MemoryKeyStore {
   }
 }
 
+/** The plans' names the operator gave, in memory, failing on request. */
+export class TestPlans extends MemoryAccountPlanStore {
+  failing = false;
+
+  override planOf(owner: string): Promise<string | undefined> {
+    return this.failing
+      ? Promise.reject(new Error("connect ECONNREFUSED postgres://secret-user:secret-pass@db"))
+      : super.planOf(owner);
+  }
+}
+
+/** The payments counted per account, in memory, failing on request. */
+export class TestUsage extends MemoryAccountUsage {
+  failing = false;
+
+  override paymentsSince(owner: string, since: number): Promise<number> {
+    return this.failing
+      ? Promise.reject(new Error("connect ECONNREFUSED postgres://secret-user:secret-pass@db"))
+      : super.paymentsSince(owner, since);
+  }
+}
+
 export interface Answer {
   status: number;
   headers: Headers;
@@ -59,6 +85,8 @@ export interface Answer {
 
 export interface Portal {
   keys: TestStore;
+  plans: TestPlans;
+  usage: TestUsage;
   logs: { level: string; event: string; fields: Record<string, unknown> }[];
   /** Moves the clock the app and the tokens run on. */
   advance(ms: number): void;
@@ -96,6 +124,8 @@ export async function startPortal(
 ): Promise<Portal> {
   let now = NOW;
   const keys = new TestStore();
+  const plans = new TestPlans();
+  const usage = new TestUsage();
   const logs: Portal["logs"] = [];
   const log =
     (level: string) =>
@@ -113,9 +143,12 @@ export async function startPortal(
       hubSecret: { current: SECRET },
       minAccountAgeMinutes: 5,
       clientIp: "socket",
+      accountPlans: parseAccountPlans(DEFAULT_ACCOUNT_PLANS),
       ...config,
     },
     keys,
+    plans,
+    usage,
     sealer: sealer(ENCRYPTION_KEY),
     logger,
     ready: () => Promise.resolve(),
@@ -154,6 +187,8 @@ export async function startPortal(
   };
   return {
     keys,
+    plans,
+    usage,
     logs,
     advance: (ms) => void (now += ms),
     now: () => now,

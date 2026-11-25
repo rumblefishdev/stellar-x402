@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
-import { apiKeyHash, isApiKeyOwner, newApiKey } from "@stellar-x402/api-keys";
+import {
+  PostgresAccountPlanStore,
+  apiKeyHash,
+  isApiKeyOwner,
+  newApiKey,
+  type AccountPlan,
+  type AccountPlanRecord,
+} from "@stellar-x402/api-keys";
 import {
   FallbackRpc,
   SettlementSubmitter,
@@ -17,9 +24,10 @@ import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { createSearchCardRewrite } from "./catalog/search-cards.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
-import { parseConfig, parseMigrateConfig } from "./config.js";
+import { parseAccountPlansConfig, parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import type { AppDeps } from "./http/app.js";
+import { requiresApiKey } from "./http/api-key.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";
@@ -47,8 +55,9 @@ import {
   failureReason,
   type UpstreamSeams,
 } from "./settlement/upstream.js";
-import { createAssetKinds } from "./spend/asset-kinds.js";
+import { createAssetKinds, type AssetKinds } from "./spend/asset-kinds.js";
 import { BALANCE_STALE_ALARM_MS, createBalanceFloor } from "./spend/balance-floor.js";
+import { longestSpendWindowMs } from "./spend/limits.js";
 import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
 import { verifyWithRefusals } from "./settlement/refusals.js";
 import { start } from "./start.js";
@@ -125,7 +134,7 @@ function verifyOnlySigner(address: string): FacilitatorStellarSigner {
  * The verify checks' dependencies from the config (AD-3, AD-5, AD-10, AD-22): {@link buildUpstream},
  * the channels and the validity minimum. `/verify` and `/settle` build their checks from the same
  * object. `fees` is the caller's, so the pool is built from the same `fees.pool` and shares its
- * bid.
+ * bid. `assets` is the spend policy's too, so the two share one cache of the tokens' kinds.
  */
 export function buildChecks(
   config: Config,
@@ -137,7 +146,7 @@ export function buildChecks(
   logger: Pick<Logger, "warn" | "info">,
   metrics: NetworkMetrics,
   seams?: UpstreamSeams,
-): VerifierDeps {
+): VerifierDeps & { assets: AssetKinds } {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
   // facilitator are `createChecker`'s check (AD-5).
   const facilitator = verifyOnlySigner(config.signer.address);
@@ -152,6 +161,9 @@ export function buildChecks(
     missingTrustline: createTrustlineLookup(rpc, config.network, logger),
     nonceUsed: createNonceLookup(rpc, config.network, logger),
     metrics,
+    // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
+    assets: createAssetKinds({ rpc, known: [getUsdcAddress(config.network)] }),
+    rpc,
   };
 }
 
@@ -407,18 +419,23 @@ export function compose(
   }
   const policy = createSpendPolicy({
     store: stores.spend,
-    // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
-    assets: createAssetKinds({ rpc, known: [getUsdcAddress(config.network)] }),
+    assets: checks.assets,
     floor,
     budgets: {
       windowMs: config.spend.windowMs,
       globalStroops: config.spend.globalStroops,
+      freeStroops: config.spend.freeStroops,
       perPayerStroops: config.spend.perPayerStroops,
       perPayToStroops: config.spend.perPayToStroops,
       perKnownAssetStroops: config.spend.perAssetStroops,
       perOtherAssetStroops: config.spend.perOtherAssetStroops,
       tierOtherStroops: config.spend.tierOtherStroops,
     },
+    // On a network that requires an API key, each settlement counts in its caller's account,
+    // by the plan the registry names (0107).
+    plans: stores.accountPlans,
+    accountPlans: config.spend.accountPlans,
+    keyed: requiresApiKey(config.network),
     logger,
     metrics,
   });
@@ -562,7 +579,8 @@ export async function main(
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
     // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
-    // Every budget sums the one window (0024 S-design §5).
+    // Every budget sums the one window (0024 S-design §5); where a key is required, an account's
+    // payments are counted from the start of its month too (0107).
     const pruner = createPruner({
       settlements: stores.settlements,
       ledger: {
@@ -572,7 +590,7 @@ export async function main(
       spend: stores.spend,
       rateLimits: stores.rateLimits,
       catalogAttempts: stores.catalogAttempts,
-      spendWindowMs: config.spend.windowMs,
+      spendWindowMs: longestSpendWindowMs(config.spend.windowMs, requiresApiKey(config.network)),
       rateLimitWindowMs: config.http.rateLimit.windowMs,
       logger,
       metrics,
@@ -663,22 +681,43 @@ export class KeysError extends Error {
   override name = "KeysError";
 }
 
-const KEYS_USAGE = `usage: keys issue <name> | keys revoke <name | owner> | keys list
+/** The key script's usage, naming the plans `plan` takes. */
+const keysUsage = (plans: ReadonlyMap<string, AccountPlan>) =>
+  `usage: keys issue <name> | keys revoke <name | owner> | keys list | keys plan <owner> <plan> [note…] | keys plans
   issue <name>     a new key for operator:<name>, printed once; <name> is a-z, 0-9, "_" and "-"
   revoke <owner>   revokes the owner's active key at once; a bare <name> means operator:<name>
-  list             every key: owner, state, times and the start of its hash`;
+  list             every key: owner, state, times and the start of its hash
+  plan <owner> <plan> [note…]
+                   sets the owner's plan, one of ${[...plans.keys()].join(", ")}; the rest of the line is why
+  plans            every plan set: owner, plan, when, by whom and why`;
 
 /** A name the operator gives a key's holder: what follows `operator:` in the owner. */
 const OPERATOR_NAME = /^[a-z0-9][a-z0-9_-]*$/;
 
 type KeysCommand =
-  { command: "issue"; owner: string } | { command: "revoke"; owner: string } | { command: "list" };
+  | { command: "issue"; owner: string }
+  | { command: "revoke"; owner: string }
+  | { command: "list" }
+  | { command: "plan"; owner: string; plan: string; note?: string }
+  | { command: "plans" };
 
 /** The command line of the key script; anything it doesn't take is a {@link KeysError}. */
-function parseKeysCommand(argv: readonly string[]): KeysCommand {
+function parseKeysCommand(
+  argv: readonly string[],
+  plans: ReadonlyMap<string, AccountPlan>,
+): KeysCommand {
   const [command, target, ...rest] = argv;
-  const usage = () => new KeysError(KEYS_USAGE);
-  if (command === "list" && target === undefined) return { command };
+  const usage = () => new KeysError(keysUsage(plans));
+  if ((command === "list" || command === "plans") && target === undefined) return { command };
+  if (command === "plan") {
+    // The whole owner: an account the portal made has no bare name.
+    const [plan, ...words] = rest;
+    if (target === undefined || !isApiKeyOwner(target) || plan === undefined || !plans.has(plan))
+      throw usage();
+    // On one line, so a quoted tab or line break can't split the row `plans` prints.
+    const note = words.join(" ").replace(/\s+/g, " ").trim();
+    return { command, owner: target, plan, ...(note.length > 0 && { note }) };
+  }
   if ((command !== "issue" && command !== "revoke") || target === undefined || rest.length > 0)
     throw usage();
   // Only the portal issues an owner of another kind (0106), so `issue` takes a name alone; a
@@ -689,20 +728,44 @@ function parseKeysCommand(argv: readonly string[]): KeysCommand {
   return { command, owner };
 }
 
+/** A plan row as `plan` and `plans` print it, one tab-separated line. */
+function planLine(row: AccountPlanRecord): string {
+  return [
+    row.owner,
+    row.plan,
+    `set ${new Date(row.setAt).toISOString()}`,
+    `by ${row.setBy}`,
+    row.note ?? "-",
+  ].join("\t");
+}
+
+/**
+ * Who sets a plan, as its row records it: `operator:$USER`, or `operator:unknown` when the login
+ * isn't a name an owner can carry. The row only records it, so no login fails the command.
+ */
+function planSetter(env: Record<string, string | undefined>): string {
+  const setter = `operator:${env.USER ?? ""}`;
+  return isApiKeyOwner(setter) ? setter : "operator:unknown";
+}
+
 /**
  * `pnpm keys`: the operator's hand on the API key registry (0105), the same one the portal
- * writes (0106). It needs only `DATABASE_URL`, of the network whose callers the key is for.
+ * writes (0106), and on each account's plan (0107). It needs only `DATABASE_URL`, of the network
+ * whose callers the key or the plan is for, and `ACCOUNT_PLANS` where the service has it set.
  *
  * `issue` prints the new key once, through `write` (stdout) and never through the logger: only
  * its SHA-256 is stored, so a lost key is replaced, not read back. `revoke` holds from the
- * caller's next request, on every instance. A mistake rejects with a {@link KeysError}.
+ * caller's next request, on every instance. `plan` takes only a plan the config names. A mistake
+ * rejects with a {@link KeysError}.
  */
 export async function keysMain(
   argv: readonly string[],
   env: Record<string, string | undefined> = process.env,
   write: (line: string) => void = (line) => void process.stdout.write(`${line}\n`),
 ): Promise<void> {
-  const parsed = parseKeysCommand(argv);
+  // Before the command: its usage names the plans. Run in the service's container, `ACCOUNT_PLANS`
+  // is the service's own.
+  const parsed = parseKeysCommand(argv, parseAccountPlansConfig(env));
   const { databaseUrl } = parseMigrateConfig(env);
   // Stdout is the operator's, so a lost connection is logged to stderr.
   const logger = jsonLogger("info", (line) => process.stderr.write(line));
@@ -726,6 +789,21 @@ export async function keysMain(
             `sha256 ${key.hash.slice(0, 12)}`,
           ].join("\t"),
         );
+      return;
+    }
+    const accountPlans = new PostgresAccountPlanStore(pool);
+    if (parsed.command === "plans") {
+      const rows = await accountPlans.listPlans();
+      if (rows.length === 0) write("no plans");
+      for (const row of rows) write(planLine(row));
+      return;
+    }
+    if (parsed.command === "plan") {
+      const { owner, plan, note } = parsed;
+      const now = Date.now();
+      const setBy = planSetter(env);
+      await accountPlans.setPlan({ owner, plan, now, setBy, note });
+      write(planLine({ owner, plan, setAt: now, setBy, note }));
       return;
     }
     const { owner } = parsed;
