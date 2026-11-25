@@ -114,9 +114,10 @@ too: keep its mtime fresh or end within 5 minutes.
 | Rule / check | How | Notes |
 |---|---|---|
 | `x402-facilitator-silent` | stop window: `systemctl stop x402@production` | fires after 10 min |
-| `x402-gauge-stale` | the same stop window (last-read stamps stop) | real |
+| `x402-gauge-stale` | drill textfile: a last-read stamp 1000 s old, `network="drill"`, while the process runs | the rule is gated on the liveness series, so the stop window doesn't fire it (found 2026-11-25) |
 | `x402-sweeps-stopped` | drill textfile: a flat `settlement_sweeps_total{network="drill",outcome="listed",drill="1"} 0` | the stop window doesn't fire it: no `absent()` branch, and a stopped series leaves `increase()` above 1, then nothing |
-| `x402-server-silent`, `x402-target-down` | stop the agent's node-exporter (`x402-metrics`) | real |
+| `x402-server-silent` | stop `x402-metrics` past 5 min | real; stopping the node-exporter alone restarts the whole agent in 5 s (`--abort-on-container-exit`) |
+| `x402-target-down` | the stop window (`job` facilitator) | real |
 | `x402-textfile-stale` | stop `x402-host-probe.timer` past 5 min | real |
 | `x402-agent-behind` | `promtool test rules` scenario, not fired live: a lag over 2 minutes fires it, samples the VM refused fire it, the 11 s lag read on the VM's live data stays quiet | no live drill: the agent's `prometheus_remote_storage_*` series reach the VM only through the sends they measure, so an unreachable `remote_write` URL leaves the VM nothing to read and fires `server-silent` instead (Oskar's review of #240). The scenario: `deploy/metrics/rules/agent-behind.test.yml` (#242), in CI's `prometheus-rules` |
 | `x402-rpc-stalled`, `x402-balance-stale`, `x402-pending`, `x402-queue-waiting`, `x402-channel-quarantined`, `x402-rpc-on-fallback` | drill textfile, the gauge past its threshold for its `for`, `network="drill"` | `queue-waiting` and `rpc-on-fallback` are `min by (network)`: they need the own network |

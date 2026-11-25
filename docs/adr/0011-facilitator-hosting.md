@@ -22,7 +22,9 @@
   container, 512 MiB, joins the totals) and 2026-11-20 (task 0106: the log files also rotate
   daily and none is kept past 30 days, the hub's privacy policy) and 2026-11-24 (task 0120: the
   search-model container runs from the facilitator's image, limited to 768 MiB, and the totals
-  rise by 256 MiB)
+  rise by 256 MiB) and 2026-11-25 (task 0139: the switch went out as three deploys about 8
+  minutes apart, not one change; Grafana is at monitoring.sorobanscan.com behind Cloudflare
+  Access, for every @rumblefish.pl address)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -596,7 +598,8 @@ One request or one stop must never outlast the layer in front of it:
   - That EMF lines turn into metrics is checked once, at the first deploy (0027).
   - Once metrics move to Prometheus (0139), the facilitator writes no EMF lines. Their log group
     stays until its 30-day retention has run out, so the weekly fee review that spans the switch
-    keeps its data, and is deleted then. Each field the weekly fee review or a Logs Insights
+    keeps its data, and is deleted then: its last facilitator line is from 2026-11-25, so on
+    2026-12-26 at the earliest, once the host probe no longer writes there. Each field the weekly fee review or a Logs Insights
     recipe reads becomes a label,
     if its values are few and closed, or moves to the app line (0139).
   - No pino: stdout is the only transport, and the logger already writes identifiers only.
@@ -632,8 +635,11 @@ One request or one stop must never outlast the layer in front of it:
     timestamp, and a liveness series is written after start, so a missing series reads as a
     fault, never as a quiet day (0139).
   - A series costs no money, only disk and memory on the VM (Monitoring stack, below).
-  - The EMF adapter (0027) and the `x402-facilitator` alarms in CloudWatch go in the same change
-    that turns the Prometheus rules on (0139). There is no period with both.
+  - The EMF adapter (0027) and the `x402-facilitator` alarms in CloudWatch go when the
+    Prometheus rules go on (0139), with no period with both. On 2026-11-25 that was three deploys,
+    not one change: the facilitator stopped writing EMF at 13:35 UTC, the rules went on at 13:43,
+    and the alarms were deleted at 13:45, so for about 8 minutes nothing watched its metrics
+    (0139 decision 4, accepted with testnet alone in production).
 - **Host metrics:** node_exporter reports memory, disk and CPU, since ClickHouse shares the
   machine; its textfile collector carries the host probe's stamps (the backup, WAL and snapshot
   ages). The collector keeps reporting a file's last values when nobody writes it, so every file
@@ -660,8 +666,12 @@ One request or one stop must never outlast the layer in front of it:
     VM's own disk.
   - Grafana shows dashboards only; its own alerting is off, so alerts take one path. Its
     datasources and dashboards are provisioned from the repo, so its database holds nothing to
-    back up. It is reached through Cloudflare Tunnel behind Cloudflare Access, with no port of
-    its own.
+    back up. It is at https://monitoring.sorobanscan.com, through a Cloudflare Tunnel whose
+    cloudflared runs on the VM, behind Cloudflare Access for every @rumblefish.pl address with a
+    one-time PIN. Grafana signs a person in as a Viewer from Access's signed token, so a request
+    that skipped Access gets nothing; its admin signs in over SSH only. Each project's dashboards
+    sit in a folder of their own, loaded from its repository at a pinned commit
+    (soroban-infrastructure `monitoring/`, "Dashboards" and "Grafana through Cloudflare Access").
   - The rules are generated from the catalog, as `infra/src/lib/alarms/factory.ts` builds the
     alarms today: one per check, with `network` as a label, so pubnet adds alert instances, not
     rules.
@@ -906,9 +916,8 @@ One request or one stop must never outlast the layer in front of it:
   until 0027 lands.
 - **0139 builds:** the Prometheus adapter; the monitoring VM, its role and its certificate; the
   agent on this server; the rules generated from the catalog; the Slack webhook, the heartbeat
-  and the failed-notification rule; Grafana behind Cloudflare Access; and the switch: one change
-  that turns the rules on and retires the EMF adapter and the CloudWatch alarms that moved, with
-  no period of both. Each rule is drilled once right after the switch, and one that fails its
+  and the failed-notification rule; Grafana behind Cloudflare Access with x402's dashboard; and the switch, which turns the rules on and retires the EMF adapter and the CloudWatch
+  alarms that moved, with no period of both (three deploys on 2026-11-25, above). Each rule is drilled once right after the switch, and one that fails its
   drill is fixed forward.
 - **0023 keys the limiter on `CF-Connecting-IP`** as above.
 - **Cost:**

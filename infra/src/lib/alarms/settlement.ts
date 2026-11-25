@@ -143,7 +143,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
         qualifier: breaker.replace("_", "-"),
         signal: { catalog: "spend_breaker_opened_total", dims: { network, breaker } },
         description: {
-          what: `A ${breaker} spend breaker opened on ${network}: ${scope} failed on chain past its limit, and its payments are refused for the cool-down (0024).`,
+          what: `The ${breaker} spend breaker opened on ${network}: ${scope} failed on chain past its limit, and its payments are refused for the cool-down (0024).`,
           next: "Read spend_breaker_opened in the app logs for the scope, then the failures that tripped it.",
           noData: SILENT_EVENT,
         },
