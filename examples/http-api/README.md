@@ -29,4 +29,11 @@ Without `PUBLIC_ORIGIN` the 402 names the URL the request came in on. Behind a p
 TLS, such as a Cloudflare tunnel, that is an `http://` URL, which a catalog refuses to list: set
 `PUBLIC_ORIGIN` there.
 
+The image runs it on our server beside the facilitator (task 0042); it holds no secret:
+
+```bash
+docker build --platform linux/amd64 -f examples/http-api/Dockerfile -t x402-seller .
+docker run --rm -p 4021:4021 -e SELLER_ADDRESS=G... x402-seller
+```
+
 A buyer pays it with `call_paid_http` from `stellar-x402-mcp` (`apps/mcp-local`).
