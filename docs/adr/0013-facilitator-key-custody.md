@@ -221,9 +221,9 @@
     (0027). After the mainnet deploy, also the real fee spend, from 0027's `fee_charged_stroops`
     summed over 7 days and set against the balance's change, where a gap means the fee account
     paid for something other than settlements; the next refill amount; and whether this custody
-    still fits the float (see Rationale). Also from the first deploy: whether the fee account's
-    balance plus 1.5 XLM per channel in `CHANNELS` has passed 500 XLM, ADR 0015's trigger to
-    re-check the key's power.
+    still fits the float (see Rationale); and whether mainnet's fee account balance plus 1.5 XLM
+    per mainnet channel has passed 500 XLM, ADR 0015's trigger to re-check the key's power.
+    Testnet's fee account holds Friendbot's 10,000 XLM, which puts nothing at stake.
 - **Rotation and break-in runbook** (0026):
   - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one, and
     restart the facilitator, which reads it at start;
