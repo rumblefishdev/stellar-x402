@@ -74,6 +74,11 @@ describe("src/index.ts", () => {
     expect(port).not.toBe("0");
     const response = await fetch(`http://127.0.0.1:${port}/weather?city=Warsaw`);
     expect(response.status).toBe(402);
+
+    // In a container it is PID 1, which ignores a SIGTERM it doesn't handle; this one exits 0.
+    const exit = once(child, "exit");
+    child.kill("SIGTERM");
+    expect(await exit).toEqual([0, null]);
     // Starting through tsx takes seconds on a busy runner, as the facilitator's start tests allow.
   }, 20_000);
 });

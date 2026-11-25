@@ -13,3 +13,10 @@ const server = createApp(config).listen(port, (error?: Error) => {
     `Paid weather API on http://localhost:${bound}/weather?city=Warsaw, paying ${config.payTo}`,
   );
 });
+
+// In a container Node is PID 1, which ignores SIGTERM unless it is handled: stop taking requests,
+// let open ones finish, then exit, so `docker stop` doesn't wait for its kill.
+process.once("SIGTERM", () => {
+  server.close(() => process.exit(0));
+  server.closeIdleConnections();
+});
