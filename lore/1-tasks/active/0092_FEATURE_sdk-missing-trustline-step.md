@@ -91,7 +91,7 @@ is the one missing.
 - [x] Given a missing trustline, the payer's or `payTo`'s, when MCP's `pay` fails, then its result
       names that account and the asset, not `insufficient_funds`, and a test covers it
       (`pay.test.ts`, "when signing fails for a payer without the trustline" and "a seller without
-      the trustline"; on testnet E-14 and E-14d)
+      the trustline"; on testnet E-14, E-14d and E-14e)
 - [x] Given a balance too low (`#10`), when MCP's `pay` fails, then it still answers
       `insufficient_funds` (`pay.test.ts`, "a payer with too little"; on testnet E-14b)
 - [ ] Given any other simulation failure, when the SDK builds the payment, then the error is
@@ -108,15 +108,19 @@ The MCP part, in `apps/mcp-local`:
 - `src/results.ts`: the two codes. `README.md`: their rows in the codes table.
 - `test/fake-seller.ts`: `noTrustline` and `tooLittle` throw upstream's typed errors, where
   `NO_TRUSTLINE` was a string; the seller's `payTo` and the buyer are addresses in shape.
-- `test/pay.test.ts`: the signing-failure table grows from three rows to seven.
+- `test/pay.test.ts`: the signing-failure table grows from three rows to eight, and checks what a
+  message leaves out as well as what it names.
 - `e2e/test/after-signing.ts`: E-14 expects `payer_trustline_missing` with the account and the
-  asset named; E-14d is new, a seller whose `payTo` has no trustline.
+  asset named; E-14d is new, a seller whose `payTo` has no trustline, and E-14e, a `payTo` that
+  doesn't exist.
 
 Testnet run on 2026-11-25, on commit c1c4df80: 26 scenarios, 124 rows, none failed. Run again after
 the rebase onto 0137's search tool (#245), on commit 50a59216 (`e2e/results/testnet-results.json`):
 27 scenarios, 128 rows, none failed. Both times E-14 (the payer's trustline), E-14b (a balance too
 low) and E-14d (the seller's trustline) each got their code from the real `ExactStellarScheme`, with
-the account and the asset in the tool's text and the RPC's text in the log only.
+the account and the asset in the tool's text. After the review of #247, on commit 54d9f601: 28
+scenarios, 132 rows, none failed; E-14 named both in its second call too, and E-14d and the new
+E-14e (a `payTo` that doesn't exist) kept the RPC's text in the log only, as E-14 did.
 
 The SDK criteria (1, 2 and 5) are built with 0102's buyer helper, which moves this code.
 
@@ -147,3 +151,14 @@ The SDK criteria (1, 2 and 5) are built with 0102's buyer helper, which moves th
    `payment_failed`**, as the facilitator's lookup answers nothing for it.
 6. **The payer's message says the seller's account was not checked**, as the facilitator's does:
    the asset contract stops at its first failure, the payer's side first.
+7. **The messages name USDC as `CODE:ISSUER` too** (from the review of #247). The error carries the
+   asset contract (`C…`), which `changeTrust` can't take, and a contract's id is a hash, so the
+   classic asset can't be read back from it without the RPC the facilitator asks. Upstream's two
+   USDC contracts are named from a table that `pay.test.ts` checks against their ids; any other
+   asset is named by its contract only. The seller's message says the account must exist and hold
+   the trustline, as the facilitator's refusal does: E-14e showed a `payTo` that doesn't exist gets
+   the same `#13`.
+8. **A muxed `payTo` (`M…`) is `payment_failed`** (from the review of #247). The asset contract
+   names the underlying `G…`, which upstream doesn't match to an `M…` payee, so it throws a plain
+   `SimulationFailedError`. Nothing is sent and only the code is less precise; the README says so,
+   and the fix is upstream's.
