@@ -21,8 +21,9 @@ StandardError=append:/var/log/x402/%i/facilitator.err.log
 ExecStartPre=/usr/local/libexec/x402/x402-creds %i database-url.testnet:1000 rpc-urls.testnet:1000 approle-role-id.testnet:1000 approle-secret-id.testnet:1000
 # The last image that was ready, unless a deploy is starting this one.
 ExecStartPre=/bin/sh -c '[ -e /run/x402/%i/deploying ] || cp digest.good digest'
-# --exit-code-from: a plain `up` exits 0 whatever the container's code.
-ExecStart=/usr/local/libexec/x402/x402-compose %i up --no-log-prefix --no-color --no-deps --pull never --exit-code-from facilitator facilitator
+# --exit-code-from: a plain `up` exits 0 whatever the container's code. Without --no-deps, so the
+# search model (ADR 0014) starts first; its own exit never stops the facilitator.
+ExecStart=/usr/local/libexec/x402/x402-compose %i up --no-log-prefix --no-color --pull never --exit-code-from facilitator facilitator
 ExecStop=/usr/local/libexec/x402/x402-compose %i stop facilitator
 # A planned stop: after ExecStop, systemd signals the `up` that is still exiting, and Compose
 # answers a signal with 130. Without this, every deploy, drain and `systemctl stop` ended `failed`

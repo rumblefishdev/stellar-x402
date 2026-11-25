@@ -333,8 +333,8 @@ One request or one stop must never outlast the layer in front of it:
     environment's credentials (below) and, unless a deploy is running (a marker in
     `/run/x402/<environment>/`, which a reboot clears), puts `digest.good` into `digest`, so a
     reboot during a deploy starts the last image that was ready. It neither pulls nor migrates:
-    `ExecStart` runs Compose in the foreground for the facilitator only (`--no-deps`), from the
-    image the deploy pulled, with `Restart=on-failure`, and `ExecStop` stops it, which gives it
+    `ExecStart` runs Compose in the foreground for the facilitator and the search model it
+    depends on (ADR 0014), from the image the deploy pulled, with `Restart=on-failure`, and `ExecStop` stops it, which gives it
     its `stop_grace_period`. It wants and runs after `x402-openbao.service`, though it starts
     without OpenBao (ADR 0013).
   - **`x402-tunnel@<environment>.service` owns `cloudflared`.** It decrypts the tunnel token
