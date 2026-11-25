@@ -8,16 +8,26 @@ import { CATALOG, type MetricName, seriesDims } from "@stellar-x402/metrics-cata
 import { describe, expect, test } from "vitest";
 import { AWS_METRICS, type AlarmRecord } from "../src/lib/alarms/factory.js";
 import { INFRA_ROOT } from "../src/lib/names.js";
-import { allOn, ofType, production, type Resource, synth, type TemplateJson } from "./fixtures.js";
+import {
+  allOn,
+  everyRow,
+  ofType,
+  production,
+  type Resource,
+  synth,
+  type TemplateJson,
+} from "./fixtures.js";
 
 const all = synth(allOn());
 const prod = synth(production());
-const records: readonly AlarmRecord[] = all.x.alarms.alarms.records;
-const alarms = ofType(all.alarms, "AWS::CloudWatch::Alarm");
+/** Every row's CloudWatch form, Prometheus's included: what each row defines (0139). */
+const every = everyRow(allOn());
+const records: readonly AlarmRecord[] = every.stack.alarms.records;
+const alarms = ofType(every.alarms, "AWS::CloudWatch::Alarm");
 const byName = new Map(alarms.map((a) => [a.Properties["AlarmName"] as string, a.Properties]));
 const topicRef = {
-  Ref: Object.keys(all.alarms.Resources).find(
-    (k) => all.alarms.Resources[k]?.Type === "AWS::SNS::Topic",
+  Ref: Object.keys(every.alarms.Resources).find(
+    (k) => every.alarms.Resources[k]?.Type === "AWS::SNS::Topic",
   ),
 };
 
@@ -307,62 +317,31 @@ test("docs/monitoring.md lists every metric of the catalog and every alarm, on o
   expect(CATALOG.map((m) => m.name).filter((n) => !rows.has(n))).toEqual([]);
   // An alarm that is on has its section (the test above); one that is off, its row.
   const sections = new Set([...doc.matchAll(/^### (\S+)$/gm)].map((m) => m[1]));
-  const bases = new Set(all.x.alarms.alarms.records.map((r) => r.base));
+  const bases = new Set(records.map((r) => r.base));
   expect([...bases].filter((b) => !sections.has(b) && !rows.has(b))).toEqual([]);
 });
 
-test("production as committed makes only the groups that are on", () => {
+test("production as committed makes only the groups that are on, and of them what stays in CloudWatch (0139)", () => {
+  // Every other row of a group that is on is a Prometheus rule (rules.test.ts).
   expect(prod.x.alarms.alarms.records.map((r) => r.alarmName).sort()).toEqual([
     "x402-production-audit-disk",
     "x402-production-balance-critical-testnet",
     "x402-production-balance-low-testnet",
-    "x402-production-balance-stale-testnet",
-    "x402-production-breaker-opened-testnet-asset",
-    "x402-production-breaker-opened-testnet-pay-to",
-    "x402-production-breaker-opened-testnet-payer",
-    "x402-production-budget-nearing-testnet",
     "x402-production-certificate",
-    "x402-production-channel-quarantined-testnet",
-    "x402-production-commit-unmatched-testnet",
     "x402-production-credentials-stale",
-    "x402-production-disk-root",
     "x402-production-emf-parsing",
     "x402-production-emf-validation",
-    "x402-production-facilitator-failed",
-    "x402-production-facilitator-silent-testnet",
-    "x402-production-failure-ours-testnet",
-    "x402-production-gauges-silent-testnet",
-    "x402-production-history-gone-testnet",
-    "x402-production-hook-failures-testnet",
-    "x402-production-http-500",
-    "x402-production-landed-after-expired-testnet",
     "x402-production-log-volume-app",
     "x402-production-log-volume-metrics",
-    "x402-production-memory",
-    "x402-production-openbao-down",
-    "x402-production-pending-testnet",
-    "x402-production-pool-health-testnet",
-    "x402-production-probe-silent",
     "x402-production-protocol-changed-pubnet",
     "x402-production-protocol-changed-testnet",
     "x402-production-protocol-upgrade-coming-pubnet",
     "x402-production-protocol-upgrade-coming-testnet",
-    "x402-production-queue-waiting-testnet",
-    "x402-production-refused-after-verify-testnet",
-    "x402-production-rpc-on-fallback-testnet",
-    "x402-production-rpc-stalled-testnet",
-    "x402-production-settlement-expired-testnet",
-    "x402-production-signer-failures-testnet",
-    "x402-production-store-outage-testnet",
-    "x402-production-submit-failed-testnet",
-    "x402-production-sweeps-stopped-testnet",
     "x402-production-telemetry-silent",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
-    "x402-production-verify-rpc-unavailable",
     "x402-production-watch-errors",
     "x402-production-watch-no-invocations",
-    "x402-production-watchdog-restart",
   ]);
 });
 
@@ -600,12 +579,12 @@ describe("gauges-silent (decision 28)", () => {
   const heldOff = { ...on, alarmGroups: { ...on.alarmGroups, channelHeld: false } };
 
   test.each([
-    ["on", all, { ...SIX, held: "channel_longest_hold_seconds" }],
-    ["off", synth(heldOff), SIX],
+    ["on", every, { ...SIX, held: "channel_longest_hold_seconds" }],
+    ["off", everyRow(heldOff), SIX],
   ] as const)(
     "with channelHeld %s, fires on any watched gauge's silence while the sweeps arrive",
     (_, built, gauges) => {
-      const made = built.x.alarms.alarms.records.filter((r) => r.base === "gauges-silent");
+      const made = built.stack.alarms.records.filter((r) => r.base === "gauges-silent");
       expect(made.map((r) => r.network).sort()).toEqual(["stellar:pubnet", "stellar:testnet"]);
       for (const r of made) {
         const fill = Object.keys(gauges)
@@ -631,7 +610,7 @@ test("store-outage adds both failure counters, either one missing read as 0", ()
   expect(made).toHaveLength(2);
   for (const r of made) {
     const on = { network: r.network };
-    expect(mathOf(all.alarms, r.alarmName)).toEqual({
+    expect(mathOf(every.alarms, r.alarmName)).toEqual({
       expression: "FILL(records, 0) + FILL(spend, 0)",
       stats: ["Sum"],
       ids: {
