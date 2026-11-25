@@ -67,6 +67,14 @@ jobs:
       - uses: actions/checkout@v4
       - run: deploy/scripts/check-production-postgres.sh
 
+  # The search model in the facilitator's image, built for the server's amd64 and run with
+  # production's limits (ADR 0014): a model that loads on a laptop can still fail there.
+  search-model-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: deploy/scripts/check-search-model-image.sh
+
   # The monitoring VM's rule file (0139 step 6): the tests compare it with what `make rules`
   # writes, but only promtool parses its PromQL, and Prometheus refuses a whole file it can't load.
   prometheus-rules:
