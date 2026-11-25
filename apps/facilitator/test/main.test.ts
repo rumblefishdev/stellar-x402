@@ -30,6 +30,8 @@ type PromModule = typeof import("../src/adapters/prometheus-metrics.js");
 const prom = vi.hoisted(() => ({
   options: [] as Parameters<PromModule["prometheusMetrics"]>[0][],
   writers: [] as ReturnType<PromModule["prometheusMetrics"]>[],
+  /** How many `/metrics` listeners `main()` made. */
+  listeners: 0,
 }));
 vi.mock("../src/adapters/prometheus-metrics.js", async (importActual) => {
   const actual = await importActual<PromModule>();
@@ -40,6 +42,10 @@ vi.mock("../src/adapters/prometheus-metrics.js", async (importActual) => {
       const writer = actual.prometheusMetrics(opts);
       prom.writers.push(writer);
       return writer;
+    },
+    metricsListener: (render: () => string) => {
+      prom.listeners++;
+      return actual.metricsListener(render);
     },
   };
 });
@@ -390,8 +396,9 @@ describe("main()", () => {
     const metricsUrl = `http://127.0.0.1:${app.metricsPort}/metrics`;
     try {
       await app.reconciled;
-      // Off the public port: the app answers /metrics as any unknown route.
+      // Off the public port, which the tunnel reaches: there /metrics is an unknown route.
       expect(app.metricsPort).not.toBe(app.port);
+      expect((await fetch(`http://127.0.0.1:${app.port}/metrics`)).status).toBe(404);
       const response = await fetch(metricsUrl);
       expect(response.status).toBe(200);
       const text = await response.text();
@@ -417,13 +424,19 @@ describe("main()", () => {
 
   it("writes no liveness series for a start that fails, and closes /metrics (0139)", async () => {
     prom.writers.length = 0;
+    prom.listeners = 0;
+    // A port known in advance: `main()` rejects, so it never reports the one it took.
+    const probe = createServer().listen(0);
+    await once(probe, "listening");
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise((resolve) => probe.close(resolve));
     const error = await main(
       {
         ...env,
         CHANNELS: `${env.CHANNELS},${masterActive}`,
         RPC_URLS: rpc.url,
         PORT: "0",
-        METRICS_PORT: "0",
+        METRICS_PORT: String(port),
         LOG_LEVEL: "error",
       },
       { write: () => {} },
@@ -432,6 +445,9 @@ describe("main()", () => {
     // A crash loop of short starts shows as a missing series, so `facilitator-silent` fires.
     expect(prom.writers).toHaveLength(1);
     expect(prom.writers[0]!.render()).not.toContain("facilitator_started_timestamp_seconds");
+    // It listened before the channel check refused the start, and closed on the way out.
+    expect(prom.listeners).toBe(1);
+    await expect(fetch(`http://127.0.0.1:${port}/metrics`)).rejects.toThrow();
   });
 
   it("logs each issue the writer reports as a metric_issue warning (0027)", async () => {
