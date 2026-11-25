@@ -86,8 +86,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 92 with two networks", () => {
-    expect(alarms).toHaveLength(92);
+  test("has every alarm of the list once per network, 93 with two networks", () => {
+    expect(alarms).toHaveLength(93);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 

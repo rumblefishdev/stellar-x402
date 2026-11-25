@@ -35,6 +35,7 @@ the alarms that read them. The [uptime figure](#the-uptime-figure) is under Upti
 | `gauges-silent`           | `facilitator` | 2026-11-09 12:19 UTC | Not fired: it needs gauges missing while sweeps run ([Drills](#drills))                                                                 |
 | `http-500`                | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:00, OK 14:09:00 UTC                                                           |
 | `search-words-only`       | `facilitator` | next rules deploy    | Not yet: a Prometheus rule ([The Prometheus rules](#the-prometheus-rules)), once deployed                                               |
+| `search-vector-failed`    | `facilitator` | next rules deploy    | Not yet: a Prometheus rule ([The Prometheus rules](#the-prometheus-rules)), once deployed                                               |
 | `rpc-stalled`             | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:33:26, OK 13:47:26 UTC                                         |
 | `rpc-on-fallback`         | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:43:00, OK 13:48:00 UTC                                         |
 | `balance-stale`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:38, OK 13:47:38 UTC                                         |
@@ -439,6 +440,19 @@ can. That is expected; a fallback outside a restart is not.
    ```sh
    sudo /usr/local/libexec/x402/x402-compose production restart search-model
    ```
+
+### search-vector-failed
+
+The search model gave no vector for a listing the catalog wrote, or the start's pass could not
+read the cards ([ADR 0014](adr/0014-bazaar-search.md)). Search by meaning leaves such a listing out
+until it has a vector, and answers `partialResults: true` meanwhile. Nothing tries again before the
+next start. One quiet minute ends it.
+
+1. In Logs Insights on `/x402/production/app`, the `search_vector_failed` and
+   `search_vectors_read_failed` lines: the listing and the cause.
+2. The model container's state, as for `search-words-only`.
+3. Once the model answers, a restart of `x402@production` embeds every listing still without a
+   vector; it drains, so plan it like a deploy.
 
 ### rpc-stalled
 
@@ -960,7 +974,7 @@ the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_tot
 | `lease_changes_total`                       | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
 | `store_prune_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `search_card_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
-| `search_vector_failures_total`              | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `search_vector_failures_total`              | `x402-facilitator` | counter, Count | none                                                     | [search-vector-failed](#search-vector-failed)                                                                 |
 | `search_words_only_total`                   | `x402-facilitator` | counter, Count | none                                                     | [search-words-only](#search-words-only)                                                                       |
 | `catalog_internal_errors_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_attempts_total`                    | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
