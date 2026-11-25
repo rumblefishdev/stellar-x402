@@ -628,6 +628,8 @@ describe("main()", () => {
     try {
       const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
       const prune = vi.spyOn(app.stores.spend, "prune");
+      // What stops the timer is the pruner's own test; here, that `main()`'s close calls it (0157).
+      const close = vi.spyOn(app.pruner, "close");
       try {
         // A tick comes within a minute, ±10%. It reads the latest ledger before any table, a
         // real request to the RPC that fake timers don't wait for (0156).
@@ -636,6 +638,9 @@ describe("main()", () => {
       } finally {
         await app.close();
       }
+      // Deterministic, unlike the check below: a stray tick reads the RPC before it prunes, a real
+      // request the fake timers don't wait for, so on a loaded machine that check can pass alone.
+      expect(close).toHaveBeenCalledTimes(1);
       prune.mockClear();
       await vi.advanceTimersByTimeAsync(10 * 66_000);
       expect(prune).not.toHaveBeenCalled();

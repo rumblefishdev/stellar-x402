@@ -339,7 +339,6 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
     fields: ["table"],
-    // `settlements_refused` is #205's (0086): listed ahead, so it isn't `other` once that lands.
     fieldValues: {
       table: [
         "spend_reservations",
