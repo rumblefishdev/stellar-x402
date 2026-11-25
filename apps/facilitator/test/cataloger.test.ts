@@ -650,15 +650,9 @@ describe("cataloger", () => {
     expect(listed).toHaveBeenCalledTimes(1);
   });
 
-  it("still lists when the vector fails or hangs (0120 E)", async () => {
-    const failing = setup({
-      vectors: { listed: vi.fn().mockRejectedValue(new Error("model down")) },
-    } as Partial<CatalogerDeps>);
-    await expect(failing.cataloger.onSuccess(record(valid), "settle")).resolves.toBeUndefined();
-    expect(await failing.list()).toHaveLength(1);
-    expect(failing.metrics.value("catalog_upsert_failures_total", { origin: "settle" })).toBe(0);
-
-    await db.empty();
+  // A failed vector is the vectors' own: `listed()` logs and counts it and never rejects
+  // (search-vectors.test.ts), so only a hung one is the cataloger's to outlast.
+  it("still lists when the vector hangs (0120 E)", async () => {
     const hung = setup({
       vectors: { listed: vi.fn().mockReturnValue(new Promise(() => {})) },
     } as Partial<CatalogerDeps>);
