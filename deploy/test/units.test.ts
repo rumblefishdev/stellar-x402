@@ -292,6 +292,12 @@ describe("the units' output", () => {
     expect(model).toContain("cpus: 1");
     expect(compose).toMatch(/depends_on:\n\s+search-model:\n\s+condition: service_started/);
     expect(model).toMatch(/networks:\n\s+- search\n/);
+    // The facilitator alone reaches it, over a network with no way out.
+    const facilitator = compose.match(/^ {2}facilitator:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? "";
+    expect(facilitator).toMatch(/networks:\n(?:\s+- \w+\n)*\s+- search\n/);
+    expect(compose).toMatch(
+      /^ {2}search:\n {4}name: x402-production-search\n {4}internal: true\n/m,
+    );
     expect(read("../apps/facilitator/Dockerfile")).toContain("ENV ORT_DISABLE_TELEMETRY=1");
   });
 
