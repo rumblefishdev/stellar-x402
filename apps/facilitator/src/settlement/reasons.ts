@@ -1,4 +1,8 @@
-import { NONCE_CONSUMED_SETTLE_REASON, type IsNonceUsed } from "./nonce-used.js";
+import {
+  NONCE_CONSUMED_REASON,
+  NONCE_CONSUMED_SETTLE_REASON,
+  type IsNonceUsed,
+} from "./nonce-used.js";
 import { PAYER_AUTH_REASON, UNSUPPORTED_CREDENTIAL_REASON } from "./verify.js";
 
 /**
@@ -172,19 +176,26 @@ export const UNSENT_REASONS: readonly string[] = [
 export const UNSENT = new Set(UNSENT_REASONS);
 
 /**
- * Failed answers about a record that don't tell the payer to sign again (0082): it isn't over, it
- * landed, the payload is another payment, its auth entry has expired, or nothing was recorded
- * because another payment of the payer and asset held the slot (0024). Every other failed answer
- * about a record ended a payment whose auth entry can still land until its expiration ledger, in
- * a new envelope: our failed or refused transaction spent no nonce. A nonce another transaction
- * used gets no advice at all (0141, `withRetry`).
+ * What a failed `/settle` answer about a record tells the client to do, by its reason. A reason not
+ * in the table ended a payment whose auth entry can still land until its expiration ledger, in a
+ * new envelope, as our failed or refused transaction spent no nonce: "sign a new payment" once that
+ * ledger has closed.
+ *
+ * - `repeat`: nothing was sent (0073 decisions 3, 5, 15), or nothing was recorded because another
+ *   payment of the payer and asset held the slot (0024): the same payment can be sent again.
+ * - `none` (0082): it isn't over, it landed, the payload is another payment, or its auth entry has
+ *   expired; or another transaction used the payer's nonce (0141), where no repeat can settle it
+ *   and only the chain tells whether it paid.
  */
-export const NOT_SIGN_AGAIN = new Set<string>([
-  SETTLE_REASONS.pending,
-  SETTLE_REASONS.alreadySettled,
-  SETTLE_REASONS.nonceUsed,
-  SETTLE_REASONS.expired,
-  SETTLE_REASONS.payerBusy,
+export const ADVICE = new Map<string, "repeat" | "none">([
+  ...UNSENT_REASONS.map((reason) => [reason, "repeat"] as const),
+  [SETTLE_REASONS.payerBusy, "repeat"],
+  [SETTLE_REASONS.pending, "none"],
+  [SETTLE_REASONS.alreadySettled, "none"],
+  [SETTLE_REASONS.nonceUsed, "none"],
+  [SETTLE_REASONS.expired, "none"],
+  [NONCE_CONSUMED_REASON, "none"],
+  [SETTLE_REASONS.nonceConsumedElsewhere, "none"],
 ]);
 
 /**

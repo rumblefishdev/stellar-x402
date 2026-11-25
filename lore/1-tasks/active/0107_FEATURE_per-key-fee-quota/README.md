@@ -264,7 +264,7 @@ Claude's calls in the design (14 to 25), approved with it. 26 is the plan's.
 
 ## Implementation Notes
 
-Built on 2026-11-23 and 24: the spend store's count limit; plans, migration `0017_account_plans`
+Built on 2026-11-23 and 24: the spend store's count limit; plans, migration `0018_account_plans`
 and `keys plan`; the policy's account scopes and refusals; the balance-missing refusal; the
 portal's `details.usage`; the config, the alarm's `free` and the docs. The hub's card is not done.
 

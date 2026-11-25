@@ -317,6 +317,34 @@ ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
 `,
   },
   {
+    // 0120: each listing's search card (ADR 0014): its four fields, built by `searchFields` in
+    // `@stellar-x402/bazaar`, and their weighted words. A table of its own, which the catalog's
+    // write fills along with the listing, and which each release rewrites once as it starts, so a
+    // change to the field rules never rewrites `catalog` under its lock. A new table, so the
+    // release before keeps working: it never reads it. The GIN index lets a query read only the
+    // cards that hold its words: over CDP's 39,579 real listings and 0134's 40 queries it took the
+    // median from 23.8 ms to 10.3 ms, and a query of rare words from about 10 ms to under 2 ms
+    // (measured locally on 18, 2026-11-24).
+    name: "0017_catalog_search",
+    sql: `
+CREATE TABLE catalog_search (
+  seq bigint PRIMARY KEY REFERENCES catalog (seq) ON DELETE CASCADE,
+  name text NOT NULL,
+  tags text NOT NULL,
+  description text NOT NULL,
+  parameters text NOT NULL,
+  -- Weights A to D; search ranks them 1.0, 0.67, 0.5, 0.33.
+  words tsvector GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', name), 'A')
+      || setweight(to_tsvector('english', tags), 'B')
+      || setweight(to_tsvector('english', description), 'C')
+      || setweight(to_tsvector('english', parameters), 'D')
+  ) STORED
+);
+CREATE INDEX catalog_search_words ON catalog_search USING gin (words);
+`,
+  },
+  {
     // 0107: the plan the operator gives an account (a key's owner) by hand; one without a row is
     // on `free`, and the plans themselves are config. `account_usage` is the account's payments as
     // `reserve` counts them: each `account:<owner>` scope row, which `release` deletes. It finds
@@ -337,7 +365,7 @@ ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
     // the release before keeps working: it reads neither. The view takes ACCESS SHARE on the two
     // spend tables, which no write waits for and which waits for none. A later migration that
     // changes a column it reads must drop the view and make it again.
-    name: "0017_account_plans",
+    name: "0018_account_plans",
     sql: `
 CREATE TABLE account_plans (
   owner text PRIMARY KEY,

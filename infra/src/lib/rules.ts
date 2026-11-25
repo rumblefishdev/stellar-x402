@@ -49,6 +49,12 @@ export type Skip = { readonly check: string; readonly why: string };
 
 const PROJECT_NAME = "x402";
 const PROJECT = `project="${PROJECT_NAME}"`;
+/** The facilitator process's liveness series, written once it has started. */
+const STARTED = `facilitator_started_timestamp_seconds{${PROJECT}}`;
+/** The namespace of the counters the facilitator process writes (the catalog's). */
+const FACILITATOR = "x402-facilitator";
+/** The agent's scrape interval (deploy/metrics/prometheus.yml). */
+const SCRAPE = "15s";
 
 /**
  * Rows on a server-side metric that stay in CloudWatch all the same (ADR 0011, "Alerts"): the log
@@ -143,9 +149,24 @@ export class RuleSet implements Alarms {
     const branches = signals.map((s) => {
       const { inner, by } = this.series(check, s);
       const inc = (m: number) => agg("sum", by, `increase(${inner}[${minutes(m)}])`);
-      // "t in 1 of n periods": any increase in the window, or a period's at t or over.
-      const expr =
-        t === 1 ? `${inc(n * p)} > 0` : `max_over_time((${inc(p)})[${minutes(n * p)}:1m]) >= ${t}`;
+      // "t in 1 of n periods": any increase in the window, or a period's at t or over. The
+      // subquery steps at the scrape interval: at 1m it missed t events spread over most of a
+      // period, which CloudWatch counts (Karol's point 5 on #211).
+      const counted =
+        t === 1
+          ? `${inc(n * p)} > 0`
+          : `max_over_time((${inc(p)})[${minutes(n * p)}:${SCRAPE}]) >= ${t}`;
+      // A facilitator counter starts at 0 in each process, so above 0 in a process started
+      // within the window means events since that start. increase() misses them when the new
+      // process's first sample equals the old one's: an event the facilitator reports at every
+      // start, as history-gone (Karol's point 4 on #211). Only for t = 1: a count since the start
+      // isn't t in one period, and resyncs at a pool's start would page every deploy. The host
+      // probe's counters keep their totals across restarts, so they don't take this either.
+      const restarted =
+        t === 1 && byName((s as { catalog: MetricName }).catalog)?.namespace === FACILITATOR
+          ? ` or (${agg("sum", by, inner)} > 0 and on() (time() - max(${STARTED}) < ${n * p * 60}))`
+          : "";
+      const expr = `${counted}${restarted}`;
       const labelled = `label_replace(${expr}, "check", "${check}", "", "")`;
       return `label_replace(${labelled}, "severity", "${spec.severity ?? "warning"}", "", "")`;
     });
@@ -308,7 +329,7 @@ export function serverRules(c: EnvironmentConfig): Rule[] {
       annotations: { description: describe(check, d) },
     });
   };
-  const started = `facilitator_started_timestamp_seconds{${PROJECT}}`;
+  const started = STARTED;
   const nodeUp = `up{${PROJECT},job="node"}`;
 
   rule(
