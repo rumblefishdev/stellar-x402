@@ -413,7 +413,8 @@ are refused. A burst sends one message.
 `/discovery/search` answered by words alone ([ADR 0014](adr/0014-bazaar-search.md)): the search
 model did not give the query's vector within 2 s, answered an error, or is down. Such an answer
 ranks worse, misses typos and lets a seller's repeated words rank first, and its
-`partialResults` is `true`. Every fallback fires it; a burst sends one message.
+`partialResults` is `true`. Every fallback fires it. One quiet minute ends it, so an outage sends
+one message and the next outage, a minute or more later, sends another.
 
 A model container that restarts answers nothing until it has loaded the model, a few seconds. A
 search in those seconds falls back and fires this once, as a deploy that restarts the container

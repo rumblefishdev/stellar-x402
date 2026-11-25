@@ -72,6 +72,8 @@ services:
   search-model:
     image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}
     command: [node, /search-model/dist/main.js]
+    # Back after an exit, an out-of-memory one included: x402@ restarts only the facilitator.
+    restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
