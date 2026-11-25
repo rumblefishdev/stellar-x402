@@ -897,6 +897,189 @@ the alarm fires a day later:
 - To go back to the old passphrase on the repository: `borg key import` the secret's
   `borg_key_export` (it is locked by `borg_passphrase`), and move `borg-passphrase.old.cred` back.
 
+### The restore drill
+
+It proves the backup, using only the backup secret and the Storage Box (ADR 0013): the read-only
+account copies the Borg repository, the secret's export replaces the copy's key, the newest
+snapshot goes into a fresh OpenBao with the secret's seal key, a root token comes from the
+secret's recovery key, an AppRole logs in, and the Transit key's address is the one on chain.
+Before mainnet (first on testnet), then every quarter, and after any seal key rotation, Borg
+passphrase change or OpenBao upgrade.
+
+It runs in Docker on the admin's machine, which stands in for ADR 0013's throwaway machine: the
+restored OpenBao has no network (its own `network_mode: none`), Borg runs in a container with no
+network on the copy, and the only connection out is the copy from the box's read-only account. It
+writes nothing on the server, the box or AWS; reading the secret is one CloudTrail event, which
+step 9 lists. Everything secret lives in a directory in `/dev/shm`, a tmpfs, which step 10
+removes; if you stop before it, run step 10. One shell from step 1 to step 10, at the root of
+this repo, Docker and `jq` installed, and `aws sso login --profile soroban-admin` done.
+
+1. **The workspace and the secret.** Each field goes to its own file, the seal key and the
+   recovery key with no newline, as OpenBao and step 6 need them:
+
+   ```sh
+   umask 077
+   d=$(mktemp -d /dev/shm/x402-drill.XXXXXX)
+   AWS_PROFILE=soroban-admin aws secretsmanager get-secret-value --region eu-central-1 \
+     --secret-id x402/production/openbao-backup --query '{v:VersionId,s:SecretString}' --output json > "$d/secret.json"
+   s() { jq -er ".s | fromjson | .$1" "$d/secret.json"; }
+   jq -r .v "$d/secret.json"   # the version the drill reads, for the record
+   s storage_box_ro_ssh_key > "$d/ro-key"
+   s borg_key_export > "$d/borg-key"
+   printf %s "$(s borg_passphrase)" > "$d/borg-passphrase"
+   printf %s "$(s seal_key_hex)" > "$d/seal-key"
+   printf %s "$(s recovery_key)" > "$d/recovery-key"
+   [ "$(s seal_key_id)" = x402-openbao-1 ] && echo "seal key ID ok"
+   [ "$(shasum -a 256 < "$d/seal-key" | cut -d' ' -f1)" = "$(s seal_key_sha256)" ] && echo "seal key hash ok"
+   [ -z "$(s previous_seal_key_id)" ] && echo "no previous seal key"
+   ```
+
+   Three `ok` lines. After a seal key rotation the previous pair is set: add it to step 4's
+   `seal "static"` as `previous_key_id` and `previous_key`, as on the server.
+
+2. **The copy of the repository,** through the read-only account `u595862-sub3`, whose home is
+   the repositories' directory. The box's host key is the one pinned for the write account:
+
+   ```sh
+   sed -n 's/^\[u595862-sub2\./[u595862-sub3./p' deploy/ansible/files/storage-box.known_hosts > "$d/known_hosts"
+   rsync -a -e "ssh -p 23 -i $d/ro-key -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes \
+     -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$d/known_hosts" \
+     u595862-sub3@u595862-sub3.your-storagebox.de:openbao/ "$d/repo/"
+   du -sh "$d/repo"
+   ```
+
+3. **Borg, and the secret's key in the copy.** Borg 1.2 from Ubuntu 24.04, the server's package,
+   in a container. The copy's own key is removed first, so the export is what opens it:
+
+   ```sh
+   docker build -q -t x402-drill-borg - <<'EOF'
+   FROM ubuntu:24.04
+   RUN apt-get update && apt-get install -y --no-install-recommends borgbackup && rm -rf /var/lib/apt/lists/*
+   EOF
+   borg() { docker run --rm -i --network none --user "$(id -u):$(id -g)" -v "$d:/d" -e BORG_REPO=/d/repo \
+     -e BORG_BASE_DIR=/d/borg -e BORG_PASSCOMMAND='cat /d/borg-passphrase' --entrypoint "${E:-borg}" x402-drill-borg "$@"; }
+   borg --version   # borg 1.2.x
+   E=python3 borg -c 'import configparser as c; p = c.ConfigParser(interpolation=None); p.read("/d/repo/config"); p.remove_option("repository", "key"); p.write(open("/d/repo/config", "w"))'
+   borg list || echo "no key in the copy: expected"
+   borg key import /d/repo /d/borg-key
+   borg list
+   ```
+
+   `borg list` fails once, then lists the archives: the export and the passphrase open the
+   repository.
+
+4. **A fresh OpenBao** from `deploy/openbao`, under its own project and volume names, with the
+   secret's seal key. The seal stanza and the version must be the secret's:
+
+   ```sh
+   cp -r deploy/openbao "$d/openbao"
+   sed -i -e 's/^name: x402-openbao$/name: x402-openbao-drill/' \
+     -e 's/name: x402-openbao-\(data\|audit\|testnet\)$/name: x402-drill-openbao-\1/' "$d/openbao/compose.yaml"
+   grep -n 'name:' "$d/openbao/compose.yaml"
+   [ "$(sed -n '/^seal "static"/,/^}/p' "$d/openbao/config.hcl")" = "$(s seal_config)" ] && echo "seal stanza ok"
+   grep -q "openbao/openbao:$(s openbao_version)@" "$d/openbao/compose.yaml" && echo "version ok"
+   chmod 0444 "$d/seal-key" "$d/openbao/config.hcl"   # read inside by uid 100 (step 1's umask made them 0600); the directory stays 0700
+   docker volume create x402-drill-openbao-data && docker volume create x402-drill-openbao-audit
+   dc() { SECRETS_DIR=$d docker compose -f "$d/openbao/compose.yaml" "$@"; }
+   bao() { dc exec -T -e BAO_TOKEN openbao bao "$@"; }
+   dc up -d
+   sleep 5; bao status   # Initialized false
+   init=$(bao operator init -recovery-shares=1 -recovery-threshold=1 -format=json </dev/null)
+   export BAO_TOKEN=$(printf %s "$init" | jq -r .root_token); unset init
+   ```
+
+   The names are `x402-openbao-drill` and `x402-drill-openbao-…`, never the server's. Init's root
+   token only serves the restore, which replaces it.
+
+5. **The newest snapshot, restored:**
+
+   ```sh
+   a=$(borg list --last 1 --format '{archive}')
+   echo "$a"
+   borg extract --stdout "::$a" openbao.snap > "$d/openbao.snap"
+   gzip -t "$d/openbao.snap" && ls -l "$d/openbao.snap"
+   dc exec -T openbao sh -c 'cat > /tmp/raft.snap' < "$d/openbao.snap"
+   bao operator raft snapshot restore /tmp/raft.snap
+   ```
+
+   With the right seal key under the same ID it is accepted as it is. If it answers `could not
+verify hash file`, run it again with `-force` and record that it needed it; `-force` can't get
+   round a wrong seal key, which leaves OpenBao sealed. The restore finishes in the background:
+
+   ```sh
+   unset BAO_TOKEN
+   for i in $(seq 30); do bao status -format=json 2>/dev/null | jq -e '.sealed == false' > /dev/null && break; sleep 2; done
+   bao status   # Sealed false
+   ```
+
+6. **A root token from the recovery key,** through the legacy API, as on the server (OpenBao, A
+   new root token), with the key from the file:
+
+   ```sh
+   key=$(cat "$d/recovery-key")
+   [ ${#key} -eq 44 ] && echo ok || echo 'bad key: stop here'
+   n=$(bao read -field=otp_length sys/generate-root/attempt)
+   otp=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c "$n")
+   nonce=$(printf %s "$otp" | bao write -field=nonce sys/generate-root/attempt otp=-)
+   encoded=$(printf %s "$key" | bao write -field=encoded_token sys/generate-root/update key=- nonce="$nonce")
+   export BAO_TOKEN=$(encoded=$encoded otp=$otp python3 -c 'import base64, os; e, o = os.environ["encoded"], os.environ["otp"]; print(bytes(a ^ b for a, b in zip(base64.b64decode(e + "=" * (-len(e) % 4)), o.encode())).decode())')
+   unset key otp nonce encoded
+   bao token lookup -format=json | jq -c .data.policies   # ["root"]
+   ```
+
+7. **An AppRole login,** testnet's, with a new secret ID issued in this copy only:
+
+   ```sh
+   rid=$(bao read -field=role_id auth/approle/role/x402-testnet/role-id </dev/null)
+   sid=$(bao write -f -field=secret_id auth/approle/role/x402-testnet/secret-id </dev/null)
+   printf '{"role_id":"%s","secret_id":"%s"}' "$rid" "$sid" |
+     BAO_TOKEN= bao write -format=json auth/approle/login - | jq -c .auth.policies   # ["x402-testnet"]
+   unset rid sid
+   ```
+
+8. **The Transit key against the chain.** The address of the restored key must be testnet's
+   facilitator address (`FACILITATOR_ADDRESS_TESTNET`, the fee account), and that account's
+   signer on chain:
+
+   ```sh
+   pub=$(bao read -format=json transit/keys/stellar-testnet | jq -r '.data.keys[(.data.latest_version | tostring)].public_key')
+   addr=$(cd packages/signer-pool && node -e 'console.log(require("@stellar/stellar-sdk").StrKey.encodeEd25519PublicKey(Buffer.from(process.argv[1], "base64")))' "$pub")
+   echo "$addr"
+   curl -s "https://horizon-testnet.stellar.org/accounts/$addr" | jq -c '[.signers[] | {key, weight}]'
+   ```
+
+   The address is `GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP`, and Horizon lists
+   it as a signer of its own account.
+
+9. **Reads of the secret that weren't drills,** in CloudTrail's 90 days (the read-only profile is
+   enough; it pages slowly, a few minutes):
+
+   ```sh
+   AWS_PROFILE=soroban-readonly aws cloudtrail lookup-events --region eu-central-1 \
+     --lookup-attributes AttributeKey=EventName,AttributeValue=GetSecretValue \
+     --start-time "$(date -u -d '-90 days' +%FT%TZ)" --output json |
+     jq -r '.Events[] | (.CloudTrailEvent | fromjson) as $e
+       | select(($e.requestParameters.secretId // "") | contains("openbao-backup"))
+       | "\(.EventTime) \($e.userIdentity.arn | sub(".*/"; "")) \($e.sourceIPAddress) \($e.errorCode // "ok")"'
+   ```
+
+   Each line must be one we know: a setup or rotation step in this runbook, or a drill. One that
+   isn't is the suspected key theft of ADR 0013.
+
+10. **Removal,** also after a drill that stopped partway:
+
+    ```sh
+    unset BAO_TOKEN pub addr a
+    dc down
+    docker volume rm x402-drill-openbao-data x402-drill-openbao-audit x402-drill-openbao-testnet
+    shred -fu "$d"/ro-key "$d"/borg-key "$d"/borg-passphrase "$d"/seal-key "$d"/recovery-key "$d"/secret.json
+    rm -rf "$d"; unset d
+    docker image rm x402-drill-borg
+    ```
+
+Record the result in the task that ran it: the date, the secret's version, the archive, whether
+the restore needed `-force`, the address, the login, and the CloudTrail lines.
+
 ### Testing locally
 
 The script takes its paths from the environment, so it runs against a throwaway OpenBao and a
@@ -2018,8 +2201,9 @@ sudo systemctl reset-failed x402@production && sudo systemctl start x402@product
 
 ## Not here yet
 
-- OpenBao's restore drill, key rotation as an on-chain signer change, mainnet's
-  fee float top-ups (0036, 0047). After a restore on the same server, restart the facilitator: a token newer
+- Key rotation as an on-chain signer change, mainnet's fee float top-ups (0036, 0047). A restore
+  on the server itself has no steps yet (the drill above restores into a copy); after one,
+  restart the facilitator: a token newer
   than the snapshot answers 403 until its hour ends, and a 403 doesn't make the signer log in again.
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
 - A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, and the weekly
