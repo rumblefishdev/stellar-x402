@@ -67,6 +67,7 @@ import { createPool } from "../../src/adapters/postgres.js";
 import { migrate } from "../../src/adapters/postgres-schema.js";
 import { main } from "../../src/main.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
+import { startSearchModel } from "../search-model.js";
 
 const network = "stellar:testnet";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -392,6 +393,7 @@ async function facilitatorOn(databaseUrl: string, env: Record<string, string> = 
   return main(
     {
       ...signerEnv(facilitator.publicKey(), openbao.socketPath),
+      SEARCH_MODEL_URL: searchModel.url,
       CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
       DATABASE_URL: databaseUrl,
       CLIENT_IP: "socket",
@@ -517,6 +519,7 @@ await sendAndPoll(setup, "channel setup");
 
 // The fake OpenBao holds this run's key (0036): a testnet account funded for the run.
 const openbao = await fakeOpenBao(facilitator);
+const searchModel = await startSearchModel();
 
 // --- Cases on the default budgets -------------------------------------------------------------
 
@@ -809,6 +812,7 @@ try {
 } finally {
   await admin.end();
   openbao.close();
+  await searchModel.stop();
 }
 
 const results = {
