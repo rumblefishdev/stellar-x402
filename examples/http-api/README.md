@@ -16,11 +16,11 @@ SELLER_ADDRESS=G... pnpm --filter @stellar-x402/example-http-api dev
 curl -i "http://localhost:4021/weather?city=Warsaw"   # 402 with the PAYMENT-REQUIRED header
 ```
 
-| Variable          | Default                            | Meaning                                                               |
-| ----------------- | ---------------------------------- | --------------------------------------------------------------------- |
-| `SELLER_ADDRESS`  | required                           | Stellar testnet account that receives USDC; it needs a USDC trustline |
-| `FACILITATOR_URL` | `https://www.x402.org/facilitator` | facilitator that verifies and settles                                 |
-| `PORT`            | `4021`                             | port to listen on                                                     |
+| Variable          | Default                            | Meaning                                                                  |
+| ----------------- | ---------------------------------- | ------------------------------------------------------------------------ |
+| `SELLER_ADDRESS`  | required                           | Stellar testnet account that receives USDC; it needs a USDC trustline    |
+| `FACILITATOR_URL` | `https://www.x402.org/facilitator` | facilitator that verifies and settles                                    |
+| `PORT`            | `4021`                             | port to listen on; `0` lets the system pick one, named in the start line |
 
 A wrong or missing setting stops the start with a message naming the variable.
 

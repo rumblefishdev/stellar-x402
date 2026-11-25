@@ -67,6 +67,61 @@ const LIST_RESOURCES_INPUT = z
 
 const LIST_RESOURCES_OUTPUT = { items: z.array(SUMMARY), pagination: PAGINATION };
 
+/** The search_resources tool's input: the list's filters without `offset`, a query and a cursor. */
+const SEARCH_RESOURCES_INPUT = LIST_RESOURCES_INPUT.omit({ offset: true }).extend({
+  query: z.string().describe("What you need, in your own words"),
+  network: LIST_RESOURCES_INPUT.shape.network.describe(
+    "Network the payment is made on; without it, both are searched",
+  ),
+  cursor: z
+    .string()
+    .optional()
+    .describe(
+      "pagination.cursor of the previous page, as it came, with the same query and filters; " +
+        "absent for the first page and after any change to them",
+    ),
+});
+
+/** Upstream's search answer; the spec makes `partialResults` and `pagination` optional. */
+const SEARCH_PAGE = z.object({
+  resources: z.array(ENTRY),
+  partialResults: z.boolean().optional(),
+  pagination: z.object({ limit: z.number(), cursor: z.string().nullable() }).nullish(),
+});
+
+const SEARCH_RESOURCES_OUTPUT = {
+  items: z.array(SUMMARY).describe("Best match first"),
+  partialResults: z
+    .boolean()
+    .optional()
+    .describe("true: some matches were left out, and no later page returns them"),
+  pagination: SEARCH_PAGE.shape.pagination.describe(
+    "cursor: pass it back for the next page; null when there is none",
+  ),
+};
+
+/**
+ * The parameter a catalog's `400` names, read from upstream's error: its client throws a plain
+ * Error whose message is `… failed (<status>): <body>`, and our route's body is
+ * `{"error":"bad_request","param":"<name>"}`. Anything else gives `undefined`. Only a name of the
+ * tool's own inputs is kept, `""` otherwise: the body is the catalog's text, and the agent's model
+ * reads the message.
+ */
+function refusedParam(error: unknown): string | undefined {
+  const answer = /failed \(400\): (.*)$/s.exec(String(error));
+  if (!answer) return undefined;
+  try {
+    const body: unknown = JSON.parse(answer[1]!);
+    const param = (body as { param?: unknown }).param;
+    return typeof param === "string" && Object.hasOwn(SEARCH_RESOURCES_INPUT.shape, param)
+      ? param
+      : "";
+  } catch {
+    // A 400 without our route's body still names the agent's input as the cause.
+    return "";
+  }
+}
+
 type Entry = z.infer<typeof ENTRY>;
 
 /** The upstream `listResources` takes no abort signal, so a catalog that never answers is cut off here. */
@@ -96,4 +151,14 @@ function summary(item: Entry) {
   };
 }
 
-export { LIST_RESOURCES_INPUT, LIST_RESOURCES_OUTPUT, PAGE, deadline, summary };
+export {
+  LIST_RESOURCES_INPUT,
+  LIST_RESOURCES_OUTPUT,
+  PAGE,
+  SEARCH_PAGE,
+  SEARCH_RESOURCES_INPUT,
+  SEARCH_RESOURCES_OUTPUT,
+  deadline,
+  refusedParam,
+  summary,
+};

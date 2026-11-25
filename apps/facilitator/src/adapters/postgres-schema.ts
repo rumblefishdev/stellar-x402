@@ -316,6 +316,70 @@ ALTER TABLE catalog ALTER COLUMN ledger DROP NOT NULL;
 ALTER TABLE catalog_attempts ALTER COLUMN payer DROP NOT NULL;
 `,
   },
+  {
+    // 0120: each listing's search card (ADR 0014): its four fields, built by `searchFields` in
+    // `@stellar-x402/bazaar`, and their weighted words. A table of its own, which the catalog's
+    // write fills along with the listing, and which each release rewrites once as it starts, so a
+    // change to the field rules never rewrites `catalog` under its lock. A new table, so the
+    // release before keeps working: it never reads it. The GIN index lets a query read only the
+    // cards that hold its words: over CDP's 39,579 real listings and 0134's 40 queries it took the
+    // median from 23.8 ms to 10.3 ms, and a query of rare words from about 10 ms to under 2 ms
+    // (measured locally on 18, 2026-11-24).
+    name: "0017_catalog_search",
+    sql: `
+CREATE TABLE catalog_search (
+  seq bigint PRIMARY KEY REFERENCES catalog (seq) ON DELETE CASCADE,
+  name text NOT NULL,
+  tags text NOT NULL,
+  description text NOT NULL,
+  parameters text NOT NULL,
+  -- Weights A to D; search ranks them 1.0, 0.67, 0.5, 0.33.
+  words tsvector GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', name), 'A')
+      || setweight(to_tsvector('english', tags), 'B')
+      || setweight(to_tsvector('english', description), 'C')
+      || setweight(to_tsvector('english', parameters), 'D')
+  ) STORED
+);
+CREATE INDEX catalog_search_words ON catalog_search USING gin (words);
+`,
+  },
+  {
+    // 0107: the plan the operator gives an account (a key's owner) by hand; one without a row is
+    // on `free`, and the plans themselves are config. `account_usage` is the account's payments as
+    // `reserve` counts them: each `account:<owner>` scope row, which `release` deletes. It finds
+    // the account's scope in `spend_scopes`, whose row `reserve` writes with the scope rows, so
+    // the window index serves one owner's scope rows: over the scope rows alone the owner is an
+    // expression no index serves, and the read scanned them all (about 90 ms at 3,000,000 rows).
+    // The owner's own row is still found by a scan of `spend_scopes`, for the same reason: 0.5 ms
+    // at 72 rows, 1.5 ms at 3,500 and 5.5 ms at 50,000 (measured in the review of #236), on a
+    // table that holds a row per account and per breaker scope on a network that requires a key.
+    // A view that also gave `scope` would let the read name it and use the primary key (0.4 ms at
+    // any size). `pruneScopes` keeps the row while the scope has a reservation in the
+    // pruner's horizon, which the quota's own count needs to cover the month. One race is left:
+    // a `pruneScopes` statement that began before the next `reserve` of an account idle for the
+    // whole horizon committed still deletes the account's row, and the view then misses its
+    // payments until a later `reserve` writes the row again; the store's count, which enforces
+    // the quota, reads the scope rows and is unaffected. The portal reads the two with `SELECT`
+    // on them alone: the view reads its tables as the view's owner. A new table and a view, so
+    // the release before keeps working: it reads neither. The view takes ACCESS SHARE on the two
+    // spend tables, which no write waits for and which waits for none. A later migration that
+    // changes a column it reads must drop the view and make it again.
+    name: "0018_account_plans",
+    sql: `
+CREATE TABLE account_plans (
+  owner text PRIMARY KEY,
+  plan text NOT NULL,
+  set_at bigint NOT NULL,
+  set_by text NOT NULL,
+  note text
+);
+CREATE VIEW account_usage AS
+  SELECT substr(s.scope, length('account:') + 1) AS owner, rs.at
+  FROM spend_scopes s JOIN spend_reservation_scopes rs ON rs.scope = s.scope
+  WHERE s.scope LIKE 'account:%';
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

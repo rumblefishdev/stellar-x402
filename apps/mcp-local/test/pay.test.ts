@@ -555,7 +555,11 @@ describe("without payment config", () => {
 
   it("lists and previews, but offers no call_paid_http tool", async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(["list_resources", "get_resource"]);
+    expect(tools.map((t) => t.name)).toEqual([
+      "list_resources",
+      "search_resources",
+      "get_resource",
+    ]);
   });
 
   it("previews a resource's terms without a key", async () => {

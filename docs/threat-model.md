@@ -196,7 +196,14 @@ What each party must trust:
   For `exact`, restore rent is rent too: over the ceiling the payment is refused, and when its
   transaction lists the archived entries the refusal's message names them, so anyone can restore
   them from their own account and pay again (task 0066); under the ceiling the facilitator pays it.
-  The list comes from the buyer's transaction and is not checked against the chain.
+  The list comes from the buyer's transaction and is not checked against the chain. A payment that
+  would create a C-address `payTo`'s balance of a SAC token is refused the same way, with
+  `invalid_exact_stellar_pay_to_balance_missing` and the fix: the seller creates the balance once,
+  from its own account (0107). On pubnet such a USDC payment has a fee of about 443,000 stroops
+  and is charged about 382,000 (measured 2026-11-05 and 2026-11-23), where a typical settlement
+  is charged 12,203, so rotating C-address `payTo`s can't make us pay a new USDC balance's rent.
+  Rent under the ceiling is still ours to pay. On pubnet each account's settlements also count in
+  its plan's fee budget per 24 hours, and the free accounts' together in `free`, whatever the rent.
 - **Residual risk:** Rent depends on the entry's size and the length of the extension, so there
   is no fixed bound. When the token extends its own instance in the same settlement as the
   proxy's extension, the total goes over the default ceiling, and a valid payment is refused
@@ -204,7 +211,11 @@ What each party must trust:
   ledgers, the proxy and code by 720, and an expiry at the cap. Up to about 480,000 is possible for
   a SAC instance close to expiry (extrapolated). Task 0015 raises the `upto` ceiling and keeps the
   accepted tokens' instances alive outside settlements. A settlement that pays it can cost several times a normal one; the
-  [testnet report](upto-proxy-testnet-report.md#known-limits) has the measured case.
+  [testnet report](upto-proxy-testnet-report.md#known-limits) has the measured case. Pubnet's rent
+  is at its floor rate while the live state is under about 2 GB (1.64 GB on 2026-11-23); at ten
+  times that rate a C-address balance's TTL extension would cost 100,000 to over a million
+  stroops, so settlements to or from C-addresses would at times be refused under today's
+  ceiling, a question for the ceiling (0010), not the quota.
 
 #### Nonce griefing
 
@@ -476,14 +487,21 @@ requires one (0105, "API keys" below).
   rate, not the sum: kept up for under three days, the attack takes the float to its 5 XLM floor,
   and `/settle` then refuses everyone until a top-up.
   `spend_budget_nearing` fires at 80 % of a shared budget, and the facilitator README has a
-  runbook to tell an attack from real traffic.
+  runbook to tell an attack from real traffic. On pubnet `/verify` and `/settle` require an API
+  key (0105), issued after Discord sign-in (0106), and a settlement counts in its caller's
+  account, `free` and `global`, never in `asset:` or `tier:other` (0107), so USDC is no longer a
+  lever there. A Discord account plays the part of an address, up to its plan: a free account
+  stops at 1,000 payments a month or 2 XLM of fees in 24 hours, whichever comes first.
 - **Residual risk:** Accepted on testnet (decided by akot, 2026-10-30): the shared budgets bound
-  the loss, not availability. On pubnet `/verify` and `/settle` require an API key (0105), to be
-  issued after Discord sign-in (0106), and a key owner's settlements will count in a budget of its
-  own, not in the shared ones (0107; akot, 2026-11-03); `stellar:pubnet` is refused until that
-  lands. A
-  Discord account then plays the part of an address, but only up to its free quota, and all free
-  quotas share one budget, so many accounts use up only the free traffic (0107).
+  the loss, not availability. On pubnet the residual moves to the free tier (akot, 2026-11-23):
+  13 free accounts whose payments cost the ceiling fill `free` (25 XLM per 24 hours) and refuse
+  every free account for a day, and about 30 keep it full for a month, since an account's month
+  is at most 1,000 ceilings, 25 XLM. Accounts on a raised plan keep settling: they count in
+  `global`, not in `free`. Each attacking account is a member of Stellar Developers past its
+  screening and older than 5 minutes (0106). `free` bounds the rate, not the sum: kept up, the
+  attack costs up to 25 XLM a day, which takes the float to its alarm in about 3 days, and the
+  float's alarms and hand top-ups bound the total (ADR 0013). `spend_budget_nearing` and the
+  `budget-nearing` alarm cover `free`.
 
 #### Targeted `payTo` budget exhaustion
 
@@ -496,17 +514,20 @@ requires one (0105, "API keys" below).
   count in `payTo:<address>/<token>`, so a junk token fills only that, never the seller's USDC
   budget. The USDC route stays bounded by `asset:USDC` and `global`, and `spend_budget_nearing`
   reports the `payTo` budget at 80 %.
-- **Residual risk:** The USDC route is accepted, as Sybil self-payments are: per-party budgets
-  bound one address, not one attacker. On pubnet API keys (0105) close it only if the `payTo`
-  budget is also kept per caller, one of 0107's decisions.
+- **Residual risk:** The USDC route is accepted on testnet, as Sybil self-payments are: per-party
+  budgets bound one address, not one attacker. On pubnet it moves rather than closes (0107): a
+  settlement counts in its caller's account and no `payTo` budget, so another caller's key can't
+  fill a seller's budget any more, but the seller's own key carries its buyers' payments, so a
+  buyer can use up the seller's month ("A buyer uses up a seller's quota", under "API keys").
 
 ## API keys
 
 Scope: the API key a `/verify` or `/settle` request for `stellar:pubnet` must carry (AD-11,
 [ADR 0007](adr/0007-fee-abuse-containment.md)'s amendments of 2026-11-03 and 2026-11-13, task
-0105), and its registry. A key says who calls, so the rate limiter and, with 0107, the fee budgets
-can count a caller; it gives no right over anyone's funds, and a payment is still authorized only
-by its payer's signature. Who may get a key is the portal's rule (0106), not covered here.
+0105), and its registry. A key says who calls, so the rate limiter and the account's quota and
+fee budget (0107) count a caller; it gives no right over anyone's funds, and a payment is still
+authorized only by its payer's signature. Who may get a key is the portal's rule (0106), not
+covered here.
 
 ### Threats
 
@@ -514,15 +535,18 @@ by its payer's signature. Who may get a key is the portal's rule (0106), not cov
 
 - **Attack:** A seller's key ends up in a repository, a log or a client bundle, and someone else
   calls `/verify` and `/settle` with it. They use up the owner's rate budget, so the owner's own
-  requests get a 429, and with 0107 the owner's free quota and fee budget.
+  requests get a 429, and the account's payments for the month and its fee budget (0107).
 - **Mitigation:** The owner's key is revoked, by the operator's script or the portal, and the
   revocation holds from the next request on every instance: the registry is read on each request
   and nothing caches it. The count is the owner's, so the replacement key starts no new budget
-  for the thief to share. The `x402_` prefix lets a secret scanner recognize a key. The
-  facilitator logs a key's owner, never the key or its hash.
-- **Residual risk:** Until the owner notices, the thief spends the owner's budgets. A key never
-  expires on its own. `/settle` can't be called from a browser (no CORS), but nothing stops a
-  seller from shipping its key in one.
+  for the thief to share. What the thief costs us stops at the account's plan: its fee budget per
+  24 hours, 2 XLM on the free plan, and its payments for the month. The `x402_` prefix lets a
+  secret scanner recognize a key. The facilitator logs a key's owner, never the key or its hash.
+- **Residual risk:** Until the owner notices, the thief spends the owner's budgets, and the owner
+  is then refused until its month rolls or the operator raises its plan. A key the portal issued
+  is replaced only from the next calendar month (0106 decision 24), so the owner waits for that
+  too. A key never expires on its own. `/settle` can't be called from a browser (no CORS), but
+  nothing stops a seller from shipping its key in one.
 
 #### The registry or its backup is read
 
@@ -612,12 +636,37 @@ by its payer's signature. Who may get a key is the portal's rule (0106), not cov
 
 #### A new key for a new budget
 
-- **Attack:** A caller that used up its rate budget, or with 0107 its free quota, replaces its
-  key to start again.
-- **Mitigation:** The limiter counts by the key's owner, not the key, and an owner has one active
-  key (a partial unique index, whoever writes the row), so a replaced key continues the count.
-- **Residual risk:** A caller with several owners has several budgets. An owner costs a Discord
-  account that passed the portal's gates (0106), or the operator's decision to issue one by hand.
+- **Attack:** A caller that used up its rate budget, or its account's quota, replaces its key to
+  start again.
+- **Mitigation:** The limiter and the account's quota count by the key's owner, not the key, and
+  an owner has one active key (a partial unique index, whoever writes the row), so a replaced key
+  continues both counts. The account's plan is the owner's too. A test pins it: an account uses
+  part of its quota, revokes its key, gets a new one, and its use carries over (0107).
+- **Residual risk:** A caller with several owners has several budgets, on the free plan within
+  `free` ("Shared budget exhaustion by Sybil self-payments"). An owner costs a Discord account
+  that passed the portal's gates (0106), or the operator's decision to issue one by hand. There
+  is no ban (0107, as in stellar-prices-api): an account that abused its quota gets it back with
+  the month.
+
+#### A buyer uses up a seller's quota
+
+- **Attack:** The seller's server calls `/settle` with the seller's key, so every buyer's payment
+  counts in the seller's account. A buyer pays a free seller 1,000 times and the seller's month is
+  gone: `/settle` refuses its other buyers with `settle_exact_stellar_quota_exhausted` until the
+  month rolls. Or the buyer pays from a C-address wallet whose own check makes each settlement
+  cost the ceiling: 80 payments spend a free account's fee budget, and the seller is refused for
+  a day (`settle_exact_stellar_spend_limit_account`).
+- **Mitigation:** The first route costs the buyer 1,000 times the resource's price, all of it paid
+  to the seller. A payment that fails on chain counts too and pays the seller nothing, so there
+  the price bounds nothing: the payer's breaker does, which closes that payer address for an hour
+  after 3 failures in an hour (1 in a C-account payer's own contract) but binds one address only,
+  and the seller's fee budget per 24 hours. The fee budget is per 24 hours, so the second route
+  refuses the seller for a day, not for the rest of the month. The operator raises a plan by hand
+  when the seller writes to us.
+- **Residual risk:** Accepted (akot, 2026-11-23): such a buyer can't be told from a popular
+  seller's buyers. Charging past the quota (0108) is the fix. Past its quota a seller's `/verify`
+  still passes, so its handler serves and `/settle` refuses; `@x402/express` 2.31.0 then withholds
+  the response it held back.
 
 #### A client over its budget still makes the server read its body
 
@@ -744,3 +793,37 @@ and the two Lambdas off the server, the uptime probe and the check that watches 
   block the address at the edge without a shell on the server.
 - **Residual risk:** Accepted on testnet. Looked at again before mainnet, with the retention
   (0038).
+
+## Bazaar search
+
+`GET /discovery/search` (task 0120, [ADR 0014](adr/0014-bazaar-search.md)) is public and ranks
+listings that sellers write. Its first part ranks by words alone; the part by meaning follows.
+
+### Threats
+
+#### Ranking by repeated words
+
+- **Attack:** A seller repeats a word in its listing to rank first for it. `ts_rank_cd` counts
+  every occurrence: a description of "weather" 62 times, inside its 500-character limit, ranks 31
+  for `weather` against 1 for a listing named "Weather"; a URL path of the word 250 times, inside
+  the 2,048-character URL limit, ranks 250. A listing costs one small settlement, or a seed entry.
+- **Mitigation:** None while search ranks by words alone, so that part is not deployed by itself.
+  Once the meaning part lands, the words weigh a fifth of a listing's score and count only by
+  their rank among matches (ADR 0014), which bounds what repetition buys.
+- **Residual risk:** When the model is down, search falls back to words alone and repetition wins
+  again. It stays a named risk with no limit of its own (ADR 0014).
+
+#### Costly queries
+
+- **Attack:** A client sends the longest query, 2,000 characters of common words, so PostgreSQL
+  scans every listing that holds any of them; or a cursor PostgreSQL can't read, to cause 500s.
+- **Mitigation:** Only the first 32 distinct words are looked for: on 2,200 listings 330 common
+  words took 1.1–1.2 s and the first 32 of them 67 ms, against 10 ms for 7 words. Search reads
+  through the discovery pool of 3 connections, apart from `/settle`'s, inside `/discovery/*`'s
+  per-IP limit (ADR 0007). A cursor whose rank PostgreSQL can't hold is refused with `400`.
+- **Residual risk:** The queries share the database's CPU with payments. A client within its
+  limit can keep the discovery pool busy, which slows the database for every route and makes
+  `/discovery/resources` wait too, since it reads through the same pool. The cap bounds the words,
+  not the listings they match: on 39,578 real listings (CDP's Bazaar) the 32 most common words
+  matched 39,170 of them and took 1.8–2.2 s, the pool's statement timeout, so such a query may
+  answer 500 at that size.

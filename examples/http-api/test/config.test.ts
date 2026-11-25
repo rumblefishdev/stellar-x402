@@ -28,13 +28,16 @@ describe("loadConfig", () => {
     });
   });
 
+  it("accepts PORT 0, which lets the system pick a free port", () => {
+    expect(loadConfig({ SELLER_ADDRESS, PORT: "0" }).port).toBe(0);
+  });
+
   it.each([
     [{}, "SELLER_ADDRESS is required"],
     [{ SELLER_ADDRESS: "GAS7JQRK" }, "SELLER_ADDRESS must be a Stellar account address"],
     [{ SELLER_ADDRESS, FACILITATOR_URL: "x402.org" }, "FACILITATOR_URL must be a URL"],
     [{ SELLER_ADDRESS, PORT: "abc" }, "PORT must be a port number"],
-    [{ SELLER_ADDRESS, PORT: "0" }, "PORT must be between 1 and 65535"],
-    [{ SELLER_ADDRESS, PORT: "70000" }, "PORT must be between 1 and 65535"],
+    [{ SELLER_ADDRESS, PORT: "70000" }, "PORT must be between 0 and 65535"],
   ])("refuses %j", (env, message) => {
     expect(() => loadConfig(env)).toThrow(message);
   });

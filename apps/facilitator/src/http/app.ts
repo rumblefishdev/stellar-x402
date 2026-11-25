@@ -27,6 +27,7 @@ import { admit, callerOf } from "./admit.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 import { rateLimit, rateLimiter, type RateLimit } from "./rate-limit.js";
+import { discoverySearch } from "./search.js";
 
 /** What the composition root hands to the HTTP adapter. Lanes add their services here. */
 export interface AppDeps {
@@ -290,6 +291,8 @@ export function createApp({
       // Which RPC URL answered: a lagging fallback rejects valid payments (AD-3).
       rpc: trace.rpc,
       message: LOGGED_MESSAGES.has(response.invalidReason) ? response.invalidMessage : undefined,
+      // Upstream's message our refusal replaced: the fee of a payment creating payTo's balance.
+      upstreamMessage: trace.upstreamMessage,
     });
     res.json(response);
   });
@@ -306,7 +309,7 @@ export function createApp({
     res.once("close", () => {
       if (!res.writableEnded) left.abort();
     });
-    const { response, record, afterResponse, key, replay } = await settle(
+    const { response, record, afterResponse, key, replay, upstreamMessage } = await settle(
       request.paymentPayload,
       request.paymentRequirements,
       left.signal,
@@ -330,6 +333,7 @@ export function createApp({
       success: response.success,
       errorReason: response.errorReason,
       message: LOGGED_MESSAGES.has(response.errorReason) ? response.errorMessage : undefined,
+      upstreamMessage,
       payer: response.payer,
       transaction: response.transaction || undefined,
     });
@@ -360,6 +364,7 @@ export function createApp({
   });
   app.use("/discovery", rateLimit(budget("discovery", config.http.rateLimit.discovery)));
   app.get("/discovery/resources", discoveryResources(stores.catalog, logger, metrics));
+  app.get("/discovery/search", discoverySearch(stores.catalog, logger, metrics));
 
   app.use((_req, res) => {
     res.status(404).json({ error: "not_found" });

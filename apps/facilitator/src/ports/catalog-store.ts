@@ -47,6 +47,29 @@ export interface CatalogPage {
   total: number;
 }
 
+/** `GET /discovery/search`'s words and filters (0120); the route resolves `limit` and the cursor. */
+export interface CatalogSearch {
+  /** The query as the agent wrote it. */
+  text: string;
+  type?: string;
+  payTo?: string;
+  /** A CAIP-2 id; without one, both networks are searched (0155). */
+  network?: string;
+  limit: number;
+  /** The last result of the page before; this page starts after it. */
+  after?: CatalogSearchPosition;
+}
+
+/** Where a result sits: its rank by words, as PostgreSQL writes it, and its key for ties. */
+export interface CatalogSearchPosition {
+  rank: string;
+  key: CatalogKey;
+}
+
+export interface CatalogSearchHit extends CatalogSearchPosition {
+  resource: DiscoveryResource;
+}
+
 /** `stale`: the stored entry came from a check that started later; nothing was written. */
 export type UpsertOutcome = "inserted" | "updated" | "stale";
 
@@ -66,6 +89,13 @@ export interface CatalogStore {
    * place, so offset paging doesn't shift each time a resource settles again.
    */
   list(query: CatalogQuery): Promise<CatalogPage>;
+  /**
+   * Entries that hold a word of `text`, ranked by words (ADR 0014): a word in the name counts
+   * most, then tags, description and parameters, and each repeat counts again (threat model,
+   * "Ranking by repeated words"). Equal ranks go by key, so a page that starts `after` a result
+   * goes on exactly where the page before stopped.
+   */
+  search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
 }
 
 /** Where a listing attempt ended: the payment's copy, or the check of the seller's 402. */

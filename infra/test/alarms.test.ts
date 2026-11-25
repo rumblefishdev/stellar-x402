@@ -154,6 +154,19 @@ describe("the Alarms template", () => {
     }
   });
 
+  test("names in budget-nearing each budget the catalog writes its series for (0107)", () => {
+    const def = CATALOG.find((m) => m.name === "spend_budget_nearing_total");
+    const budgets = def?.sets[0]?.when?.["budget"] ?? [];
+    expect(budgets).toContain("free");
+    const named = `(${budgets.slice(0, -1).join(", ")} or ${budgets.at(-1)})`;
+    const nearing = records.filter((r) => r.base === "budget-nearing");
+    expect(nearing.length).toBeGreaterThan(0);
+    for (const r of nearing) {
+      const d = byName.get(r.alarmName)!["AlarmDescription"] as string;
+      expect(d, r.alarmName).toContain(named);
+    }
+  });
+
   test("keeps the backup and snapshot alarms out of host, apart from it and each other (40)", () => {
     const bases = (g: string) =>
       [...new Set(records.filter((r) => r.group === g).map((r) => r.base))].sort();

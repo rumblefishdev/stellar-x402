@@ -1,6 +1,6 @@
 import { Address, MuxedAccount, StrKey, Transaction, xdr } from "@stellar/stellar-sdk";
 import type { StellarNetwork } from "@stellar-x402/config";
-import { RpcUnavailableError } from "@stellar-x402/signer-pool";
+import { RpcUnavailableError, type SorobanRpc } from "@stellar-x402/signer-pool";
 import {
   DEFAULT_ESTIMATED_LEDGER_SECONDS,
   getAddressCredentials,
@@ -8,6 +8,7 @@ import {
 } from "@x402/stellar";
 import type { PaymentPayload, PaymentRequirements, VerifyResponse } from "@x402/core/types";
 import type { NetworkMetrics } from "../metrics.js";
+import type { AssetKinds } from "../spend/asset-kinds.js";
 import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
 import type { FindMissingTrustline } from "./trustline.js";
 
@@ -24,6 +25,11 @@ export interface UpstreamVerifier {
 export interface VerifyTrace {
   /** The `RPC_URLS[i]` name of the URL whose upstream answer this is (AD-3). */
   rpc?: string;
+  /**
+   * Upstream's message where our own refusal took its place, so the answer doesn't carry it: for
+   * `payTo`'s missing balance (0107), the fee and the ceiling. The `settled` log has it too.
+   */
+  upstreamMessage?: string;
 }
 
 export interface VerifierDeps {
@@ -49,6 +55,13 @@ export interface VerifierDeps {
   nonceUsed: IsNonceUsed;
   /** Counts that refusal, here where `/verify` and `/settle`'s re-check both give it (0141). */
   metrics: NetworkMetrics;
+  /**
+   * Tells a SAC from a wasm token behind upstream's fee refusal: only a SAC's balance key is known,
+   * so only its payment can be refused for creating `payTo`'s balance (0107).
+   */
+  assets: Pick<AssetKinds, "kind">;
+  /** Reads `payTo`'s balance entry, behind upstream's fee refusal only (0107). */
+  rpc: Pick<SorobanRpc, "getLedgerEntries">;
   /**
    * How long the whole upstream call may take, in milliseconds, across every RPC URL it tries and
    * the bid read before them; 10,000 by default. Upstream's RPC and Horizon clients have no timeout
@@ -127,7 +140,8 @@ export type Verify = (
  * missing trustline (0078), then address credentials only, the channel
  * check (AD-5, with the facilitator's muxed address), the payer's one auth entry (AD-6), then the
  * validity check (AD-22). The first rejection is the answer; upstream's fee refusal also names the
- * archived entries the payment's transaction lists (0066). Errors are thrown, not answered: ours
+ * archived entries the payment's transaction lists (0066), or else becomes our own refusal when
+ * the payment would create `payTo`'s balance (0107). Errors are thrown, not answered: ours
  * (the ledger read), upstream's, which it reports as `unexpected_verify_error`, and an upstream
  * call past `upstreamTimeoutMs`.
  */
@@ -233,7 +247,9 @@ export function createChecker(deps: VerifierDeps): Check {
         };
       }
     }
-    if (!upstream.isValid) return { response: withArchivedEntries(upstream, payload) };
+    if (!upstream.isValid) {
+      return { response: await withFeeCause(upstream, payload, requirements, deps, trace) };
+    }
     // Upstream always names the payer of a valid payment; without one, nothing below can run.
     if (upstream.payer === undefined) throw new Error("upstream verify named no payer");
 
@@ -477,18 +493,39 @@ function isV0Envelope(payload: PaymentPayload): boolean {
 }
 
 /**
- * Upstream's fee refusal, its message followed by the archived entries the payment's transaction
- * lists (task 0066). Since Protocol 23 a transaction pays their restore rent, which can put the
- * fee over the ceiling; anyone can restore them from their own account and pay again. The buyer's
- * client puts its simulation's Soroban data in the transaction, so the entries come with the
- * payment, unchecked: they only describe the refusal, which stays upstream's, and the message
- * says they are the transaction's. Any other answer, or a transaction that lists none, is
- * returned as it is.
+ * Upstream's fee refusal with its cause, where the payment shows one: the archived entries its
+ * transaction lists (task 0066), or else the balance of `payTo` it would create (0107). Any other
+ * answer is returned as it is, and so is a fee refusal with neither. Our own refusal names no
+ * amount, so upstream's message, with the fee, goes to `trace` for the logs.
  */
-function withArchivedEntries(response: VerifyResponse, payload: PaymentPayload): VerifyResponse {
+async function withFeeCause(
+  response: VerifyResponse,
+  payload: PaymentPayload,
+  requirements: PaymentRequirements,
+  deps: Pick<VerifierDeps, "assets" | "rpc">,
+  trace: VerifyTrace | undefined,
+): Promise<VerifyResponse> {
   if (response.invalidReason !== FEE_EXCEEDS_MAXIMUM) return response;
   const keys = archivedEntries(payload);
-  if (keys.length === 0) return response;
+  if (keys.length > 0) return withArchivedEntries(response, keys);
+  if (!(await payToBalanceMissing(requirements, deps))) return response;
+  if (trace) trace.upstreamMessage = response.invalidMessage;
+  return {
+    ...response,
+    invalidReason: PAY_TO_BALANCE_MISSING,
+    invalidMessage: PAY_TO_BALANCE_MISSING_MESSAGE,
+  };
+}
+
+/**
+ * Upstream's fee refusal, its message followed by the archived entries the payment's transaction
+ * lists (task 0066), `keys`. Since Protocol 23 a transaction pays their restore rent, which can
+ * put the fee over the ceiling; anyone can restore them from their own account and pay again. The
+ * buyer's client puts its simulation's Soroban data in the transaction, so the entries come with
+ * the payment, unchecked: they only describe the refusal, which stays upstream's, and the message
+ * says they are the transaction's.
+ */
+function withArchivedEntries(response: VerifyResponse, keys: string[]): VerifyResponse {
   const entries = keys.length === 1 ? "1 archived entry" : `${keys.length} archived entries`;
   const named = keys.slice(0, ARCHIVED_ENTRIES_NAMED);
   if (keys.length > named.length) named.push(`and ${keys.length - named.length} more`);
@@ -552,6 +589,63 @@ function archivable(key: xdr.LedgerKey): boolean {
   return (
     key.switch() === xdr.LedgerEntryType.contractData() &&
     key.contractData().durability() === xdr.ContractDataDurability.persistent()
+  );
+}
+
+/**
+ * Our code for upstream's fee refusal of a payment that would create `payTo`'s balance of a SAC
+ * token (0107 decision 6): the new entry's rent puts the fee over the ceiling, and the facilitator
+ * doesn't pay it. The seller creates the balance once, from its own account, and the buyer pays
+ * again. `/settle` gives it too, from its re-check.
+ */
+export const PAY_TO_BALANCE_MISSING = "invalid_exact_stellar_pay_to_balance_missing";
+/** Its message, which names no account or amount: the same for every payment. */
+export const PAY_TO_BALANCE_MISSING_MESSAGE =
+  "payTo has no balance of this token yet, and its first payment, which creates one, costs " +
+  "more than the facilitator pays: send payTo a first amount of the token from your own " +
+  "account, then pay again";
+/**
+ * How long the read of `payTo`'s balance may take, the token's kind included. It only names the
+ * cause of a refusal already decided, as the trustline lookup does.
+ */
+const PAY_TO_BALANCE_READ_MS = 3_000;
+
+/**
+ * Whether `payTo` holds no balance of the payment's token, so that the payment would create it.
+ * Read only for a SAC, whose balance key is known, and a contract `payTo`: an account holds a
+ * SAC's token in its trustline or, for XLM, in the account itself. A kind the ledger doesn't
+ * confirm, or a read that fails or outruns `PAY_TO_BALANCE_READ_MS`, is `false`: the refusal
+ * stays upstream's, which is still true.
+ */
+async function payToBalanceMissing(
+  { asset, payTo }: PaymentRequirements,
+  deps: Pick<VerifierDeps, "assets" | "rpc">,
+): Promise<boolean> {
+  if (!StrKey.isValidContract(payTo)) return false;
+  const read = async () => {
+    if ((await deps.assets.kind(asset)) !== "sac") return false;
+    const { entries } = await deps.rpc.getLedgerEntries(sacBalanceKey(asset, payTo));
+    return entries.length === 0;
+  };
+  try {
+    return await withTimeout(read(), PAY_TO_BALANCE_READ_MS, "payTo balance read");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The key of `holder`'s balance in the SAC `asset`: the persistent entry of its
+ * `DataKey::Balance(Address)`, a vec of the symbol `Balance` and the address. The live script
+ * `test/live/pay-to-balance-missing.ts` finds it on testnet.
+ */
+export function sacBalanceKey(asset: string, holder: string): xdr.LedgerKey {
+  return xdr.LedgerKey.contractData(
+    new xdr.LedgerKeyContractData({
+      contract: new Address(asset).toScAddress(),
+      key: xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Balance"), new Address(holder).toScVal()]),
+      durability: xdr.ContractDataDurability.persistent(),
+    }),
   );
 }
 
