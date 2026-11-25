@@ -11,7 +11,8 @@ const SERVER = fileURLToPath(new URL("../../../facilitator/dist/server.js", impo
 /**
  * Starts our facilitator, built, so the example seller's payments don't depend on a public service:
  * a fresh friendbot account pays the fees, and one fresh channel carries the settlements. Its key
- * signs through the fake OpenBao, which holds nothing but this run's testnet account. Its log goes
+ * signs through the fake OpenBao, which holds nothing but this run's testnet account. It catalogs
+ * the example seller, so search can find it (E-25). Its log goes
  * to stderr, so a refused or failed settlement shows its cause.
  */
 export async function startFacilitator(databaseUrl: string) {
@@ -40,6 +41,8 @@ export async function startFacilitator(databaseUrl: string) {
       CLIENT_IP: "socket",
       CHANNELS: channel.publicKey(),
       PORT: "0",
+      // The example seller runs on this machine; without it the catalog drops its listing (0054).
+      CATALOG_LIST_LOCAL: "true",
     },
   });
   const url = await new Promise<string>((resolve, reject) => {
