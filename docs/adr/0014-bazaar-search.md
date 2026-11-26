@@ -1,7 +1,8 @@
 # ADR 0014: Search the Bazaar by words and by meaning in PostgreSQL, fused by rank
 
 - Status: accepted
-- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks), 2026-11-23
+- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks, reversed
+  2026-11-26: each network's catalog holds only its own listings), 2026-11-23
   (task 0154: the quality score) and 2026-11-24 (task 0120: each listing's search card in a table
   of its own)
 
@@ -25,8 +26,9 @@ opaque cursor because the ranked set can shift.
 What this has to fit:
 
 - All facilitator state is in PostgreSQL, a database per network
-  ([ADR 0012](0012-facilitator-state-store.md)); the catalog is one table for both networks
-  (task 0155), and which database holds it is still open (task 0126). The M1 evidence already told SCF that Tranche #2's search is planned on PostgreSQL.
+  ([ADR 0012](0012-facilitator-state-store.md)); each network's catalog holds
+  only that network's listings (task 0155), and how one process serves both is still open (task
+  0126). The M1 evidence already told SCF that Tranche #2's search is planned on PostgreSQL.
 - The server is shared: our containers were limited to 1.875 GiB together while production serves
   testnet, and the facilitator to 512 MiB and one CPU ([ADR 0011](0011-facilitator-hosting.md)).
   The server itself has 125 GiB, so ADR 0011 now adds 512 MiB for the model.
@@ -156,8 +158,8 @@ The measurements are in
 - **When the ranking is served.** There is no separate curation-only mode. 0135's run decides
   when search is offered on pubnet (task 0120): not before it reaches nDCG@10 ≥ 0.75, as §4
   promises.
-- **Network.** A search reads the one catalog, which holds both networks (task 0155): without a
-  `network` filter it ranks both, as `/discovery/resources` lists both.
+- **Network.** A search reads the catalog of the database it runs on, which holds that network's
+  listings only (task 0155); `network` filters, as on `/discovery/resources`.
 - **Cursor.** Opaque to the client; it carries the last result's score and listing key, and the
   next page starts after it. Each new listing above it shifts the next page by one, so a result
   may repeat or be skipped at a page boundary. It also carries how the page was ranked, fused or

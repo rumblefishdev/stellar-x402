@@ -994,5 +994,6 @@ sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator \
 
 The report is printed once, at the end, and a large host takes tens of minutes at the seed's pace.
 Run it in `tmux` on the server, so a dropped SSH session doesn't lose the report, and not during a
-deploy, which recreates the container and stops the seed. A testnet reset empties the catalog,
-seeded mainnet listings included (ADR 0012): run it again.
+deploy, which recreates the container and stops the seed. Run it only with the hosts of the
+network whose database it writes: mainnet sellers wait for pubnet's database (ADR 0012). A
+testnet reset empties testnet's catalog: run it again.
