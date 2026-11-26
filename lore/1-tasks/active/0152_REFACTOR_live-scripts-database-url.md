@@ -70,11 +70,14 @@ the four scripts one reading of the variable that treats blank as unset, as the 
 
 ## Implementation Notes
 
-- `apps/facilitator/test/compose-database.ts` (new, no imports): `COMPOSE_DATABASE_URL` and
-  `databaseUrlOrCompose(env = process.env)`, which returns `DATABASE_URL` trimmed, or the compose URL
-  when it is unset or blank. `test/compose-database.test.ts` (new, 4 tests): unset, empty and
-  blank fall back; a set value is trimmed.
-- `test/database.ts` imports `COMPOSE_DATABASE_URL` instead of defining it.
+- `apps/facilitator/test/compose-database.ts` (new, no imports): `COMPOSE_DATABASE_URL`;
+  `urlOrCompose(name, env = process.env)`, which returns the variable `name` trimmed, or the compose
+  URL when it is unset or blank; and `databaseUrlOrCompose(env)`, the same for `DATABASE_URL`.
+  `test/compose-database.test.ts` (new, 8 tests): for each function, unset, empty and blank fall
+  back; a set value is trimmed, and `urlOrCompose` reads only the variable it is given.
+- `test/database.ts` reads `TEST_DATABASE_URL` with `urlOrCompose`, so a blank one falls back to the
+  compose database instead of throwing `TypeError: Invalid URL` from `new URL("")` in every test
+  file (and in the mcp-local e2e, which uses `testDatabase`).
 - `token-matrix.ts`, `spend-matrix.ts`, `catalog-smoke.ts` and `verify-smoke.ts` call
   `databaseUrlOrCompose()`; their headers say the default also applies to a blank value and name
   the module.
@@ -84,6 +87,8 @@ the four scripts one reading of the variable that treats blank as unset, as the 
 - Checks (2026-11-26): typecheck of the facilitator; eslint and prettier on the changed files;
   `pnpm test` in `apps/facilitator` against the compose PostgreSQL, 1393 passed and 3 skipped (+4).
   `test/compose-database.test.ts` is the 55th file in the suite (54 on `develop`).
+- After review (2026-11-26): typecheck, eslint and prettier again; `TEST_DATABASE_URL= pnpm test`
+  in `apps/facilitator` (blank), 1397 passed and 3 skipped (+4 more).
 - Runs of the scripts (2026-11-26), each against the `develop` version for contrast:
   - `token-matrix.ts` without `CLIENT_SECRET`, so it stops after its database step: blank,
     unset and all-spaces `DATABASE_URL` recreate `token_matrix` in the compose database, then stop
@@ -114,3 +119,9 @@ the four scripts one reading of the variable that treats blank as unset, as the 
    falls back as well, so the reader learns the new behaviour where the variable is described.
 3. **`deploy/testnet.env.example` keeps its quoted URL**: it is an env file a person copies, not
    code, and the server never uses the compose database.
+4. **A blank `TEST_DATABASE_URL` falls back too**: not in the task, found in review. The tests read
+   it with `??` the way the scripts read `DATABASE_URL`, so a blank one broke every database test;
+   the same helper, given the variable's name, fixes both.
+5. **`apps/portal/test/live/hand-run.sh` keeps its own copy**: a shell script can't import the TS
+   module, and it already reads a blank `DATABASE_URL` as unset (`${DATABASE_URL:-…}`). The criterion
+   "defined once in code" covers the facilitator's TypeScript.
