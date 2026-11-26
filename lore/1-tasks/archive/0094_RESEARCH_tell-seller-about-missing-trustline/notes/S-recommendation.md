@@ -10,7 +10,7 @@ history:
     note: "Recommendation from R-what-the-seller-sees and R-prior-art; for the owner to confirm."
     spawned_from: [notes/R-what-the-seller-sees.md, notes/R-prior-art.md]
     spawns:
-      - ../../../backlog/0164_FEATURE_seller-verify-refusal-reader.md
+      - ../../../active/0164_FEATURE_seller-verify-refusal-reader.md
   - date: "2026-11-26"
     status: mature
     who: akot

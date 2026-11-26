@@ -2,7 +2,8 @@
 id: "0164"
 title: "Tell the seller why /verify refused a payment: a refusal reader in @stellar-x402/sdk/seller"
 type: FEATURE
-status: backlog
+status: active
+owner: akot
 milestone: 2
 related_adr: []
 related_tasks: ["0094", "0102", "0107", "0078"]
@@ -17,6 +18,10 @@ history:
     note: >
       Spawned from 0094's recommendation: a refusal that reaches /verify never reaches the
       seller's log, and pay_to_balance_missing (0107) does reach it with upstream's client.
+  - date: "2026-11-26"
+    status: active
+    who: akot
+    note: "Started after 0094 closed."
 ---
 
 # Tell the seller why /verify refused a payment: a refusal reader in @stellar-x402/sdk/seller
