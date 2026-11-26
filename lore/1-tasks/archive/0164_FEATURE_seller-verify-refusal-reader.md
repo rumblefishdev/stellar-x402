@@ -2,7 +2,7 @@
 id: "0164"
 title: "Tell the seller why /verify refused a payment: a refusal reader in @stellar-x402/sdk/seller"
 type: FEATURE
-status: active
+status: completed
 owner: akot
 milestone: 2
 related_adr: []
@@ -22,6 +22,13 @@ history:
     status: active
     who: akot
     note: "Started after 0094 closed."
+  - date: "2026-11-26"
+    status: completed
+    who: akot
+    note: >
+      Closed after PR #267 merged (4 commits): readVerifyRefusal in /seller, the example seller
+      logs each refusal. SDK 80 tests (+11), example 24 (+3); testnet live script 8 checks, MCP
+      e2e 28 scenarios, none failed. Decisions 1-5. No follow-up.
 ---
 
 # Tell the seller why /verify refused a payment: a refusal reader in @stellar-x402/sdk/seller
@@ -98,6 +105,13 @@ or without a first balance, from my own log and not from buyers.
   `sellerMustAct` with the account named. The MCP e2e at 14:27 UTC on this branch (the example
   seller with the hook): 28 scenarios, 132 rows, none failed; its results file was restored, not
   committed.
+
+## Issues Encountered
+
+- **CI's `node (22)` failed twice on tests this PR doesn't touch**: `deploy`'s `host-probe.test.ts`
+  (a 5 s timeout), then the facilitator's `settle.test.ts` ("reads the blocker again after a failed
+  read"). The third run passed; `develop` failed the same way three times that day. 0074's timing
+  problem.
 
 ## Design Decisions
 
