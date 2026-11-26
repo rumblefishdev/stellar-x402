@@ -41,14 +41,6 @@ describe("the hosts file (0155 decision 13)", () => {
     );
   });
 
-  it("refuses to seed without the search model, so no seeded listing waits for a restart to be found (ADR 0014)", async () => {
-    const path = join(await mkdtemp(join(tmpdir(), "seed-")), "hosts.txt");
-    await writeFile(path, "a.example\n");
-    await expect(
-      seedMain([path], { DATABASE_URL: "postgres://user:pass@127.0.0.1:9/db" }),
-    ).rejects.toThrow(/SEARCH_MODEL_URL/);
-  });
-
   it("names every line that isn't a host, so a typo never vanishes", () => {
     expect(parseHosts("a.example\napi.seller .example\nhost:abc\n")).toEqual({
       origins: ["https://a.example"],

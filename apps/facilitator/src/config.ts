@@ -127,7 +127,7 @@ function isPostgresUrl(value: string): boolean {
 /** Holds a password, so it is never logged and no message echoes it. */
 const databaseUrl = z.string().refine(isPostgresUrl, "must be a postgres:// URL");
 
-/** The search model container's URL (ADR 0014), read by the service and by `pnpm seed`. */
+/** The search model container's URL (ADR 0014). */
 const searchModelUrl = z.string().refine(isHttpUrl, "must be an http(s) URL without credentials");
 
 const envSchema = z
@@ -441,7 +441,6 @@ const envSchema = z
 
 /** `pnpm migrate` needs only the database. */
 const migrateEnvSchema = z.object({ DATABASE_URL: databaseUrl });
-const seedEnvSchema = z.object({ DATABASE_URL: databaseUrl, SEARCH_MODEL_URL: searchModelUrl });
 
 export type Env = z.input<typeof envSchema>;
 
@@ -661,21 +660,6 @@ export function parseMigrateConfig(env: Record<string, string | undefined>): {
   databaseUrl: string;
 } {
   return { databaseUrl: parseEnv(migrateEnvSchema, env).DATABASE_URL };
-}
-
-/**
- * The config of `pnpm seed`: the database, and the search model, so the seeded listings have their
- * vectors when it ends (ADR 0014).
- */
-export function parseSeedConfig(env: Record<string, string | undefined>): {
-  databaseUrl: string;
-  searchModel: { url: string; timeoutMs: number };
-} {
-  const e = parseEnv(seedEnvSchema, env);
-  return {
-    databaseUrl: e.DATABASE_URL,
-    searchModel: { url: e.SEARCH_MODEL_URL, timeoutMs: SEARCH_MODEL_TIMEOUT_MS },
-  };
 }
 
 /** `pnpm keys` reads the plans as the service does, so `plan` sets only one the service knows. */

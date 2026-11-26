@@ -30,12 +30,7 @@ import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { createSearchCardRewrite } from "./catalog/search-cards.js";
 import { createSearchVectors, type SearchVectors } from "./catalog/search-vectors.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
-import {
-  parseAccountPlansConfig,
-  parseConfig,
-  parseMigrateConfig,
-  parseSeedConfig,
-} from "./config.js";
+import { parseAccountPlansConfig, parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import type { AppDeps } from "./http/app.js";
 import { requiresApiKey } from "./http/api-key.js";
@@ -879,34 +874,22 @@ export async function seedMain(
   const { origins, invalid } = parseHosts(await readFile(path, "utf8"));
   if (invalid.length > 0)
     throw new SeedError(`the hosts file has lines that aren't hosts: ${invalid.join(", ")}`);
-  const { databaseUrl, searchModel } = parseSeedConfig(env);
+  const { databaseUrl } = parseMigrateConfig(env);
   const logger = jsonLogger("info", (line) => process.stderr.write(line));
   const pool = createPool(databaseUrl, poolErrorLogger(logger));
   try {
     const pending = await pendingMigrations(pool);
     if (pending.length > 0)
       throw new SeedError(`the schema lacks migrations: ${pending.join(", ")}`);
-    const stores = postgresStores(pool, {}, SEARCH_MODEL_ID);
-    const metrics = memoryMetrics();
-    const vectors = createSearchVectors({
-      store: stores.searchCards,
-      embedder: createSearchModelClient({ ...searchModel, model: SEARCH_MODEL_ID }),
-      ready: () => searchModelReady(searchModel),
-      logger,
-      metrics,
-    });
+    const stores = postgresStores(pool);
     const cataloger = createCataloger({
       store: stores.catalog,
       attempts: stores.catalogAttempts,
       rateLimits: stores.rateLimits,
       logger,
-      metrics,
+      metrics: memoryMetrics(),
     });
     const reports = await seedHosts(origins, cataloger, { listLocal: false });
-    await cataloger.drain();
-    // One run embeds the cards seeded; the pool ends only once their vectors are stored.
-    await vectors.start();
-    await vectors.close();
     for (const line of reportLines(reports)) write(line);
   } finally {
     await pool.end();
