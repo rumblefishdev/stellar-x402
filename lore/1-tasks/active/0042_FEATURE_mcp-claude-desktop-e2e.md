@@ -146,7 +146,12 @@ field would name `8f671cbe`, as these commits were not made yet.
 ### Emerged
 
 1. **`PUBLIC_ORIGIN` takes https and an origin only.** An http one would bring back the refused
-   listing, and a path would make the route name a URL other than its own.
+   listing, and a path would make the route name a URL other than its own. After Karol's review
+   it must also name a host a catalog lists (no user or password, no IP address, no trailing dot,
+   no single label or private suffix), the rules `packages/bazaar` applies later, so a wrong value
+   stops the start instead of leaving a seller that is never listed. The rules are copied, not
+   imported, so the example needs none of our packages. `trust proxy` in its place was turned
+   down: it rests on the tunnel's forwarded headers, which nothing checked before the deploy.
 2. **The seller handles SIGTERM.** Not in the criteria; without it every `docker stop` and deploy
    would wait out the grace period and kill it, which the facilitator and the portal avoid the same
    way.

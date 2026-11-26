@@ -62,4 +62,27 @@ describe("loadConfig", () => {
   ])("refuses %j", (env, message) => {
     expect(() => loadConfig(env)).toThrow(message);
   });
+
+  // The catalog refuses these hosts later, so a seller named by one would never be listed.
+  it.each([
+    "https://user:pw@seller.example.com",
+    "https://user@seller.example.com",
+    "https://seller.example.com.",
+    "https://127.0.0.1",
+    "https://[::1]",
+    "https://localhost",
+    "https://seller",
+    "https://seller.local",
+    "https://seller.internal",
+  ])("refuses the public origin %s, which a catalog can't list", (PUBLIC_ORIGIN) => {
+    expect(() => loadConfig({ SELLER_ADDRESS, PUBLIC_ORIGIN })).toThrow(
+      "PUBLIC_ORIGIN must name a public host",
+    );
+  });
+
+  it("accepts a public origin with a port", () => {
+    expect(
+      loadConfig({ SELLER_ADDRESS, PUBLIC_ORIGIN: "https://seller.example.com:8443" }).publicOrigin,
+    ).toBe("https://seller.example.com:8443");
+  });
 });
