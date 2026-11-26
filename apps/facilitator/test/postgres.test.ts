@@ -1634,7 +1634,7 @@ describe("PostgreSQL stores", () => {
       await settlements.claim(settlement("2"));
     };
 
-    it("adds nullable listing_method and listing_url to settlements, NULL on rows written before it (decision 1)", async () => {
+    it("adds nullable listing_method and listing_url to settlements, NULL on rows written before it (0154)", async () => {
       const fresh = `${schema}_0018`;
       await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
       await pool.query(`CREATE SCHEMA ${fresh}`);
@@ -1672,7 +1672,7 @@ describe("PostgreSQL stores", () => {
       }
     });
 
-    it("sets the listing's method and URL on that settlement's row, and nothing else on any row (decision 2)", async () => {
+    it("sets the listing's method and URL on that settlement's row, and nothing else on any row (0154)", async () => {
       const { settlements, catalog } = await stores();
       await twoSettled(settlements);
       const [first, second] = await rows();
@@ -1683,7 +1683,7 @@ describe("PostgreSQL stores", () => {
       ]);
     });
 
-    it("leaves the same values when settle and reconcile link one settlement, in turn or at once (decision 2)", async () => {
+    it("leaves the same values when settle and reconcile link one settlement, in turn or at once (0154)", async () => {
       const { settlements, catalog } = await stores();
       await twoSettled(settlements);
       const link = { settlementKey: settlement("1").key, key };
@@ -1694,7 +1694,7 @@ describe("PostgreSQL stores", () => {
       expect(await rows()).toEqual(linked);
     });
 
-    it("rejects a link to a settlement no row has, and writes nothing (decision 2)", async () => {
+    it("rejects a link to a settlement no row has, and writes nothing (0154)", async () => {
       const { settlements, catalog } = await stores();
       await twoSettled(settlements);
       const before = await rows();

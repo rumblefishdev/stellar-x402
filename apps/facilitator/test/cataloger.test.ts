@@ -843,13 +843,13 @@ describe("cataloger, the listing of a payment (0154)", () => {
     listing_url: `${seller.url}/users/:`,
   });
 
-  it("links the settlement to its listing key's method and URL (decision 3)", async () => {
+  it("links the settlement to its listing key's method and URL (0154)", async () => {
     const { cataloger } = setup();
     await cataloger.onSuccess(await settled(1), "settle");
     expect(await links()).toEqual([linked(1)]);
   });
 
-  it("links once and logs no failure when settle and reconcile report one settlement, in turn or at once (decision 2)", async () => {
+  it("links once and logs no failure when settle and reconcile report one settlement, in turn or at once (0154)", async () => {
     const { cataloger, logger } = setup();
     const paid = await settled(1);
     await cataloger.onSuccess(paid, "settle");
@@ -862,7 +862,7 @@ describe("cataloger, the listing of a payment (0154)", () => {
     );
   });
 
-  it("links the payment when the copy is unchanged against the stored listing (decision 3)", async () => {
+  it("links the payment when the copy is unchanged against the stored listing (0154)", async () => {
     const { cataloger, counted } = setup();
     await cataloger.onSuccess(await settled(1), "settle");
     await cataloger.onSuccess(await settled(2), "settle");
@@ -870,7 +870,7 @@ describe("cataloger, the listing of a payment (0154)", () => {
     expect(await links()).toEqual([linked(1), linked(2)]);
   });
 
-  it("links the payment when the seller check is over budget (decision 3)", async () => {
+  it("links the payment when the seller check is over budget (0154)", async () => {
     const { cataloger, counted } = setup();
     await cataloger.onSuccess(await settled(1), "settle");
     await cataloger.onSuccess(await settled(2, valid, { description: "Changed" }), "settle");
@@ -879,7 +879,7 @@ describe("cataloger, the listing of a payment (0154)", () => {
     expect(await links()).toEqual([linked(1), linked(2)]);
   });
 
-  it("links the payment of an MCP tool listing, though the seller isn't asked (decision 3)", async () => {
+  it("links the payment of an MCP tool listing, though the seller isn't asked (0154)", async () => {
     const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };
     const { cataloger, counted } = setup();
     await cataloger.onSuccess(await settled(1, tool, { url: "mcp://tool/weather" }), "settle");
@@ -900,7 +900,7 @@ describe("cataloger, the listing of a payment (0154)", () => {
     ]);
   });
 
-  it("links a payment whose payTo is its payer (decision 3)", async () => {
+  it("links a payment whose payTo is its payer (0154)", async () => {
     const { cataloger } = setup();
     await cataloger.onSuccess(
       await stored(record(valid, { key: "stellar:testnet:GPAYTO:1", payer: "GPAYTO" })),
@@ -909,7 +909,7 @@ describe("cataloger, the listing of a payment (0154)", () => {
     expect(await links()).toEqual([{ ...linked(1), key: "stellar:testnet:GPAYTO:1" }]);
   });
 
-  it("links nothing for a payment whose copy fails validation (decision 3)", async () => {
+  it("links nothing for a payment whose copy fails validation (0154)", async () => {
     const { cataloger, counted } = setup();
     await cataloger.onSuccess(await settled(1, { info: {} }), "settle");
     expect(counted("payment", "rejected", "invalid_info")).toBe(1);
@@ -918,7 +918,7 @@ describe("cataloger, the listing of a payment (0154)", () => {
     ]);
   });
 
-  it("logs catalog_payment_write_failed with the error, counts nothing for it, and catalogs on (decision 4)", async () => {
+  it("logs catalog_payment_write_failed with the error, counts nothing for it, and catalogs on (0154)", async () => {
     // The same payment with a working store, to compare against.
     const working = setup();
     const workingIncrements = vi.spyOn(working.metrics, "increment");

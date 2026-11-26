@@ -2,8 +2,8 @@
 
 - Status: accepted
 - Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks), 2026-11-23
-  (task 0154: the quality score) and 2026-11-24 (task 0120: each listing's search card in a table
-  of its own)
+  (task 0154: the quality score), 2026-11-24 (task 0120: each listing's search card in a table
+  of its own) and 2026-11-25 (task 0154: a payment's listing on its settlement's row)
 
 ## Context
 
