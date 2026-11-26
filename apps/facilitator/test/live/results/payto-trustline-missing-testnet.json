@@ -1,0 +1,176 @@
+{
+  "network": "stellar:testnet",
+  "ranAt": "2026-11-26T13:50:01.447Z",
+  "facilitator": "GDOHG667SIGIEORPS3ZNP76T6IXNHVUCWG4RLIJTZIJIT2ZR6PPDEDRP",
+  "channelSetup": "2a819eff7336e84e3d517a796b5eadae7498abeb053d04664a0ea6b074f08145",
+  "buyer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+  "neverTrusted": {
+    "payTo": "GB6PPDEH4UTXIR65KRM2F2IABY2WLFE7V6GJCIWHM3OY7KI4RLAXAO3G",
+    "checkTrustline": {
+      "status": "missing",
+      "classicAsset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      "reason": "no trustline"
+    },
+    "clients": {
+      "sdkPayingFetch": {
+        "type": "PaymentError",
+        "code": "payto_trustline_missing",
+        "message": "The seller's account GB6PPDEH4UTXIR65KRM2F2IABY2WLFE7V6GJCIWHM3OY7KI4RLAXAO3G has no trustline to USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 (the asset contract CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA): the account must exist and hold one, and only the seller can add it. Nothing was sent.",
+        "paid": "none"
+      },
+      "upstreamFetch": {
+        "type": "Error",
+        "message": "Failed to create payment payload: Stellar trustline is missing for account GB6PPDEH4UTXIR65KRM2F2IABY2WLFE7V6GJCIWHM3OY7KI4RLAXAO3G and asset CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA: HostError: Error(Contract, #13)"
+      }
+    }
+  },
+  "losesTrustline": {
+    "payTo": "GDQG7WNDOOIPLE36DPUYXMZMASF3WSN23RP3EOCT677V4DLLQKFQ572H",
+    "trustlineOpened": "5423fc57a0384d30e959153517b9d513f1f72907402fd6bad01afafbafe2a516",
+    "checkTrustlineWhileSigning": {
+      "status": "ok",
+      "classicAsset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+    },
+    "trustlineRemoved": "412aee46e9c89c5e365f90b5205d3ecd32088f2a3eb8c5b5cae4700ac779cdd3",
+    "checkTrustlineAfterRemoval": {
+      "status": "missing",
+      "classicAsset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      "reason": "no trustline"
+    },
+    "first": {
+      "atSeller": {
+        "status": 402,
+        "error": "invalid_exact_stellar_payto_trustline_missing",
+        "body": "{\"error\":\"invalid_exact_stellar_payto_trustline_missing\"}"
+      },
+      "atVerify": {
+        "isValid": false,
+        "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+        "invalidMessage": "this payment will not settle here, but its auth entry may still land in ledger 5935529: sign a new payment once that ledger has closed; GDQG7WNDOOIPLE36DPUYXMZMASF3WSN23RP3EOCT677V4DLLQKFQ572H has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935470: the account must exist and hold one",
+        "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+        "extra": {
+          "expirationLedger": 5935529
+        }
+      }
+    },
+    "merged": "8ad5c17f75de8452c6933ab49f39d97c4d0e79c968dd54a9f57ad95a7bfedb7a",
+    "mergedInto": "GB6PPDEH4UTXIR65KRM2F2IABY2WLFE7V6GJCIWHM3OY7KI4RLAXAO3G",
+    "checkTrustlineAfterMerge": {
+      "status": "missing",
+      "classicAsset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      "reason": "the account does not exist"
+    },
+    "second": {
+      "atSeller": {
+        "status": 402,
+        "error": "invalid_exact_stellar_payto_trustline_missing",
+        "body": "{\"error\":\"invalid_exact_stellar_payto_trustline_missing\"}"
+      },
+      "atVerify": {
+        "isValid": false,
+        "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+        "invalidMessage": "this payment will not settle here, but its auth entry may still land in ledger 5935529: sign a new payment once that ledger has closed; GDQG7WNDOOIPLE36DPUYXMZMASF3WSN23RP3EOCT677V4DLLQKFQ572H has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935471: the account must exist and hold one",
+        "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+        "extra": {
+          "expirationLedger": 5935529
+        }
+      }
+    }
+  },
+  "sellerReceived": [
+    {
+      "seller": "A",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": false,
+      "status": 402,
+      "error": "Payment required"
+    },
+    {
+      "seller": "A",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": false,
+      "status": 402,
+      "error": "Payment required"
+    },
+    {
+      "seller": "B",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": false,
+      "status": 402,
+      "error": "Payment required"
+    },
+    {
+      "seller": "B",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": true,
+      "status": 402,
+      "error": "invalid_exact_stellar_payto_trustline_missing"
+    },
+    {
+      "seller": "B",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": true,
+      "status": 402,
+      "error": "invalid_exact_stellar_payto_trustline_missing"
+    }
+  ],
+  "sellerLog": [],
+  "facilitatorVerified": [
+    {
+      "time": "2026-11-26T13:49:55.637Z",
+      "level": "info",
+      "event": "verified",
+      "network": "stellar:testnet",
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+      "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+      "rpc": "RPC_URLS[0]#c8522d1c",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935529: sign a new payment once that ledger has closed; GDQG7WNDOOIPLE36DPUYXMZMASF3WSN23RP3EOCT677V4DLLQKFQ572H has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935470: the account must exist and hold one"
+    },
+    {
+      "time": "2026-11-26T13:49:55.657Z",
+      "level": "info",
+      "event": "verified",
+      "network": "stellar:testnet",
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+      "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935529: sign a new payment once that ledger has closed; GDQG7WNDOOIPLE36DPUYXMZMASF3WSN23RP3EOCT677V4DLLQKFQ572H has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935470: the account must exist and hold one"
+    },
+    {
+      "time": "2026-11-26T13:50:01.431Z",
+      "level": "info",
+      "event": "verified",
+      "network": "stellar:testnet",
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+      "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+      "rpc": "RPC_URLS[0]#c8522d1c",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935529: sign a new payment once that ledger has closed; GDQG7WNDOOIPLE36DPUYXMZMASF3WSN23RP3EOCT677V4DLLQKFQ572H has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935471: the account must exist and hold one"
+    },
+    {
+      "time": "2026-11-26T13:50:01.445Z",
+      "level": "info",
+      "event": "verified",
+      "network": "stellar:testnet",
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+      "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935529: sign a new payment once that ledger has closed; GDQG7WNDOOIPLE36DPUYXMZMASF3WSN23RP3EOCT677V4DLLQKFQ572H has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935471: the account must exist and hold one"
+    }
+  ],
+  "checks": {
+    "sdkStoppedBeforeSigning": true,
+    "upstreamFetchStoppedBeforeSigning": true,
+    "sellerAGotNoPayment": true,
+    "firstRefusedAtSeller": true,
+    "secondRefusedAtSeller": true,
+    "verifyNamesAccount": true,
+    "facilitatorLoggedMessage": true
+  }
+}

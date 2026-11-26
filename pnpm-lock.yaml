@@ -94,12 +94,21 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
+      '@stellar-x402/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+      '@x402/express':
+        specifier: ~2.31.0
+        version: 2.31.0(express@5.3.0)(typescript@6.0.3)
+      '@x402/fetch':
+        specifier: ~2.31.0
+        version: 2.31.0
 
   apps/mcp-local:
     dependencies:
@@ -1114,6 +1123,9 @@ packages:
 
   '@x402/extensions@2.31.0':
     resolution: {integrity: sha512-hFq11UtXNWPirZSZjZuWFHvjetYvFQmkQSZcNEMaQYxOz70ZLNFmIdXfG2J/B8YGE2nS2d223Hz9Lnkrxw+Sqw==}
+
+  '@x402/fetch@2.31.0':
+    resolution: {integrity: sha512-Td+Nxhy0TIwKMZ4G7q+lv+oD5SsRI1T0peGE34lSZaaZwXvqQbeR/TQDzex6tQpljq12+D7Mjwp1wX0Maa2Zeg==}
 
   '@x402/mcp@2.31.0':
     resolution: {integrity: sha512-l0qxG1d+f5EQ5rL8D01OuYl+gC2/xfLT650bmM7XfAljGn8mIEByYjKejvBun9tq02bFrwfUNDLWeOi6+pBrZg==}
@@ -3036,6 +3048,10 @@ snapshots:
       - ethers
       - typescript
       - utf-8-validate
+
+  '@x402/fetch@2.31.0':
+    dependencies:
+      '@x402/core': 2.31.0
 
   '@x402/mcp@2.31.0':
     dependencies:
