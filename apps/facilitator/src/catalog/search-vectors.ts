@@ -1,9 +1,13 @@
 import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
-import type { CatalogKey, Embedder, SearchCard, SearchCardStore } from "../ports/index.js";
+import type { Embedder, SearchCard, SearchCardStore } from "../ports/index.js";
+import { unrefTimers, type Scheduler } from "../timers.js";
 
 /** Cards read at a time, as the card rewrite reads listings. */
 const PAGE = 100;
+
+/** How often a run starts, as `rpc-stall.ts` polls. */
+export const SEARCH_VECTORS_TICK_MS = 30_000;
 
 /**
  * The text a card's vector is made from: its fields joined with a line break, empty ones left
@@ -17,68 +21,51 @@ export function meaningText(card: SearchCard): string {
 
 export interface SearchVectorsDeps {
   store: SearchCardStore;
-  /** The model the search model container runs (`SEARCH_MODEL_ID`): a vector of another is redone. */
-  model: string;
   embedder: Embedder;
-  /** True once the search model answers its health check, so it can embed. */
+  /** True once the search model answers its health check, so it can embed. Never rejects. */
   ready: () => Promise<boolean>;
   logger: Logger;
   metrics: ProcessMetrics;
+  schedule?: Scheduler;
 }
 
 export interface SearchVectors {
-  /** Starts the pass in the background, the process serving meanwhile; settles when it ends. */
+  /** A run now, then one every `SEARCH_VECTORS_TICK_MS` until `close()`; settles when the first ends. */
   start(): Promise<void>;
-  /** Stops between cards and waits for the card under way, so the pools can end after it. */
+  /** No more runs; stops between cards and waits for the card under way. */
   close(): Promise<void>;
-  /**
-   * Computes and stores the vector of the listing at `key`, which the catalog has just written.
-   * Never rejects: a failure is logged and counted, and the next start's pass tries again.
-   */
-  listed(key: CatalogKey): Promise<void>;
+  /** `search_model_up`: 1 when the last run's health check answered, else 0; 0 before the first. */
+  up(): 0 | 1;
 }
 
 /**
- * Each search card's vector (ADR 0014), asked of the search model one listing at a time, so a
- * backlog never takes the CPU queries need. The catalog's write asks for the vector of the listing
- * it wrote; once per start, after the card rewrite, a pass embeds every card without a vector of
- * `model` of its current text: the database keeps each card's text hash, and a vector counts only
- * while the hash it was made from equals it. A listing the model fails on is logged and counted,
- * and waits for the next start.
+ * Each search card's vector (ADR 0014), written by one loop: a run at the start, then one every
+ * 30 s. A run asks the model's health once, then embeds every card without a vector of its current
+ * text, one at a time, so a backlog never takes the CPU queries need. A listing the catalog writes
+ * gets its vector by the next run, and a model that is down ends the run, so the next one resumes
+ * within 30 s of its return. A card the model fails on while it answers failed
+ * on its own text: it is logged, counted and not tried again until its text changes or the
+ * process restarts.
  */
 export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
-  const { store, model, embedder, ready, logger, metrics } = deps;
+  const { store, embedder, ready, logger, metrics } = deps;
+  const schedule = deps.schedule ?? unrefTimers;
+  let up: 0 | 1 = 0;
+  let checked = false;
   let closed = false;
   let running: Promise<void> | undefined;
-  // Ends the wait for the model at once on close, timers faked or not.
-  let wake = () => {};
-  // The model's queue: the pass and every catalog write wait their turn, so the model embeds one
-  // listing at a time and a query's vector waits behind one listing at most.
-  let turn: Promise<unknown> = Promise.resolve();
-  const embed = (text: string) => {
-    const answer = turn.then(() => embedder.embed(text, "listing"));
-    // The next one waits for this one to end, failed or not; its caller still gets the failure.
-    turn = answer.catch(() => {});
-    return answer;
-  };
-
-  // The model loads for about 12 s after its container starts, and the facilitator doesn't wait
-  // for it, so `/settle` doesn't either: the pass does, or every card would fail until the next
-  // start.
-  const waitForModel = async () => {
-    let waiting = false;
-    while (!closed && !(await ready())) {
-      if (!waiting) logger.info("search_vectors_waiting_for_model", {});
-      waiting = true;
-      await new Promise<void>((resolve) => {
-        wake = resolve;
-        setTimeout(resolve, 1_000);
-      });
-    }
-  };
+  let timer: unknown;
+  // The text each failed card had, by seq: a card whose text is still the same is skipped.
+  const failed = new Map<string, string>();
 
   const run = async () => {
-    await waitForModel();
+    const answered = (await ready()) ? 1 : 0;
+    // One line when the model stops answering, not one per tick while it stays down.
+    if (answered === 0 && (up === 1 || !checked))
+      logger.info("search_vectors_waiting_for_model", {});
+    up = answered;
+    checked = true;
+    if (up === 0) return;
     let written = 0;
     let after = "0";
     while (!closed) {
@@ -86,58 +73,54 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
       try {
         page = await store.cards(after, PAGE);
       } catch (error) {
-        // Nothing tries again before the next start, so the cards past this page wait for it.
         logger.error("search_vectors_read_failed", { written, error });
         metrics.increment("search_vector_failures_total");
         return;
       }
       if (page.length === 0) break;
-      // A shutdown waits for the pass, so it stops between cards.
-      let i = 0;
-      while (i < page.length && !closed) {
-        const card = page[i]!;
+      for (const card of page) {
+        if (closed) break;
+        const text = meaningText(card);
+        if (failed.get(card.seq) === text) continue;
         try {
-          if (await store.writeVector(card, await embed(meaningText(card)))) written++;
+          if (await store.writeVector(card, await embedder.embed(text, "listing"))) written++;
         } catch (error) {
-          // A model that went away mid-pass (a restart) fails every card alike: wait for it, then
-          // try this card again. A model that answers failed on this card's text alone.
-          if (!closed && !(await ready())) {
-            await waitForModel();
-            continue;
+          // A model that went away (a restart) fails every card alike: the next tick resumes.
+          if (!(await ready())) {
+            up = 0;
+            logger.info("search_vectors_waiting_for_model", {});
+            return;
           }
+          failed.set(card.seq, text);
           logger.warn("search_vector_failed", { seq: card.seq, error });
           metrics.increment("search_vector_failures_total");
         }
-        i++;
       }
       after = page[page.length - 1]!.seq;
     }
-    // One line at the end, so a release's log shows whether every card has its vector.
-    logger.info("search_vectors_written", { written, stopped: closed });
+    // A release's log shows whether every card got its vector.
+    if (written > 0) logger.info("search_vectors_written", { written, stopped: closed });
+  };
+
+  // A tick that finds a run still under way skips, so runs never stack.
+  const tick = () => {
+    if (closed) return;
+    timer = schedule.setTimeout(tick, SEARCH_VECTORS_TICK_MS);
+    if (running) return;
+    running = run().finally(() => (running = undefined));
   };
 
   return {
     start() {
-      running = run();
-      return running;
+      tick();
+      return running ?? Promise.resolve();
     },
     async close() {
       closed = true;
-      wake();
+      if (timer !== undefined) schedule.clearTimeout(timer);
+      timer = undefined;
       await running;
     },
-    async listed(key) {
-      try {
-        const card = await store.card(key);
-        if (card === undefined)
-          throw new Error("the catalog holds no card for the listing written");
-        // A write that left the card's text as it was kept its vector.
-        if (card.model === model) return;
-        await store.writeVector(card, await embed(meaningText(card)));
-      } catch (error) {
-        logger.warn("search_vector_failed", { resourceUrl: key.resourceUrl, error });
-        metrics.increment("search_vector_failures_total");
-      }
-    },
+    up: () => up,
   };
 }

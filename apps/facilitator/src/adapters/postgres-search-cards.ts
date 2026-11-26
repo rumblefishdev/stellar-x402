@@ -1,6 +1,6 @@
 import { searchFields } from "@stellar-x402/bazaar";
 import type pg from "pg";
-import type { CardListing, CatalogKey, SearchCard, SearchCardStore } from "../ports/index.js";
+import type { CardListing, SearchCard, SearchCardStore } from "../ports/index.js";
 
 export class PostgresSearchCardStore implements SearchCardStore {
   /** `searchModel`: the model the cards' vectors are of (`SEARCH_MODEL_ID`). */
@@ -55,20 +55,10 @@ export class PostgresSearchCardStore implements SearchCardStore {
     return rows;
   }
 
-  async card(key: CatalogKey): Promise<SearchCard | undefined> {
-    const { rows } = await this.pool.query<SearchCard>(
-      `SELECT s.seq, s.name, s.tags, s.description, s.parameters, s.model
-         FROM catalog c JOIN catalog_search s USING (seq)
-        WHERE c.network = $1 AND c.pay_to = $2 AND c.method = $3 AND c.resource_url = $4`,
-      [key.network, key.payTo, key.method, key.resourceUrl],
-    );
-    return rows[0];
-  }
-
   /**
    * The model takes its time without a lock held (ADR 0014), so the catalog may write the
    * listing's card meanwhile. The update then waits for that write and re-reads the card: a card
-   * whose fields are no longer the ones embedded keeps what it holds, and the next pass embeds
+   * whose fields are no longer the ones embedded keeps what it holds, and the next run embeds
    * its new text. pgvector reads a vector from its text form, `[1,2,3]`.
    */
   async writeVector(card: SearchCard, vector: number[]): Promise<boolean> {

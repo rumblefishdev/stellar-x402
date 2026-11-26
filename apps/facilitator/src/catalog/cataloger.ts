@@ -17,7 +17,6 @@ import type {
 } from "../ports/index.js";
 import type { SettlementHooks, SettlementOrigin } from "../settlement/hooks.js";
 import { CHECKS_PER_HOST, overBudget } from "./budget.js";
-import type { SearchVectors } from "./search-vectors.js";
 import { askMcpSeller, askSeller, type SellerAnswer } from "./seller-check.js";
 
 export type BazaarApi = Pick<typeof bazaarLib, "validate" | "normalize" | "toExtensionResponses">;
@@ -64,8 +63,6 @@ export interface CatalogerDeps {
   checksPerHost?: number;
   /** The app clock, ms. */
   now?: () => number;
-  /** The search vectors (ADR 0014): asked for the vector of each listing written. */
-  vectors: Pick<SearchVectors, "listed">;
 }
 
 /** How seeding one resource URL ended, a line of the seed's report (0155). */
@@ -137,7 +134,6 @@ export function createCataloger({
   sellerTimeoutMs = 10_000,
   checksPerHost = CHECKS_PER_HOST,
   now = Date.now,
-  vectors,
 }: CatalogerDeps): Cataloger {
   const inFlight = new Set<Promise<void>>();
   const options = { listLocal };
@@ -432,14 +428,6 @@ export function createCataloger({
       });
       if (listing.routeTemplateIgnored && outcome !== "stale")
         metrics.increment("catalog_route_template_ignored_total", { origin });
-      // Not awaited: the listing is stored, and a slow or failing model must not hold up the
-      // check. `drain()` still waits for it, so it ends before the pools do.
-      if (outcome !== "stale") {
-        // Never rejects: `listed()` logs and counts its own failure.
-        const vectored = vectors.listed(entry.key);
-        inFlight.add(vectored);
-        void vectored.finally(() => inFlight.delete(vectored));
-      }
       if (outcome === "stale") return await end({ ...written, stage: "seller", outcome: "stale" });
       return await end({ ...written, stage: "seller", outcome: "refreshed", reason: outcome });
     } catch (error) {

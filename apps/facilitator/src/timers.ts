@@ -1,4 +1,4 @@
-// Timers for the RPC stall tracker (rpc-stall.ts) and the search model watch, which take one as `schedule`; tests pass a
+// Timers for the RPC stall tracker (rpc-stall.ts) and the search vectors' loop, which take one as `schedule`; tests pass a
 // fake.
 
 /** Injectable timers. The default is the global timers, `unref`'d so they never hold the process. */

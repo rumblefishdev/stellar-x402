@@ -664,8 +664,8 @@ export function parseMigrateConfig(env: Record<string, string | undefined>): {
 }
 
 /**
- * The config of `pnpm seed`: the database, and the search model, so each seeded listing gets its
- * vector at once and search finds it before the facilitator's next start (ADR 0014).
+ * The config of `pnpm seed`: the database, and the search model, so the seeded listings have their
+ * vectors when it ends (ADR 0014).
  */
 export function parseSeedConfig(env: Record<string, string | undefined>): {
   databaseUrl: string;

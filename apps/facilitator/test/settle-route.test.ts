@@ -18,7 +18,7 @@ import type { Settle } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
 import { signerEnv } from "./fake-openbao.js";
-import { noSearchModel, noVectors } from "./vectors.js";
+import { noSearchModel } from "./vectors.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -247,7 +247,6 @@ describe("POST /settle", () => {
       store: db.stores().catalog,
       attempts: db.stores().catalogAttempts,
       rateLimits: db.stores().rateLimits,
-      vectors: noVectors,
       metrics: memoryMetrics(),
       logger: jsonLogger("debug", () => undefined),
     });

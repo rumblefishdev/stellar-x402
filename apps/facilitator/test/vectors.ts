@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { postgresStores } from "../src/adapters/postgres.js";
-import type { CatalogKey, Embedder } from "../src/ports/index.js";
+import type { CatalogKey, Embedder, SearchCard } from "../src/ports/index.js";
 
 /** The model's vector size (ADR 0014: granite-embedding-30m-english, 384 dimensions). */
 export const DIMS = 384;
@@ -39,7 +39,7 @@ export const vectorLiteral = (vector: number[]) => `[${vector.join(",")}]`;
 
 /**
  * Stores `vector` of `model` on the card of the listing at `key`, through the search card store as
- * the vector pass does (0120 point A), so the tests hold no copy of its write. Needs the `vector`
+ * the vectors' loop does (0120 point A), so the tests hold no copy of its write. Needs the `vector`
  * extension, which ADR 0014 creates in `public`: the tests' connections search their own schema
  * only.
  */
@@ -50,7 +50,13 @@ export async function setVector(
   vector: number[],
 ): Promise<void> {
   const { searchCards } = postgresStores(pool, {}, model);
-  const card = await searchCards.card(key);
+  const { rows } = await pool.query<SearchCard>(
+    `SELECT s.seq, s.name, s.tags, s.description, s.parameters, s.model
+       FROM catalog c JOIN catalog_search s USING (seq)
+      WHERE c.network = $1 AND c.pay_to = $2 AND c.method = $3 AND c.resource_url = $4`,
+    [key.network, key.payTo, key.method, key.resourceUrl],
+  );
+  const card = rows[0];
   if (card === undefined) throw new Error(`no search card for ${JSON.stringify(key)}`);
   if (!(await searchCards.writeVector(card, vector)))
     throw new Error(`the search card for ${JSON.stringify(key)} changed while it was written`);
@@ -91,6 +97,3 @@ export const noSearchModel: Embedder = {
     throw new Error("no search model in this test");
   },
 };
-
-/** The vectors for a cataloger whose tests don't search by meaning: each write asks, nothing is stored. */
-export const noVectors = { listed: async () => {} };

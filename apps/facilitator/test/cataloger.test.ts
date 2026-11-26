@@ -11,7 +11,6 @@ import type { SettlementRecord } from "../src/ports/index.js";
 import { testDatabase } from "./database.js";
 import { startMcpSeller, type McpSeller } from "./mcp-seller.js";
 import { startSeller, type Seller } from "./seller.js";
-import { noVectors } from "./vectors.js";
 
 const requirements = {
   scheme: "exact",
@@ -85,7 +84,6 @@ function setup(deps: Partial<CatalogerDeps> = {}) {
     store,
     attempts: stores.catalogAttempts,
     rateLimits: stores.rateLimits,
-    vectors: noVectors,
     metrics,
     logger,
     listLocal: true,
@@ -630,42 +628,6 @@ describe("cataloger", () => {
     ]);
     expect(counted("payment", "internal_error", "compare")).toBe(1);
     expect(logger.info).not.toHaveBeenCalledWith("catalog_rejected", expect.anything());
-  });
-
-  // 0120 point E: the vector is computed after the catalog's write, and its failure is the
-  // vectors' own (logged and counted there): the listing stands.
-  it("computes the vector of a listing it wrote, and only of one it wrote (0120 E)", async () => {
-    const listed = vi.fn(async () => {});
-    const { cataloger, list } = setup({ vectors: { listed } } as Partial<CatalogerDeps>);
-    await cataloger.onSuccess(record(valid), "settle");
-    const [entry] = await list();
-    await vi.waitFor(() => expect(listed).toHaveBeenCalledTimes(1));
-    expect(listed).toHaveBeenCalledWith({
-      network: "stellar:testnet",
-      payTo: "GPAYTO",
-      method: "GET",
-      resourceUrl: entry!.resource,
-    });
-    // An unchanged copy writes nothing, so there is no new text to embed.
-    await cataloger.onSuccess(record(valid), "settle");
-    await cataloger.drain();
-    expect(listed).toHaveBeenCalledTimes(1);
-  });
-
-  // A failed vector is the vectors' own: `listed()` logs and counts it and never rejects
-  // (search-vectors.test.ts), so only a hung one is the cataloger's to outlast.
-  it("still lists when the vector hangs (0120 E)", async () => {
-    const hung = setup({
-      vectors: { listed: vi.fn().mockReturnValue(new Promise(() => {})) },
-    } as Partial<CatalogerDeps>);
-    const done = hung.cataloger.onSuccess(record(valid), "settle");
-    await expect(
-      Promise.race([
-        done.then(() => "done"),
-        new Promise((resolve) => setTimeout(() => resolve("hung"), 2_000)),
-      ]),
-    ).resolves.toBe("done");
-    expect(await hung.list()).toHaveLength(1);
   });
 });
 

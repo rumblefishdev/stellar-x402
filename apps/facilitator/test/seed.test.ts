@@ -17,7 +17,6 @@ import type { Logger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
 import { startSeller, type Seller } from "./seller.js";
-import { noVectors } from "./vectors.js";
 
 describe("the hosts file (0155 decision 13)", () => {
   it("reads one host a line, skipping blank lines and # comments", () => {
@@ -167,7 +166,6 @@ describe("seedHosts (0155)", () => {
       store: stores.catalog,
       attempts: stores.catalogAttempts,
       rateLimits: stores.rateLimits,
-      vectors: noVectors,
       metrics: memoryMetrics(),
       logger,
       listLocal: true,

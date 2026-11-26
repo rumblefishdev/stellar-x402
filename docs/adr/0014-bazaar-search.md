@@ -110,16 +110,20 @@ The measurements are in
   - The server is our own Node process on `onnxruntime-node` 1.31.1, with the model's own
     tokenizer read by `@huggingface/tokenizers`: no LGPL dependency
     (`docs/scf/milestone-1-license-audit.md`).
-  - It holds no database password. The facilitator computes a listing's vector right after the
-    catalog writes the listing, and once at each start for every card without one, with no retry
-    loop in between. A vector of an older text no longer counts (the hashes above), and the next
-    start's pass embeds the card again. It asks the
+  - It holds no database password. One loop in the facilitator writes the vectors: a run at
+    the start, then one every 30 s. A run asks the container's health once, then embeds every card
+    without a vector of its current text, so a listing the catalog writes gets its vector within
+    30 s, and the catalog's write knows nothing of vectors. A vector of an older text no longer
+    counts (the hashes above), so the next run embeds the card again. The loop asks the
     container for each vector without holding a lock, and writes it only `WHERE` the card's fields
     are still the ones it embedded, so a vector never lands on a newer text.
   - The facilitator sends the container one listing at a time, so a backlog never takes the CPU
     that queries need.
-  - A listing the container fails on is tried again at the next start. Failures are logged with
-    their cause and counted in a metric, so monitoring can alert on a listing that keeps failing.
+  - A container that is down ends the run, and the next tick resumes: a listing written meanwhile
+    gets its vector within 30 s of the container's return. A listing the container fails on while
+    it answers failed on its own text: it is logged with the cause, counted in a metric that
+    monitoring alerts on, and not tried again until its text changes or the facilitator restarts.
+    The same health check, every 30 s at least, is `search_model_up`.
 - **Fusion.** Weighted RRF over every match, k = 20: a listing scores
   4 / (20 + its rank by meaning) + 1 / (20 + its rank by words), with no words term for a match
   that holds no query word. Ties go by the listing's key. Nothing is cut: on the 0134 set,
@@ -131,15 +135,16 @@ The measurements are in
 - **When a listing has no vector yet.** A new listing joins search only once its vector is stored,
   so a search never mixes listings that were scored two ways. `/discovery/resources` lists it at
   once. A listing whose text changes leaves search by meaning until its new vector is written,
-  right after the write. While a listing that passes the filters waits for its vector, the answer
-  says `partialResults: true`, so a client knows search by meaning may have missed it.
+  within 30 s of the write, by the loop's next run. While a listing that passes the filters waits
+  for its vector, the answer says `partialResults: true`, so a client knows search by meaning may
+  have missed it.
 - **When the model can't be used.** The facilitator ranks by words alone, in the same response
   shape, when the container doesn't answer within 2,000 ms or answers an error. The timeout stays
   until a measurement on the server sets it. Every listing is then scored one way, so the answer
   includes listings with no current vector. Each fallback is logged with its cause and counted in
   a metric that monitoring can alert on.
 - **When the model changes.** The model is named once, in the shared config (`SEARCH_MODEL_ID`),
-  which the model's image and the facilitator both read. The start's pass embeds every card whose
+  which the model's image and the facilitator both read. The loop embeds every card whose
   vector is of another model, and meanwhile search reads only the current model's vectors and
   answers partial. No words-only window: anything more is decided when a change comes.
 - **Quality score.** A listing's score is its fused score times a quality factor q (task 0154), in

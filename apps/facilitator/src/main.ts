@@ -45,7 +45,6 @@ import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metri
 import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
 import { createRpcStallTracker, type RpcStallTracker } from "./rpc-stall.js";
-import { createSearchModelWatch, type SearchModelWatch } from "./search-model-watch.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
 import { feeSettings, type FeeSettings } from "./settlement/fees.js";
@@ -358,10 +357,8 @@ export function compose(
   signer: OpenBaoSigner;
   /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
   rpcStall: RpcStallTracker;
-  /** Unstarted: `main()` starts the pass after the search card rewrite. */
+  /** Unstarted: `main()` starts the loop after the search card rewrite. */
   vectors: SearchVectors;
-  /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
-  searchModelWatch: SearchModelWatch;
 } {
   const { logger } = opts;
   const { stores } = opts;
@@ -374,17 +371,14 @@ export function compose(
   const embedder = createSearchModelClient({ ...config.searchModel, model: SEARCH_MODEL_ID });
   const vectors = createSearchVectors({
     store: stores.searchCards,
-    model: SEARCH_MODEL_ID,
     embedder,
     ready: () => searchModelReady(config.searchModel),
     logger,
     metrics: root,
   });
-  // The model's health whether anyone searches or not (ADR 0014); the model serves every network.
-  const searchModelWatch = createSearchModelWatch({
-    ready: () => searchModelReady(config.searchModel),
-  });
-  root.registerGauge("search_model_up", () => ({ value: searchModelWatch.up() }));
+  // The model's health whether anyone searches or not (ADR 0014): each run of the vectors' loop
+  // asks it, every 30 s at least. The model serves every network.
+  root.registerGauge("search_model_up", () => ({ value: vectors.up() }));
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
   // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
@@ -394,7 +388,6 @@ export function compose(
     logger,
     metrics: root,
     listLocal: config.catalog.listLocal,
-    vectors,
   });
   // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
   // A test's `rpc` serves every URL.
@@ -523,7 +516,6 @@ export function compose(
     signer,
     rpcStall,
     vectors,
-    searchModelWatch,
   };
 }
 
@@ -547,7 +539,6 @@ export async function main(
     | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   let rpcStall: RpcStallTracker | undefined;
-  let searchModelWatch: SearchModelWatch | undefined;
   /** `/metrics`'s listener, for the catch: a start that failed closes it. */
   let metricsServer: Server | undefined;
   try {
@@ -597,8 +588,6 @@ export async function main(
     // rising `rpc_stalled_seconds`.
     rpcStall = composed.rpcStall;
     rpcStall.start();
-    searchModelWatch = composed.searchModelWatch;
-    searchModelWatch.start();
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
@@ -637,13 +626,13 @@ export async function main(
     const searchCardsRewritten = searchCards.start();
     // After the rewrite, so each vector is made from the card's text under this release's rules.
     const searchVectorsWritten = searchCardsRewritten.then(() => vectors.start());
-    // Catalog writes, a prune, the search card rewrite and the vector pass already under way
+    // Catalog writes, a prune, the search card rewrite and the vector run already under way
     // finish before the process exits, and before the pools end, even if closing the server fails;
     // the pools end even if draining fails. `/metrics` closes last, after every part that counts,
     // so a scrape meanwhile still reads them.
     const closeOnce = async () => {
       signer.close();
-      // The search card rewrite and the vector pass stop at once, so they hold no connection
+      // The search card rewrite and the vectors' loop stop at once, so they hold no connection
       // through the drain. A pass that hasn't started yet then reads nothing.
       const rewriteClosed = searchCards.close();
       const vectorsClosed = vectors.close();
@@ -659,7 +648,6 @@ export async function main(
         }
       } finally {
         rpcStall?.stop();
-        searchModelWatch?.stop();
         await closeMetrics(metricsServer);
       }
     };
@@ -679,7 +667,7 @@ export async function main(
       reconciled: deps.reconciliation?.reconciled ?? Promise.resolve(),
       /** Settles once the search card rewrite at start has ended: for tests. */
       searchCardsRewritten,
-      /** Settles once the vector pass at start has ended: for tests. */
+      /** Settles once the vectors' first run has ended: for tests. */
       searchVectorsWritten,
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
@@ -692,7 +680,6 @@ export async function main(
     // It wrote no liveness series (above), so a crash loop shows as missing data.
     await closeMetrics(metricsServer);
     rpcStall?.stop();
-    searchModelWatch?.stop();
     await endPools();
     throw error;
   }
@@ -901,24 +888,25 @@ export async function seedMain(
       throw new SeedError(`the schema lacks migrations: ${pending.join(", ")}`);
     const stores = postgresStores(pool, {}, SEARCH_MODEL_ID);
     const metrics = memoryMetrics();
+    const vectors = createSearchVectors({
+      store: stores.searchCards,
+      embedder: createSearchModelClient({ ...searchModel, model: SEARCH_MODEL_ID }),
+      ready: () => searchModelReady(searchModel),
+      logger,
+      metrics,
+    });
     const cataloger = createCataloger({
       store: stores.catalog,
       attempts: stores.catalogAttempts,
       rateLimits: stores.rateLimits,
-      vectors: createSearchVectors({
-        store: stores.searchCards,
-        model: SEARCH_MODEL_ID,
-        embedder: createSearchModelClient({ ...searchModel, model: SEARCH_MODEL_ID }),
-        ready: () => searchModelReady(searchModel),
-        logger,
-        metrics,
-      }),
       logger,
       metrics,
     });
     const reports = await seedHosts(origins, cataloger, { listLocal: false });
-    // The vectors are computed after each write; the pool ends only once they are stored.
     await cataloger.drain();
+    // One run embeds the cards seeded; the pool ends only once their vectors are stored.
+    await vectors.start();
+    await vectors.close();
     for (const line of reportLines(reports)) write(line);
   } finally {
     await pool.end();

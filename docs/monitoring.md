@@ -455,8 +455,8 @@ on words alone meanwhile, and no listing gets a vector.
 1. The model container's state: `sudo /usr/local/libexec/x402/x402-compose production ps
 search-model`, then `logs search-model`: a restart loop, out of memory, or an image without the
    model.
-2. Once it answers again, the next search ranks by meaning, and the start's next pass embeds the
-   listings still without a vector.
+2. Once it answers again, the next search ranks by meaning, and within 30 s the vectors' loop
+   embeds the listings still without a vector.
 
 ### search-slow
 
@@ -472,16 +472,18 @@ Searches still answer while this fires.
 
 ### search-vector-failed
 
-The search model gave no vector for a listing the catalog wrote, or the start's pass could not
-read the cards ([ADR 0014](adr/0014-bazaar-search.md)). Search by meaning leaves such a listing out
-until it has a vector, and answers `partialResults: true` meanwhile. Nothing tries again before the
-next start. One quiet minute ends it.
+The search model, while it answered its health check, gave no vector for a listing, or the
+vectors' loop could not read the cards ([ADR 0014](adr/0014-bazaar-search.md)). Search by meaning
+leaves such a listing out until it has a vector, and answers `partialResults: true` meanwhile. A
+model that is down fires `search-model-down` instead: the loop resumes within 30 s of its return.
+A listing that failed is not tried again until its text changes or the facilitator restarts. One
+quiet minute ends it.
 
 1. In Logs Insights on `/x402/production/app`, the `search_vector_failed` and
    `search_vectors_read_failed` lines: the listing and the cause.
 2. The model container's state, as for `search-words-only`.
-3. Once the model answers, a restart of `x402@production` embeds every listing still without a
-   vector; it drains, so plan it like a deploy.
+3. A listing that failed on its own text: once the cause is fixed, a restart of `x402@production`
+   tries it again; it drains, so plan it like a deploy.
 
 ### rpc-stalled
 
