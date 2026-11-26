@@ -4,9 +4,7 @@ import { afterAll, beforeAll } from "vitest";
 import { createPool, postgresStores } from "../src/adapters/postgres.js";
 import { migrate } from "../src/adapters/postgres-schema.js";
 import type { Stores } from "../src/ports/index.js";
-
-/** The repo's `compose.yaml` database, used when `TEST_DATABASE_URL` is not set. */
-const COMPOSE_DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:15432/postgres";
+import { COMPOSE_DATABASE_URL } from "./compose-database.js";
 
 export interface TestDatabase {
   /** This file's schema, migrated in `beforeAll`. */

@@ -18,7 +18,8 @@
  *   PAY_TO              receives (a funded account)
  *   AMOUNT              base units (default 1000 = 0.0001 XLM)
  *   DATABASE_URL        required: the facilitator's PostgreSQL, migrated (`pnpm migrate`); the
- *                       local one from `compose.yaml` is postgres://postgres:postgres@127.0.0.1:15432/postgres
+ *                       local one from `compose.yaml` is `COMPOSE_DATABASE_URL` in
+ *                       `test/compose-database.ts`
  *
  *   cd apps/facilitator && npx tsx test/live/api-key-smoke.ts
  *

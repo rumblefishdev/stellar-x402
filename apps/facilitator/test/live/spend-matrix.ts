@@ -27,8 +27,9 @@
  *    and three fit in 300,000.
  *
  * Env:
- *   DATABASE_URL     the PostgreSQL to use (default: compose's, 127.0.0.1:15432); each facilitator
- *                    gets a new schema of its own, migrated here and dropped at the end
+ *   DATABASE_URL     the PostgreSQL to use (default, also when blank: compose's,
+ *                    `test/compose-database.ts`); each facilitator gets a new schema of its
+ *                    own, migrated here and dropped at the end
  *   CLIENT_SECRET    optional: an account holding Circle-faucet testnet USDC, for the USDC case
  *   AMOUNT           base units per payment (default 1000)
  *   RPC_URLS         passed to the facilitators (default: the testnet RPC)
@@ -66,13 +67,13 @@ import { Agent, fetch } from "undici";
 import { createPool } from "../../src/adapters/postgres.js";
 import { migrate } from "../../src/adapters/postgres-schema.js";
 import { main } from "../../src/main.js";
+import { databaseUrlOrCompose } from "../compose-database.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
 
 const network = "stellar:testnet";
 const RPC_URL = "https://soroban-testnet.stellar.org";
 const server = new rpc.Server(RPC_URL);
-const DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:15432/postgres";
+const DATABASE_URL = databaseUrlOrCompose();
 const AMOUNT = BigInt(process.env.AMOUNT ?? "1000");
 const CHANNELS = 4;
 const PARALLEL = 6;
