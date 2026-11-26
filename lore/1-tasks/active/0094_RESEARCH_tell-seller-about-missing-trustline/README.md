@@ -6,7 +6,7 @@ status: active
 owner: akot
 milestone: 2
 related_adr: []
-related_tasks: ["0078", "0092", "0102", "0107", "0075", "0164", "0165"]
+related_tasks: ["0078", "0092", "0102", "0107", "0075", "0164"]
 tags: [facilitator, payments, priority-low, effort-small]
 links:
   - ../../archive/0078_FEATURE_missing-trustline-reason.md
@@ -37,8 +37,8 @@ history:
       Research done, waiting for review. What the seller sees, from the 2.31 dists and a testnet
       run (test/live/payto-trustline-missing.ts, 7 checks passed): nothing, for every client we
       know of. Prior art: no x402 facilitator warns the seller before the first payment.
-      Recommendation: the guide step in 0075, a refusal reader (0164), a seed check (0165), no
-      facilitator route. Decisions 1-8.
+      Recommendation: the guide step in 0075, a refusal reader (0164), no seed check and no
+      facilitator route. Decisions 1-9.
 ---
 
 # Find how a seller can learn that their payTo has no trustline
@@ -102,8 +102,7 @@ out of the comparison.
       first payment)
 - [x] An `S-` note gives a recommendation, with its costs, or the reason to do nothing
       ([S-recommendation](notes/S-recommendation.md))
-- [x] Any work the recommendation needs is a backlog task (0164, 0165; the docs step went into
-      0075)
+- [x] Any work the recommendation needs is a backlog task (0164; the docs step went into 0075)
 
 ## Findings
 
@@ -125,8 +124,7 @@ out of the comparison.
   - a "payTo can receive" first step in the seller guide (0075);
   - a refusal reader for `onAfterVerify` in `/seller`, used by the example (0164, M2): it also
     tells the seller about 0107's `pay_to_balance_missing`, which does reach `/verify`;
-  - a `payTo` check at catalog seed (0165, M3, low);
-  - no facilitator route, and no portal check for now.
+  - no `payTo` check at catalog seed, no facilitator route, and no portal check for now.
   - A `payTo` that doesn't exist needs nothing of its own.
 
 ## Design Decisions
@@ -156,5 +154,8 @@ out of the comparison.
    sources are commit permalinks and quotes in the note, not archived in `sources/`.
 7. **The docs step went into 0075, not a new task.** The seller guide is where it belongs, and a
    task of its own would hold one paragraph. Recorded in 0075's history; its owner is unchanged.
-8. **0164 is M2 and medium, 0165 is M3 and low.** 0164 fixes what a seller misses today (0107's
-   refusal). 0165 protects buyers from seeded dead listings, which are rare.
+8. **0164 is M2 and medium.** It fixes what a seller misses today (0107's refusal).
+9. **No seed check** (akot, 2026-11-26): a `payTo` check at catalog seed was proposed as 0165, M3,
+   low, and dropped before the PR. No catalog we found does it, it protects buyers rather than
+   telling the seller, and the case is rare. Chosen over merging it into 0164, whose package,
+   milestone and reader differ.
