@@ -54,7 +54,7 @@
     "channelHeld": false,
     "host": true,
     "backups": false,
-    "snapshots": false,
+    "snapshots": true,
     "disk": true,
     "memory": true,
     "logVolume": true,

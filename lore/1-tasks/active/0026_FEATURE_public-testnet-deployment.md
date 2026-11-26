@@ -352,6 +352,16 @@ history:
       needs chmod 0444 (step 1's umask made it 0600, and OpenBao exited on permission denied),
       and the removal uses shred -f for the 0444 files. Next drill: quarterly, or after a seal
       key rotation, Borg passphrase change or OpenBao upgrade.
+  - date: "2026-11-26"
+    status: active
+    who: okarcz
+    note: >
+      The snapshots alarm group turned on by pull request, after Stan's switch to 0139's rules:
+      "snapshots": true in production.json and make rules, which adds x402-snapshot-age to the
+      monitoring VM's rule file; no AWS deploy, since the group makes no CloudWatch alarm now.
+      monitoring.md gets the snapshot-age section, and the runbook's turn-on step follows the
+      rules. After the merge Stan puts the rules on the VM, okarcz fires it once, and Stan
+      records it in monitoring.md.
 ---
 
 # Public testnet deployment

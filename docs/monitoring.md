@@ -60,6 +60,7 @@ On since 2026-11-25 13:43 UTC ([The Prometheus rules](#the-prometheus-rules)). T
 | `x402-rpc-on-fallback`            | `facilitator`       | 2026-11-25, the drill textfile: 14:35:15 to 14:42:00 UTC                                                                                 |
 | `x402-sweeps-stopped`             | `facilitator`       | 2026-11-25, a flat counter in the drill textfile: 14:21:30 to 14:45:45 UTC                                                               |
 | `x402-openbao-down`               | `host`              | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
+| `x402-snapshot-age`               | `snapshots`         | Not yet: 0026 fires it once the rule is on the VM                                                                                        |
 | `x402-facilitator-silent`         | `facilitator`       | 2026-11-25, the stop window: 14:39:15 to 14:39:45 UTC (10 minutes after the stop)                                                        |
 | `x402-gauge-stale`                | `facilitator`       | 2026-11-25, a stale stamp in the drill textfile while the process ran: 14:46:45 to 14:54:30 UTC                                          |
 | `x402-target-down`                | `server`            | 2026-11-25, the stop window (`job` facilitator): 14:34:15 to 14:39:45 UTC                                                                |
@@ -94,7 +95,6 @@ once, by the task that turns it on.
 | `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
 | `hub-uptime`         | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
 | `portal-uptime`      | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
-| `snapshot-age`       | `snapshots`     | 0026, once OpenBao's daily snapshot has run                                            |
 | `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
 | `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
 | `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
@@ -712,6 +712,19 @@ facilitator can't sign, so settlement stops. A signature that fails while OpenBa
 1. `systemctl status x402-openbao` and `/var/log/x402/openbao/openbao.log`.
 2. Unseal or restart it as the [runbook's OpenBao section](runbook.md#openbao) says.
 
+### snapshot-age
+
+OpenBao's last good snapshot is over 26 hours old, or there is none: the night's run at 03:15 UTC
+and its two retries failed, or the timer didn't start. The rule reads the probe's
+`snapshot_age_seconds`, the age of `/var/lib/x402/last-ok/openbao-snapshot`, so it fires about 2
+hours after the first night that failed. The older archives stay in the Borg repository; what
+changed in OpenBao since the last one has no copy.
+
+1. `journalctl -u x402-openbao-snapshot -n 50 --no-pager` and
+   `systemctl list-timers x402-openbao-snapshot.timer`.
+2. Fix the cause, then run it by hand as the
+   [runbook's OpenBao snapshots](runbook.md#openbao-snapshots) says (`reset-failed` first).
+
 ### disk
 
 The server's `/` is over 80% used for 15 minutes. It is shared with ClickHouse and Postgres, and
@@ -1045,7 +1058,7 @@ CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are Clo
 | `wal_failing`                               | `x402-host`        | gauge, None    | none                                                     | `wal-failing` (off)                                                                                           |
 | `wal_last_archived_age_seconds`             | `x402-host`        | gauge, Seconds | none                                                     | `wal-stale` (off)                                                                                             |
 | `backup_age_seconds`                        | `x402-host`        | gauge, Seconds | none                                                     | `backup-age` (off)                                                                                            |
-| `snapshot_age_seconds`                      | `x402-host`        | gauge, Seconds | none                                                     | `snapshot-age` (off)                                                                                          |
+| `snapshot_age_seconds`                      | `x402-host`        | gauge, Seconds | none                                                     | [snapshot-age](#snapshot-age)                                                                                 |
 | `certificate_days_left`                     | `x402-host`        | gauge, None    | none                                                     | [certificate](#certificate)                                                                                   |
 | `host_probe_heartbeat`                      | `x402-host`        | gauge, None    | none                                                     | [probe-silent](#probe-silent)                                                                                 |
 | `credentials_age_seconds`                   | `x402-host`        | gauge, Seconds | none                                                     | [credentials-stale](#credentials-stale)                                                                       |
