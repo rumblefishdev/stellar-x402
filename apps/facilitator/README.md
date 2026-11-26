@@ -946,9 +946,10 @@ the reason `resource_not_public`. That is not an error in the request: the servi
 isn't listed. A malformed URL is `invalid_resource_url`. The rule applies to writes from this
 version on: a local catalog written before it keeps its old entries until `docker compose down -v`.
 
-| Setting              | Default | Meaning                                                                    |
-| -------------------- | ------- | -------------------------------------------------------------------------- |
-| `CATALOG_LIST_LOCAL` | `false` | `true` lists those URLs too, for a local run or the e2e gate; testnet only |
+| Setting              | Default  | Meaning                                                                             |
+| -------------------- | -------- | ----------------------------------------------------------------------------------- |
+| `CATALOG_LIST_LOCAL` | `false`  | `true` lists those URLs too, for a local run or the e2e gate; testnet only          |
+| `SEARCH_MODEL_URL`   | required | the search model container (ADR 0014); search answers by words alone while it fails |
 
 ### Seeding the catalog
 
@@ -967,13 +968,16 @@ catalog:
    on that same 402, so a seeded listing passes the same gates. Only when the 402 declares another
    method, or an MCP tool, is the seller asked once more that way. It has no `ledger` and its
    attempt rows no `payer`; a listing a settlement wrote keeps its `ledger`.
-4. Hosts run at once; within a host the seed waits 3 s after each request, 20 a minute, below the
-   30 checks a minute a host's checks after payments may use. A URL that fails never stops the
+4. Hosts run at once; within a host the seed waits, after each URL, 1 s for each request it cost (a
+   second request to the same URL follows the first at once), 60 a minute, so a host
+   of 581 URLs takes about 10 minutes. A URL that fails never stops the
    next, nor a host the others.
 
 The seed follows each host's `robots.txt` (RFC 9309) under the name `stellar-bazaar`: a URL it
-disallows is skipped and reported as `robots`; a 4xx means no rules; a 5xx or no answer means the
-host is not asked. Every request says `User-Agent: stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
+disallows is skipped and reported as `robots`, the URL of a second request a 402 asks for
+included, and a host that disallows its `/.well-known/x402`
+is not read at all; a 4xx means no rules; any other answer than 200, a redirect included (redirects are
+not followed), or no answer means the host is not asked. Every request says `User-Agent: stellar-bazaar/1 (+https://github.com/rumblefishdev/stellar-x402)`,
 so a seller can block it by name. The report goes to stdout: a tab-separated line per URL and
 account (URL, method, network, `payTo`, outcome, reason, detail), a line per skipped entry
 (outcome `skipped`), a line per host, the totals, and each `payTo` seen on more than one host. As
@@ -991,5 +995,6 @@ sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator \
 
 The report is printed once, at the end, and a large host takes tens of minutes at the seed's pace.
 Run it in `tmux` on the server, so a dropped SSH session doesn't lose the report, and not during a
-deploy, which recreates the container and stops the seed. A testnet reset empties the catalog,
-seeded mainnet listings included (ADR 0012): run it again.
+deploy, which recreates the container and stops the seed. Run it only with the hosts of the
+network whose database it writes: mainnet sellers wait for pubnet's database (ADR 0012). A
+testnet reset empties testnet's catalog: run it again.

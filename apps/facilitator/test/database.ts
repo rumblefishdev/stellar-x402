@@ -4,9 +4,7 @@ import { afterAll, beforeAll } from "vitest";
 import { createPool, postgresStores } from "../src/adapters/postgres.js";
 import { migrate } from "../src/adapters/postgres-schema.js";
 import type { Stores } from "../src/ports/index.js";
-
-/** The repo's `compose.yaml` database, used when `TEST_DATABASE_URL` is not set. */
-const COMPOSE_DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:15432/postgres";
+import { urlOrCompose } from "./compose-database.js";
 
 export interface TestDatabase {
   /** This file's schema, migrated in `beforeAll`. */
@@ -26,12 +24,13 @@ export interface TestDatabase {
 }
 
 /**
- * A migrated schema of this test file's own in the test database: `TEST_DATABASE_URL`, else the
- * repo's compose database (`docker compose up -d`). Files run in parallel, so each gets its own
- * schema. Without a database every test of the file fails, naming the address it tried.
+ * A migrated schema of this test file's own in the test database: `TEST_DATABASE_URL`, else (also
+ * when it is blank) the repo's compose database (`docker compose up -d`). Files run in parallel, so
+ * each gets its own schema. Without a database every test of the file fails, naming the address it
+ * tried.
  */
 export function testDatabase(max = 10): TestDatabase {
-  const base = process.env.TEST_DATABASE_URL ?? COMPOSE_DATABASE_URL;
+  const base = urlOrCompose("TEST_DATABASE_URL");
   const schema = `x402_test_${randomBytes(4).toString("hex")}`;
   const urlFor = (searchPath: string, options = "") => {
     const url = new URL(base);
@@ -95,4 +94,11 @@ export async function createSchema(pool: pg.Pool, schema: string, url: string): 
       { cause: error },
     );
   }
+  // The vector extension belongs to the database, not to a schema: files that migrate at once
+  // would each create it (migration 0020), and all but one would fail on its unique name. One
+  // transaction under a lock creates it first; the migration then finds it there.
+  await pool.query(
+    `SELECT pg_advisory_xact_lock(hashtext('x402 tests: vector extension'));
+     CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;`,
+  );
 }

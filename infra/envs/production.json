@@ -18,7 +18,7 @@
     "hubUrl": "https://sorobanscan.com/api/hub/me"
   },
   "feeAccounts": {
-    "stellar:testnet": "GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP"
+    "stellar:testnet": "GDV2PC2U7QGHWHOFNA34XRGIINFTZDPMJSJOTVNQ72UIBL6IY2KESBWP"
   },
   "watch": {
     "rpcUrls": {
@@ -32,7 +32,7 @@
       },
       "stellar:pubnet": {
         "horizonUrl": "https://horizon.stellar.org",
-        "expected": 29,
+        "expected": 30,
         "supported": 30
       }
     }
@@ -54,7 +54,7 @@
     "channelHeld": false,
     "host": true,
     "backups": false,
-    "snapshots": false,
+    "snapshots": true,
     "disk": true,
     "memory": true,
     "logVolume": true,

@@ -1,3 +1,4 @@
+import { SEARCH_MODEL_ID } from "@stellar-x402/config";
 import {
   PostgresAccountPlanStore,
   PostgresAccountUsageReader,
@@ -39,6 +40,7 @@ import {
   catalogStoreContract,
   searchCardStoreContract,
   catalogSearchContract,
+  catalogMeaningContract,
   rateLimitStoreContract,
   settlement,
   holdLease,
@@ -46,17 +48,8 @@ import {
   spendStoreContract,
 } from "./port-contracts.js";
 import { hardened, rpcStub } from "./rpc-stub.js";
+import { readCards, setVector, unitVector, vectorLiteral } from "./vectors.js";
 import { signerEnv } from "./fake-openbao.js";
-
-// `main()`'s EMF lines off stdout: `LOG_LEVEL` quiets the logger only.
-vi.mock("../src/adapters/emf-metrics.js", async (importActual) => {
-  const actual = await importActual<typeof import("../src/adapters/emf-metrics.js")>();
-  return {
-    ...actual,
-    emfMetrics: (opts: Parameters<typeof actual.emfMetrics>[0]) =>
-      actual.emfMetrics({ write: () => {}, ...opts }),
-  };
-});
 
 // `main()` checks its channel at startup, on the RPC it builds from `RPC_URLS`.
 const bootSecret = Keypair.random().secret();
@@ -163,6 +156,7 @@ describe("PostgreSQL stores", () => {
             beforeSubmit: async () => ({ allow: true }),
             onFinal: async () => {},
             onSuccess: async () => {},
+            listingOf: () => undefined,
           },
           logger: jsonLogger("error"),
           metrics: memoryMetrics(),
@@ -215,6 +209,10 @@ describe("PostgreSQL stores", () => {
   catalogStoreContract(async () => (await stores()).catalog);
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
   catalogSearchContract(async () => (await stores()).catalog);
+  catalogMeaningContract(async () => ({
+    catalog: (await stores()).catalog,
+    setVector: (key, model, vector) => setVector(pool, key, model, vector),
+  }));
   searchCardStoreContract(async () => {
     const all = await stores();
     return { catalog: all.catalog, cards: all.searchCards };
@@ -831,6 +829,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -842,6 +841,7 @@ describe("PostgreSQL stores", () => {
       // The startup sweep reads the settlements on the main pool, and only there; so does the
       // search card rewrite.
       await app.reconciled;
+      // The vector pass waits for a model that never answers here, so it reads no card meanwhile.
       await app.searchCardsRewritten;
       const main = pools?.main.totalCount;
       expect(main).toBeGreaterThan(0);
@@ -933,6 +933,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -963,6 +964,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -1001,6 +1003,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -1219,6 +1222,133 @@ describe("PostgreSQL stores", () => {
     }
   });
 
+  // 0120 point A. Needs the `vector` extension (pgvector) in the test database.
+  it("gives each search card a model and a 384-number vector, one per listing (0120 A)", async () => {
+    await db.empty();
+    const { rows: columns } = await pool.query(
+      `SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute
+        WHERE attrelid = 'catalog_search'::regclass AND attname IN ('model', 'embedding')
+        ORDER BY attname`,
+    );
+    expect(columns).toEqual([
+      { attname: "embedding", type: "public.vector(384)" },
+      { attname: "model", type: "text" },
+    ]);
+    const { catalog } = db.stores();
+    await catalog.upsert(catalogEntry());
+    // A new listing's card has no vector yet.
+    expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
+      [null, null],
+    ]);
+    const key = catalogEntry().key;
+    await setVector(pool, key, SEARCH_MODEL_ID, unitVector(0.8));
+    await setVector(pool, key, SEARCH_MODEL_ID, unitVector(0.6));
+    const cards = await readCards(pool);
+    expect(cards).toHaveLength(1);
+    // A vector of another size is refused.
+    await expect(
+      pool.query("UPDATE catalog_search SET embedding = $1::public.vector", [
+        vectorLiteral([1, 0, 0]),
+      ]),
+    ).rejects.toThrow(/dimensions/);
+  });
+
+  it("counts a listing without a card as waiting for its vector (ADR 0014)", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
+    // As after a rewrite that could not read the listings: the listing stands, its card is gone.
+    await pool.query("DELETE FROM catalog_search");
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
+  });
+
+  it("refuses a write of a card's model: only the database says which vector is current", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    await catalog.upsert(catalogEntry());
+    await expect(pool.query("UPDATE catalog_search SET model = 'm'")).rejects.toThrow(/model/);
+  });
+
+  it("stops counting a card's vector once any writer changes its text, one that knows nothing of vectors too", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
+    // As the release before this one writes a card: the text only, its vector untouched.
+    await pool.query("UPDATE catalog_search SET description = 'Currency rates'");
+    expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
+      [null, null],
+    ]);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
+    // The start's pass reads it again, and the search by meaning leaves it out meanwhile.
+    expect((await searchCards.cards("0", 10)).map((card) => card.description)).toEqual([
+      "Currency rates",
+    ]);
+    expect(
+      await catalog.search({
+        text: "x",
+        limit: 10,
+        meaning: unitVector(0.8),
+      }),
+    ).toEqual([]);
+  });
+
+  it("counts a card's vector only while its text is the one embedded, the start's rewrite included", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    // A vector of a text this release never wrote: the rewrite's text does not match it.
+    await pool.query("UPDATE catalog_search SET name = 'old rules'");
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    const [listing] = await searchCards.listings("0", 10);
+    expect(await searchCards.write(listing!)).toBe(true);
+    expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
+      [null, null],
+    ]);
+    // The text it was made from back on the card: the vector is of it, so it counts again.
+    await pool.query("UPDATE catalog_search SET name = 'old rules'");
+    expect((await readCards(pool))[0]!.model).toBe(SEARCH_MODEL_ID);
+    expect(await searchCards.write(listing!)).toBe(true);
+    // The same text again: nothing is written, the vector stays.
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.6));
+    expect(await searchCards.write(listing!)).toBe(false);
+    expect((await readCards(pool))[0]!.model).toBe(SEARCH_MODEL_ID);
+  });
+
+  it("stops counting a card's vector when a catalog write changes its text, and keeps it when the text stays", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert({ ...entry, resource: { ...entry.resource, description: "Tides" } });
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    const before = (await readCards(pool))[0]!;
+    await catalog.upsert({
+      ...entry,
+      checkedAt: 2,
+      resource: { ...entry.resource, description: "Waves" },
+    });
+    const after = (await readCards(pool))[0]!;
+    expect(after.description).not.toBe(before.description);
+    // A vector counts only while it is of the card's current text (ADR 0014).
+    expect([after.model, after.embedding]).toEqual([null, null]);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.6));
+    const vectored = (await readCards(pool))[0]!;
+    // The same text written again, as a re-seed does: the vector stays.
+    await catalog.upsert({
+      ...entry,
+      checkedAt: 3,
+      resource: { ...entry.resource, description: "Waves" },
+    });
+    const same = (await readCards(pool))[0]!;
+    expect([same.model, same.embedding]).toEqual([vectored.model, vectored.embedding]);
+  });
+
   it("applies the migrations once when two runs race", async () => {
     const fresh = `${schema}_m`;
     await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
@@ -1356,6 +1486,8 @@ describe("PostgreSQL stores", () => {
           "0016_catalog_seed",
           "0017_catalog_search",
           "0018_account_plans",
+          "0019_settlement_listing",
+          "0020_catalog_search_vector",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1393,6 +1525,8 @@ describe("PostgreSQL stores", () => {
         "0016_catalog_seed",
         "0017_catalog_search",
         "0018_account_plans",
+        "0019_settlement_listing",
+        "0020_catalog_search_vector",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
@@ -1610,5 +1744,135 @@ describe("PostgreSQL stores", () => {
     await catalog.upsert(catalogEntry());
     const { rows } = await pool.query("SELECT key_version FROM catalog");
     expect(rows).toEqual([{ key_version: CATALOG_KEY_VERSION }]);
+  });
+
+  describe("the listing of a settlement (0154)", () => {
+    const listing = { method: "GET", resourceUrl: "https://seller.example.com/data" };
+    /** Every settlements row, every column, in key order. */
+    const rows = async (on = pool) =>
+      (await on.query<Record<string, unknown>>("SELECT * FROM settlements ORDER BY key")).rows;
+    /** Each settlement's listing columns, in key order. */
+    const listings = async () =>
+      (
+        await pool.query<Record<string, unknown>>(
+          "SELECT key, listing_method, listing_url FROM settlements ORDER BY key",
+        )
+      ).rows;
+
+    it("adds nullable listing_method and listing_url to settlements, NULL on rows written before it (0154)", async () => {
+      const fresh = `${schema}_0018`;
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      await pool.query(`CREATE SCHEMA ${fresh}`);
+      const old = poolFor(fresh, 2);
+      try {
+        const before = MIGRATIONS.findIndex((m) => m.name === "0019_settlement_listing");
+        expect(before).toBe(18);
+        await migrate(old, 0, MIGRATIONS.slice(0, before));
+        // Two rows as the release before it wrote them: a success and a claimed one, copied
+        // column by column into the older table, which has no listing columns.
+        const { settlements } = await stores();
+        await settlements.claim(settlement("1"));
+        await settlements.transition(settlement("1").key, "claimed", {
+          state: "success",
+          updatedAt: 3_000,
+        });
+        await settlements.claim(settlement("2"));
+        const { rows: oldColumns } = await old.query<{ column_name: string }>(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_schema = current_schema() AND table_name = 'settlements'
+             AND is_generated = 'NEVER'`,
+        );
+        const columns = oldColumns.map(({ column_name }) => `"${column_name}"`).join(", ");
+        await pool.query(
+          `INSERT INTO ${fresh}.settlements (${columns})
+           SELECT ${columns} FROM ${schema}.settlements`,
+        );
+        expect(await migrate(old, 0, MIGRATIONS.slice(0, before + 1))).toEqual([
+          "0019_settlement_listing",
+        ]);
+        expect(
+          (await rows(old)).map(({ key, listing_method, listing_url }) => ({
+            key,
+            listing_method,
+            listing_url,
+          })),
+        ).toEqual([
+          { key: settlement("1").key, listing_method: null, listing_url: null },
+          { key: settlement("2").key, listing_method: null, listing_url: null },
+        ]);
+        const { rows: added } = await old.query(
+          `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+           WHERE table_schema = current_schema() AND table_name = 'settlements'
+             AND column_name IN ('listing_method', 'listing_url')
+           ORDER BY column_name`,
+        );
+        expect(added).toEqual([
+          { column_name: "listing_method", data_type: "text", is_nullable: "YES" },
+          { column_name: "listing_url", data_type: "text", is_nullable: "YES" },
+        ]);
+      } finally {
+        await old.end();
+        await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      }
+    });
+
+    it("writes a claim's listing to listing_method and listing_url, and NULL for a claim without one (0154)", async () => {
+      const { settlements } = await stores();
+      await settlements.claim({ ...settlement("1"), listing });
+      await settlements.claim(settlement("2"));
+      expect(await listings()).toEqual([
+        {
+          key: settlement("1").key,
+          listing_method: "GET",
+          listing_url: "https://seller.example.com/data",
+        },
+        { key: settlement("2").key, listing_method: null, listing_url: null },
+      ]);
+    });
+
+    it("keeps the winning claim's listing: a claim that loses to the key changes nothing on its row (0154)", async () => {
+      const { settlements } = await stores();
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, i) =>
+          settlements.claim({
+            ...settlement("1"),
+            listing: { method: `M${i}`, resourceUrl: `https://seller.example.com/${i}` },
+          }),
+        ),
+      );
+      const winner = results.findIndex((result) => result.claimed);
+      expect(results.filter((result) => result.claimed)).toHaveLength(1);
+      const [won] = await rows();
+      expect(won).toMatchObject({
+        listing_method: `M${winner}`,
+        listing_url: `https://seller.example.com/${winner}`,
+      });
+
+      // A later claim of the key, with another listing or none, finds the row as it was.
+      await settlements.claim({ ...settlement("1"), listing });
+      await settlements.claim(settlement("1"));
+      expect(await rows()).toEqual([won]);
+    });
+
+    it("keeps a record's listing when it is reopened (0154)", async () => {
+      const { settlements } = await stores();
+      const s = settlement("1");
+      await settlements.claim({ ...s, listing });
+      await settlements.transition(s.key, "claimed", {
+        state: "rejected",
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        updatedAt: 2_000,
+      });
+      const reopened = await settlements.reopen(
+        s.key,
+        s.fingerprint,
+        [SETTLE_REASONS.noChannelInTime],
+        3_000,
+      );
+      expect(reopened).toMatchObject({ state: "claimed", reopened: 1 });
+      expect(await listings()).toEqual([
+        { key: s.key, listing_method: "GET", listing_url: "https://seller.example.com/data" },
+      ]);
+    });
   });
 });

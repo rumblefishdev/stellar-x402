@@ -71,7 +71,8 @@ What each party must trust:
 - **Mitigation:** The key can only authorize `settle_upto` calls the client already signed: the
   money goes to the signed `payTo`, at most the signed ceiling, within the signed window. It holds
   no funds. In facilitator-delegated mode the facilitator holds this authority instead, and the
-  server trusts it to charge only the amount asked for.
+  server trusts it to charge only the amount asked for; a stolen facilitator key is covered under
+  "Facilitator key" below.
 - **Residual risk:** A stolen key can charge every open authorization up to its ceiling, to the
   seller's own `payTo`. The exposure is the same as a dishonest seller's (see the trust note
   above), bounded by the ceilings and windows. Open authorizations are bound to the key, so it
@@ -711,7 +712,7 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   expire. The theft alarm detects it, the runbook destroys the secret ID, and the float caps the
   loss.
 - **Residual risk:** Accepted at today's stakes, as for root on the server: they can also lock us
-  out of the channels (0048).
+  out of the channels ([ADR 0015](adr/0015-hot-key-full-power.md)).
 
 #### Root on the server
 
@@ -721,9 +722,24 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   a channel, or a Horizon effect on them other than a credit or a claimable balance naming them,
   read off the server) and the low-balance alarms catch it; the float caps the loss. The float has no
   upper limit, so the weekly review re-checks that this custody still fits it.
-- **Residual risk:** Accepted at today's stakes. The hot key is each account's only signer (0048's
-  cold key was declined for now), so a thief can also lock us out of the channels. Upgrades: TPM-bound
-  credentials, OpenBao on its own machine, a KMS, and 0048 re-checked before mainnet.
+- **Residual risk:** Accepted at today's stakes ([ADR 0015](adr/0015-hot-key-full-power.md)). The
+  hot key is each account's only signer with every threshold at 0, so a thief can also lock us out
+  of the channels; we rebuild under a new key (runbook, "lost access"). Revisited when the float
+  and reserves pass 500 XLM or before `upto` reaches mainnet. Upgrades: TPM-bound credentials,
+  OpenBao on its own machine, a second key in KMS in a separate AWS account with both keys needed
+  for high (ADR 0015's B0).
+
+#### A stolen key charges open `upto` authorizations
+
+- **Attack:** Once `upto` is live (task 0015), the facilitator key is the receiver authorizer of
+  every open authorization in facilitator-delegated mode. A thief settles each at its full
+  `max_amount` before its `deadline`.
+- **Mitigation:** The money goes only to the signed `payTo`, at most the signed ceiling, within the
+  signed window ("Receiver authorizer key" above). Short windows bound it. A rebuild moves to a new
+  key and address, so new authorizations bind the new one.
+- **Residual risk:** Payers pay up to their ceilings on authorizations open at the theft, and those
+  can't be revoked before they expire. This is why `upto` on mainnet triggers a re-check of the
+  key's power ([ADR 0015](adr/0015-hot-key-full-power.md)).
 
 #### A copied disk or snapshot
 
@@ -797,7 +813,8 @@ and the two Lambdas off the server, the uptime probe and the check that watches 
 ## Bazaar search
 
 `GET /discovery/search` (task 0120, [ADR 0014](adr/0014-bazaar-search.md)) is public and ranks
-listings that sellers write. Its first part ranks by words alone; the part by meaning follows.
+listings that sellers write. It ranks by meaning and words fused, and by words alone while the
+search model can't be used.
 
 ### Threats
 
@@ -807,9 +824,8 @@ listings that sellers write. Its first part ranks by words alone; the part by me
   every occurrence: a description of "weather" 62 times, inside its 500-character limit, ranks 31
   for `weather` against 1 for a listing named "Weather"; a URL path of the word 250 times, inside
   the 2,048-character URL limit, ranks 250. A listing costs one small settlement, or a seed entry.
-- **Mitigation:** None while search ranks by words alone, so that part is not deployed by itself.
-  Once the meaning part lands, the words weigh a fifth of a listing's score and count only by
-  their rank among matches (ADR 0014), which bounds what repetition buys.
+- **Mitigation:** The words weigh a fifth of a listing's score and count only by their rank among
+  matches (ADR 0014), which bounds what repetition buys.
 - **Residual risk:** When the model is down, search falls back to words alone and repetition wins
   again. It stays a named risk with no limit of its own (ADR 0014).
 
@@ -826,4 +842,41 @@ listings that sellers write. Its first part ranks by words alone; the part by me
   `/discovery/resources` wait too, since it reads through the same pool. The cap bounds the words,
   not the listings they match: on 39,578 real listings (CDP's Bazaar) the 32 most common words
   matched 39,170 of them and took 1.8–2.2 s, the pool's statement timeout, so such a query may
-  answer 500 at that size.
+  answer 500 at that size. It keeps no limit of its own: once the catalog passes about 10,000
+  listings, a pool of its own for search is the next step.
+
+#### Load on the search model
+
+- **Attack:** A client sends many long queries at once, so the model, which embeds one query at a
+  time, falls behind. One query of 2,000 characters took 0.12 s on the model's 1 CPU; 40 sent at
+  once kept its health check waiting 3.25 s (both on an arm64 build of the image).
+- **Mitigation:** The model runs in its own container, capped at 1 CPU and 768 MiB, so it never
+  takes the facilitator's memory, and inside `/discovery/*`'s per-IP limit (ADR 0007). A query
+  that waits past 2 s is answered by words alone with `partialResults: true`, and
+  `search-words-only` fires. Nothing restarts an overloaded model: a restart would drop every
+  query in its queue and leave search on words alone while the model loads, about 12 s.
+- **Residual risk:** A client within its limit can keep search on words alone for every client,
+  and a hung model stays hung until an operator restarts it. A query is cut at 256 tokens, which
+  halves a long query's cost. The model computes a query its caller gave up on, so its backlog
+  outlasts a burst. A listing cataloged while the model fails gets no vector until the next start,
+  and search by meaning leaves it out until then.
+
+#### Ranking by meaning
+
+- **Attack:** A seller writes a listing whose text sits close to many queries, so it crosses the
+  0.60 floor for searches it doesn't serve. Meaning weighs four fifths of the score.
+- **Mitigation:** None beyond the floor and the fusion; the floor and the weights come from 0134's
+  40 queries.
+- **Residual risk:** Not measured. Task 0135's labelled set is where it would show.
+
+#### The model's files and runtime
+
+- **Attack:** The model's files come from Hugging Face at a pinned revision when the image is
+  built, and onnxruntime's binaries from npm. A changed file at the source reaches the image that
+  also holds the payment code.
+- **Mitigation:** The revision is pinned, the npm lockfile holds integrity hashes, the container
+  is read-only, without capabilities and on a network with no way out, and onnxruntime's
+  telemetry is off (`ORT_DISABLE_TELEMETRY`). The build checks each model file against a SHA-256
+  value in `model.ts` before it writes the file.
+- **Residual risk:** The values were taken from the pinned revision once; a revision that was bad
+  from the start passes the check.

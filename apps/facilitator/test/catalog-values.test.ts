@@ -66,6 +66,7 @@ const HOOKS: Record<keyof SettlementHooks, true> = {
   onFinal: true,
   extensionResponses: true,
   onSuccess: true,
+  listingOf: true,
 };
 const SIGNER_STEPS: Record<SignerStep, true> = { sign: true, check: true };
 const BUDGET_KINDS: Record<BudgetKind, true> = {

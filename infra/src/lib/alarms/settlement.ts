@@ -38,6 +38,65 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     },
   });
 
+  // From the first fallback: search by words alone ranks worse and lets repeated words win
+  // (ADR 0014), and nothing else shows that the model can't be used. One quiet minute ends the
+  // alarm, so each outage of the model sends its own message.
+  f.event("search-words-only", {
+    group: "facilitator",
+    signal: { catalog: "search_words_only_total" },
+    periods: 1,
+    description: {
+      what: "A Bazaar search was answered by words alone: the search model did not give the query's vector within the timeout, failed, or is down. A model container that restarts fires it for the searches of those seconds. An outage sends one message; one after a quiet minute sends another.",
+      next: `Check the search-model container's health and logs on the server (x402-compose ${c.envName} ps search-model, then logs search-model), then search_words_only in /x402/${c.envName}/app with Logs Insights for its cause.`,
+      noData: SILENT_EVENT,
+    },
+  });
+
+  // The model's health from the facilitator's own check every 30 s (ADR 0014): with no searches and
+  // no catalog writes, the two alarms beside this one never fire, so a model in a restart loop
+  // would go unseen. Five minutes, as rpc-stalled waits, so a restart's few seconds don't fire it.
+  f.level("search-model-down", {
+    group: "facilitator",
+    signal: { catalog: "search_model_up" },
+    statistic: "Maximum",
+    periodMinutes: 1,
+    periods: 5,
+    comparison: "<",
+    threshold: 1,
+    description: {
+      what: "The search model has not answered the facilitator's health check for 5 minutes, whether anyone searched or not: search runs on words alone and no listing gets a vector.",
+      next: `Check the search-model container on the server (x402-compose ${c.envName} ps search-model, then logs search-model): a restart loop, out of memory, or an image without the model.`,
+      noData: "Keeps its state; facilitator-silent covers a stopped process.",
+    },
+  });
+
+  // A fused query over 1 s (ADR 0014): the exact scan grows with the catalog, and at the 2 s
+  // statement timeout searches turn into 500s. Each slow one is worth a message, as the sign to
+  // measure the scan on the server and index it.
+  f.event("search-slow", {
+    group: "facilitator",
+    signal: { catalog: "search_slow_total" },
+    periods: 1,
+    description: {
+      what: "A Bazaar search by meaning took over 1 s in the database: the exact scan of every listing's vector grows with the catalog, and at 2 s searches fail with a 500. Searches still answer.",
+      next: `Read search_slow in /x402/${c.envName}/app with Logs Insights for its time and hits, then measure the scan on the server and choose an index (ADR 0014, HNSW, or a cap on the nearest vectors).`,
+      noData: SILENT_EVENT,
+    },
+  });
+
+  // A listing the model fails on while it answers stays out of search by meaning until its text
+  // changes or the facilitator restarts (ADR 0014), so each failure is worth a message.
+  f.event("search-vector-failed", {
+    group: "facilitator",
+    signal: { catalog: "search_vector_failures_total" },
+    periods: 1,
+    description: {
+      what: "The search model, while it answered its health check, gave no vector for a listing, or the vectors' loop could not read the cards: search by meaning leaves the listing out and answers partial. A model that is down fires search-model-down instead, and the loop resumes within 30 s of its return.",
+      next: `Read search_vector_failed and search_vectors_read_failed in /x402/${c.envName}/app with Logs Insights for the listing and the cause, then the search-model container's health (x402-compose ${c.envName} ps search-model). A listing that failed on its own text is tried again when its text changes or after a restart of x402@${c.envName}.`,
+      noData: SILENT_EVENT,
+    },
+  });
+
   for (const network of c.networks) {
     const on = { network };
 
@@ -116,7 +175,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
         qualifier: breaker.replace("_", "-"),
         signal: { catalog: "spend_breaker_opened_total", dims: { network, breaker } },
         description: {
-          what: `A ${breaker} spend breaker opened on ${network}: ${scope} failed on chain past its limit, and its payments are refused for the cool-down (0024).`,
+          what: `The ${breaker} spend breaker opened on ${network}: ${scope} failed on chain past its limit, and its payments are refused for the cool-down (0024).`,
           next: "Read spend_breaker_opened in the app logs for the scope, then the failures that tripped it.",
           noData: SILENT_EVENT,
         },
@@ -217,7 +276,7 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
       signal: { catalog: "settlement_reconciled_total", dims: { network, state: "expired" } },
       description: {
         what: `A settlement on ${network} expired: reconciliation found no transaction of it landed by its ledger bound, so the payer's payment did not settle and the payer has to sign a new one. One is rare; several mean submissions don't land.`,
-        next: "Read reconcile_finished and the record's settlement_hashes for its attempts, then the fee-raised and send-retry counts (Logs Insights on /x402/production/metrics, field type; counts only, task 0125) and the RPC around that time.",
+        next: "Read reconcile_finished and the record's settlement_hashes for its attempts, then the fee-raised and send-retry counts (pool_events_total by type, in Prometheus on the monitoring VM; counts only, task 0125) and the RPC around that time.",
         noData: SILENT_EVENT,
       },
     });

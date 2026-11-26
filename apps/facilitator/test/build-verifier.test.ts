@@ -64,6 +64,7 @@ const env = {
   ...signerEnv(Keypair.fromSecret(secret).publicKey()),
   DATABASE_URL: "postgres://db.internal/x402",
   CLIENT_IP: "socket",
+  SEARCH_MODEL_URL: "http://127.0.0.1:9",
   CHANNELS: channel,
   RPC_URLS: "https://rpc-a.example,https://rpc-b.example",
   MAX_FEE_STROOPS: "300000",

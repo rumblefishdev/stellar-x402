@@ -52,6 +52,11 @@ export default defineConfig([
     },
   },
   {
+    // The search model's build script, run by the image's build on Node.js.
+    files: ["apps/search-model/scripts/*.mjs"],
+    languageOptions: { globals: { process: "readonly", fetch: "readonly", Buffer: "readonly" } },
+  },
+  {
     files: ["conformance/external-proxy/*.mjs"],
     languageOptions: { globals: { console: "readonly", process: "readonly", fetch: "readonly" } },
   },

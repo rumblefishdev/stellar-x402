@@ -1,12 +1,14 @@
 # The production environment (ADR 0011, 0077): one facilitator for every network it serves (today
-# testnet), a database and a migration service per network, and the tunnel connector. Each service
-# has a systemd unit of its own (`deploy/systemd`), so none has a restart policy, and none
-# publishes a port. Each drops every capability and sets no-new-privileges, and runs as a user
-# other than root. On the server this is /srv/x402/production/compose.yaml.
+# testnet), the search model it starts with, a database and a migration service per network, and
+# the tunnel connector. Each service but the search model has a systemd unit of its own
+# (`deploy/systemd`), so none has a restart policy, and none publishes a port. Each drops every
+# capability and sets no-new-privileges, and runs as a user other than root. On the server this
+# is /srv/x402/production/compose.yaml.
 #
 #   FACILITATOR_IMAGE  the facilitator's image; `x402-compose` sets it from `digest`
 #   SECRETS_DIR        the decrypted credentials, /run/x402/production unless set (local runs)
-#   FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET  this directory's .env, once 0026 creates them
+#   FACILITATOR_ADDRESS_TESTNET, CHANNELS_TESTNET, OPENBAO_KEY_TESTNET, OPENBAO_KEY_VERSION_TESTNET
+#                      this directory's .env (see the facilitator's environment below)
 name: x402-production
 
 services:
@@ -23,19 +25,31 @@ services:
       # cloudflare/x402.tf in soroban-infrastructure routes to facilitator:4021: change both or
       # neither.
       PORT: "4021"
+      # /metrics for the metrics agent, which reaches it over the `metrics` network; no port is
+      # published (deploy/metrics; 0139). deploy/metrics/prometheus.yml scrapes facilitator:9464,
+      # and deploy/test/metrics.test.ts holds the two together.
+      METRICS_PORT: "9464"
       CLIENT_IP: cloudflare
       DATABASE_URL_FILE: /run/secrets/database-url.testnet
       RPC_URLS_FILE: /run/secrets/rpc-urls.testnet
       # The facilitator key signs in OpenBao Transit over testnet's socket, with no secret seed
-      # here (ADR 0013, 0036). The OpenBao key's account and its channels are public. Unset, a
-      # deploy stops before it migrates; the database's and the tunnel's units set them themselves.
+      # here (ADR 0013, 0036). The OpenBao key's name and version, its account and its channels
+      # are public, and all four live in .env so a new key needs no pull request (ADR 0015); a new
+      # name also needs its own policy in OpenBao, a new version doesn't. Unset, a deploy stops
+      # before it migrates; the database's and the tunnel's units set them themselves.
       FACILITATOR_ADDRESS: ${FACILITATOR_ADDRESS_TESTNET:?set in this directory's .env}
       CHANNELS: ${CHANNELS_TESTNET:?set in this directory's .env}
       OPENBAO_SOCKET: /run/openbao/testnet/bao.sock
-      OPENBAO_KEY: stellar-testnet
-      OPENBAO_KEY_VERSION: "1"
+      OPENBAO_KEY: ${OPENBAO_KEY_TESTNET:?set in this directory's .env}
+      OPENBAO_KEY_VERSION: ${OPENBAO_KEY_VERSION_TESTNET:?set in this directory's .env}
       OPENBAO_ROLE_ID_FILE: /run/secrets/approle-role-id.testnet
       OPENBAO_SECRET_ID_FILE: /run/secrets/approle-secret-id.testnet
+      SEARCH_MODEL_URL: http://search-model:8080
+    # Starts the model with it but never waits for it (ADR 0014): a model that can't start, as on a
+    # rollback to an image without one, leaves search on words alone, not /settle down.
+    depends_on:
+      search-model:
+        condition: service_started
     secrets:
       - database-url.testnet
       - rpc-urls.testnet
@@ -47,6 +61,8 @@ services:
     networks:
       - edge
       - db
+      - metrics
+      - search
     # Liveness only (ADR 0011); the deploy reads the body with the same one-liner.
     healthcheck:
       test:
@@ -54,6 +70,39 @@ services:
         - node
         - -e
         - fetch('http://127.0.0.1:4021/health',{signal:AbortSignal.timeout(5000)}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # The search model (ADR 0014), from the facilitator's image: it turns a listing's or a query's
+  # text into its vector. It holds no secret and reaches nothing; the facilitator calls it over
+  # `search`.
+  search-model:
+    image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}
+    command: [node, /search-model/dist/main.js]
+    # Node as PID 1 ignores SIGTERM until the model has loaded and set its listener; under an init
+    # a stop during the load ends it at once.
+    init: true
+    # Back after an exit, an out-of-memory one included: x402@ restarts only the facilitator.
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      PORT: "8080"
+    # The facilitator's only: the model reaches no database.
+    networks:
+      - search
+    # 200 only once the model is loaded.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8080/health',{signal:AbortSignal.timeout(5000)}).then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))
       interval: 10s
       timeout: 5s
       start_period: 30s
@@ -82,7 +131,8 @@ services:
       disable: true
 
   postgres-testnet:
-    image: postgres:18@sha256:979bccfde35445db618c65107d27d08c6c21339d8dc3ad4c830c6633947be0e4
+    # PostgreSQL 18 with pgvector (ADR 0014), the image's index digest.
+    image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa
     # Started as `postgres` (999), the entrypoint skips its root step (the chown and gosu) and
     # reads the password secret, 0400 and owned by 999 (x402-creds), as its owner, so it needs no
     # capability. A new volume gets /var/lib/postgresql from the image, already 999's. Run as root
@@ -120,7 +170,7 @@ services:
 # daemon.json) is taken whole by another project's network. These sit outside it and outside
 # docker0's 172.17.0.0/16; each /28 leaves 13 addresses for containers after Docker's gateway
 # (.1, .17), room for mainnet's services. A network added here needs one too, or it fails the
-# same way, and only on the server: a /28 from 172.31.200.0/24, the next free 172.31.200.32/28.
+# same way, and only on the server: a /28 from 172.31.200.0/24, the next free 172.31.200.64/28.
 networks:
   edge:
     name: x402-production-edge
@@ -134,6 +184,18 @@ networks:
     ipam:
       config:
         - subnet: 172.31.200.16/28
+  # No route out: the facilitator and the search model only (ADR 0014).
+  search:
+    name: x402-production-search
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.200.48/28
+  # The metrics agent's (deploy/metrics/compose.yaml), which makes it; the facilitator joins it so
+  # the agent scrapes /metrics with no port published. The agent's project must be up first.
+  metrics:
+    external: true
+    name: x402-metrics
 
 volumes:
   # Made by the playbook and never by Compose, so `compose down -v` can't remove the only copy.

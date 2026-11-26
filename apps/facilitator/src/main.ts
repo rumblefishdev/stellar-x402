@@ -1,4 +1,7 @@
+import { once } from "node:events";
 import { readFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
 import {
   PostgresAccountPlanStore,
@@ -8,6 +11,7 @@ import {
   type AccountPlan,
   type AccountPlanRecord,
 } from "@stellar-x402/api-keys";
+import { SEARCH_MODEL_ID } from "@stellar-x402/config";
 import {
   FallbackRpc,
   SettlementSubmitter,
@@ -17,12 +21,14 @@ import {
 import { getNetworkPassphrase, getUsdcAddress, type FacilitatorStellarSigner } from "@x402/stellar";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
-import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
+import { metricsListener, prometheusMetrics } from "./adapters/prometheus-metrics.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
+import { createSearchModelClient, searchModelReady } from "./adapters/search-model.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { createSearchCardRewrite } from "./catalog/search-cards.js";
+import { createSearchVectors, type SearchVectors } from "./catalog/search-vectors.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
 import { parseAccountPlansConfig, parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
@@ -203,7 +209,7 @@ export function buildSettlement(
     fees: FeeSettings;
     checks: VerifierDeps;
     store: SettlementStore;
-    hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
+    hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "listingOf" | "onSuccess">;
     logger: Logger;
     metrics: NetworkMetrics;
     /** The facilitator key's signer. */
@@ -319,7 +325,7 @@ export function buildSettlement(
 /**
  * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
  * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
- * PostgreSQL stores and the EMF writer; tests pass their own `rpc`, `makeScheme`, pool `sleep`
+ * PostgreSQL stores and the Prometheus writer; tests pass their own `rpc`, `makeScheme`, pool `sleep`
  * and `metrics` (in memory by default).
  *
  * Metrics follow each one's catalog `scope` (0027 AD-3): every part of this network (settlement,
@@ -346,6 +352,8 @@ export function compose(
   signer: OpenBaoSigner;
   /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
   rpcStall: RpcStallTracker;
+  /** Unstarted: `main()` starts the loop after the search card rewrite. */
+  vectors: SearchVectors;
 } {
   const { logger } = opts;
   const { stores } = opts;
@@ -353,6 +361,19 @@ export function compose(
   // One child per network; a root write of a network-scoped metric would carry no `network`, so
   // the root's type doesn't take one.
   const metrics = root.for({ network: config.network });
+  // The search model (ADR 0014): the route asks it for each query's vector, the vectors for each
+  // listing's. The cards serve every network, so they write through the root.
+  const embedder = createSearchModelClient({ ...config.searchModel, model: SEARCH_MODEL_ID });
+  const vectors = createSearchVectors({
+    store: stores.searchCards,
+    embedder,
+    ready: () => searchModelReady(config.searchModel),
+    logger,
+    metrics: root,
+  });
+  // The model's health whether anyone searches or not (ADR 0014): each run of the vectors' loop
+  // asks it, every 30 s at least. The model serves every network.
+  root.registerGauge("search_model_up", () => ({ value: vectors.up() }));
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
   // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
@@ -447,6 +468,7 @@ export function compose(
     hooks: {
       beforeSubmit: policy.beforeSubmit,
       onFinal: policy.onFinal,
+      listingOf: cataloger.listingOf,
       onSuccess: cataloger.onSuccess,
     },
     logger,
@@ -482,20 +504,19 @@ export function compose(
       floor,
       drain,
       signerState: signer.state,
+      embedder,
     },
     cataloger,
     metrics: root,
     rpc,
     signer,
     rpcStall,
+    vectors,
   };
 }
 
 export interface MainOptions {
-  /**
-   * Where the log lines and the EMF metric lines go, each ending in a newline; stdout by default.
-   * The smoke scripts read them here.
-   */
+  /** Where the log lines go, each ending in a newline; stdout by default. The smoke scripts read them here. */
   write?: (line: string) => void;
 }
 
@@ -514,8 +535,8 @@ export async function main(
     | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   let rpcStall: RpcStallTracker | undefined;
-  /** The EMF writer, for the catch: a start that failed stops it. */
-  let emf: ReturnType<typeof emfMetrics> | undefined;
+  /** `/metrics`'s listener, for the catch: a start that failed closes it. */
+  let metricsServer: Server | undefined;
   try {
     // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
     // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
@@ -545,17 +566,20 @@ export async function main(
     // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
-    const stores = postgresStores(pools.main, pools);
-    // The EMF writer (0027 AD-4) on its own sink, never through the logger. Its timers start
-    // with the graph's gauges, so a startup that hangs still writes them; its liveness seed waits
-    // for `start()` below. On stdout by default, where each write is awaited by the final flush.
-    const { write } = opts;
-    const metrics = (emf = emfMetrics({
-      ...(write && { write: (line: string) => write(`${line}\n`) }),
+    const stores = postgresStores(pools.main, pools, SEARCH_MODEL_ID);
+    // The metrics as Prometheus text (ADR 0011, "Metrics"; 0139), read by the agent on the server.
+    // `/metrics` listens before the graph is built, so a startup that hangs still shows its
+    // gauges; the liveness series waits for `start()` below.
+    const metrics = prometheusMetrics({
+      networks: [config.network],
       onIssue: (issue) => logger.warn("metric_issue", { ...issue }),
-    }));
+    });
+    if (config.metricsPort !== undefined) {
+      metricsServer = createServer(metricsListener(metrics.render)).listen(config.metricsPort);
+      await once(metricsServer, "listening");
+    }
     const composed = compose(config, { logger, stores, metrics });
-    const { deps, cataloger, rpc, signer } = composed;
+    const { deps, cataloger, rpc, signer, vectors } = composed;
     // With the graph, like the writer's timers: an RPC that hangs the startup checks shows as a
     // rising `rpc_stalled_seconds`.
     rpcStall = composed.rpcStall;
@@ -571,11 +595,9 @@ export async function main(
       restoreConsole();
       throw error;
     });
-    // The liveness point `facilitator-silent` reads, from the service's start on (AD-4): a start
-    // that hangs or fails, a crash loop of them included, writes none and shows as missing data.
-    metrics.seedZero([
-      { name: "settlement_sweeps_total", labels: { network: config.network, outcome: "listed" } },
-    ]);
+    // The liveness series `facilitator-silent` reads, from the service's start on: a start that
+    // hangs or fails, a crash loop of them included, writes none.
+    metrics.markStarted();
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
     // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
@@ -598,34 +620,38 @@ export async function main(
     pruner.start();
     const searchCards = createSearchCardRewrite({ store: stores.searchCards, logger, metrics });
     const searchCardsRewritten = searchCards.start();
-    // Catalog writes, a prune and the search card rewrite already under way finish before the process
-    // exits, and before the pools end, even if closing the server fails; the pools end even if
-    // draining fails.
-    // The metrics' final flush comes last, after every part that counts, and is awaited:
-    // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
+    // After the rewrite, so each vector is made from the card's text under this release's rules.
+    const searchVectorsWritten = searchCardsRewritten.then(() => vectors.start());
+    // Catalog writes, a prune, the search card rewrite and the vector run already under way
+    // finish before the process exits, and before the pools end, even if closing the server fails;
+    // the pools end even if draining fails. `/metrics` closes last, after every part that counts,
+    // so a scrape meanwhile still reads them.
     const closeOnce = async () => {
       signer.close();
-      // The search card rewrite stops at once, so it holds no connection through the drain.
+      // The search card rewrite and the vectors' loop stop at once, so they hold no connection
+      // through the drain. A pass that hasn't started yet then reads nothing.
       const rewriteClosed = searchCards.close();
+      const vectorsClosed = vectors.close();
       try {
         try {
           await started.close();
         } finally {
           try {
-            await Promise.all([cataloger.drain(), pruner.close(), rewriteClosed]);
+            await Promise.all([cataloger.drain(), pruner.close(), rewriteClosed, vectorsClosed]);
           } finally {
             await endPools();
           }
         }
       } finally {
-        // Its last reading goes out with the final flush; no read starts after it.
         rpcStall?.stop();
-        await metrics.close();
+        await closeMetrics(metricsServer);
       }
     };
     let closing: Promise<void> | undefined;
     return {
       ...started,
+      /** `/metrics`'s port when `METRICS_PORT` is set: for tests, which pass 0. */
+      ...(metricsServer && { metricsPort: (metricsServer.address() as AddressInfo).port }),
       /** The graph's stores and their pools: for tests. */
       stores,
       pools,
@@ -637,6 +663,8 @@ export async function main(
       reconciled: deps.reconciliation?.reconciled ?? Promise.resolve(),
       /** Settles once the search card rewrite at start has ended: for tests. */
       searchCardsRewritten,
+      /** Settles once the vectors' first run has ended: for tests. */
+      searchVectorsWritten,
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
       close: () => (closing ??= closeOnce()),
@@ -645,14 +673,20 @@ export async function main(
     // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
     // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
     logger.error("startup_failed", { error });
-    // No final metrics flush: the writer stops with its open window unwritten, so a start that
-    // failed adds no point after the error. It wrote no seed either (above), so a crash loop
-    // shows as missing data. Eager-first lines are out already.
-    emf?.stop();
+    // It wrote no liveness series (above), so a crash loop shows as missing data.
+    await closeMetrics(metricsServer);
     rpcStall?.stop();
     await endPools();
     throw error;
   }
+}
+
+/** Closes `/metrics`, the scraper's kept-alive connection included, which would hold `close()`. */
+async function closeMetrics(server: Server | undefined): Promise<void> {
+  if (!server?.listening) return;
+  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+  server.closeAllConnections();
+  await closed;
 }
 
 /** Logs an idle connection's error with its message only; the URL never reaches the log. */

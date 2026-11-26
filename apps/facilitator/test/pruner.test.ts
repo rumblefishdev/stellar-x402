@@ -121,6 +121,29 @@ describe("pruner", () => {
     expect(await nonces()).toEqual(["2", "3"]);
   });
 
+  it("keeps a success settlement's listing through a prune run (0154)", async () => {
+    const { settlements } = db.stores();
+    const paid = refusedAt("1", NOW - 365 * DAY);
+    await settlements.claim({
+      ...paid,
+      listing: { method: "GET", resourceUrl: "https://seller.example.com/data" },
+    });
+    await settlements.transition(paid.key, "claimed", { state: "success", updatedAt: NOW });
+    await settlements.refuse(refusedAt("2", NOW - DAY), { errorReason: FEE }, [], NOW);
+    await createPruner(deps({ settlements })).runOnce();
+    const { rows } = await db.pool.query(
+      "SELECT nonce, state, listing_method, listing_url FROM settlements",
+    );
+    expect(rows).toEqual([
+      {
+        nonce: "1",
+        state: "success",
+        listing_method: "GET",
+        listing_url: "https://seller.example.com/data",
+      },
+    ]);
+  });
+
   it("keeps a refused settlement past its hour until its expiration ledger has closed (0086, #205)", async () => {
     // Signed for thousands of ledgers and refused for its fee: it can pass every check later.
     const { settlements } = db.stores();

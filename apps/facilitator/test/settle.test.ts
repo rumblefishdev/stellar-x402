@@ -310,6 +310,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     }),
     onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
     onSuccess: vi.fn<SettlementHooks["onSuccess"]>(async () => {}),
+    listingOf: vi.fn<SettlementHooks["listingOf"]>(() => undefined),
   };
   const lines: string[] = [];
   const metrics = memoryMetrics();
@@ -1614,7 +1615,7 @@ describe("createSettler", () => {
   });
 
   it("counts every answer by its outcome: result success or error (0027)", async () => {
-    // `result` is the outcome's only dimension set: without it the EMF line has no valid set.
+    // `result` is the outcome's only dimension: without it the series is written as `other`.
     const { settle, metrics } = setup();
     await settle(payload(), requirements);
     await settle(payload(), requirements);
@@ -3237,6 +3238,7 @@ describe("an account's quota and fee budget (0107)", () => {
             return opts.onFinal ? opts.onFinal(run) : run();
           },
           onSuccess: async () => {},
+          listingOf: () => undefined,
         },
         now: () => clock.now,
         ...(opts.check && { check: opts.check }),
@@ -3650,6 +3652,111 @@ describe("a check refusal (0086)", () => {
     });
     const { settle } = setup(landing(), { check, store });
     await expect(settle(payload(), requirements)).rejects.toThrow("store down");
+  });
+});
+
+describe("settle, the listing of a payment (0154)", () => {
+  const listing = { method: "GET", resourceUrl: "https://seller.example.com/data" };
+  /** Each settlement's listing columns, in key order. */
+  const listings = async () =>
+    (
+      await db.pool.query<Record<string, unknown>>(
+        "SELECT key, listing_method, listing_url FROM settlements ORDER BY key",
+      )
+    ).rows;
+  /** `store.claim`, recorded in `order` and still claiming. */
+  const recordClaims = (store: SettlementStore, order: string[]) => {
+    const claim = store.claim.bind(store);
+    return vi.spyOn(store, "claim").mockImplementation(async (settlement) => {
+      order.push("claim");
+      return claim(settlement);
+    });
+  };
+
+  it("asks listingOf for the payment's listing right before the claim, and claims with it (0154)", async () => {
+    const { settle, store, hooks, order } = setup();
+    hooks.listingOf.mockImplementation(() => {
+      order.push("listingOf");
+      return listing;
+    });
+    const claims = recordClaims(store, order);
+    const p = payload();
+    const settled = await settle(p, requirements);
+    expect(settled.response).toEqual({ success: true, transaction: HASH, network, payer });
+    expect(order).toEqual(["listingOf", "claim", "beforeSubmit", "submit"]);
+    expect(hooks.listingOf).toHaveBeenCalledTimes(1);
+    expect(hooks.listingOf).toHaveBeenCalledWith(p, requirements);
+    expect(claims.mock.calls[0]![0].listing).toEqual(listing);
+    expect(await listings()).toEqual([
+      { key, listing_method: "GET", listing_url: "https://seller.example.com/data" },
+    ]);
+  });
+
+  it("claims with no listing when listingOf names none (0154)", async () => {
+    const { settle, store, order } = setup();
+    const claims = recordClaims(store, order);
+    expect((await settle(payload(), requirements)).response.success).toBe(true);
+    expect(claims.mock.calls[0]![0].listing).toBeUndefined();
+    expect(await listings()).toEqual([{ key, listing_method: null, listing_url: null }]);
+  });
+
+  it("settles as without the hook when listingOf throws: no listing claimed, settlement_hook_failed logged and counted (0154)", async () => {
+    const { settle, store, submit, hooks, order, lines, metrics } = setup();
+    hooks.listingOf.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    const claims = recordClaims(store, order);
+    const settled = await settle(payload(), requirements);
+    expect(settled.response).toEqual({ success: true, transaction: HASH, network, payer });
+    expect(await store.get(key)).toMatchObject({ state: "success", hashes: [HASH] });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(claims).toHaveBeenCalledTimes(1);
+    expect(claims.mock.calls[0]![0].listing).toBeUndefined();
+    expect(await listings()).toEqual([{ key, listing_method: null, listing_url: null }]);
+    expect(metrics.value("settlement_hook_failures_total", { hook: "listingOf" })).toBe(1);
+    expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+      expect.objectContaining({ event: "settlement_hook_failed", hook: "listingOf" }),
+    );
+  });
+
+  it("asks listingOf once per settle call, every claim attempt carrying its listing (0154)", async () => {
+    // The first payment holds its payer and asset's slot until `land()`: the second's claim is
+    // answered busy and tried again.
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    let signed!: () => void;
+    const isSigned = new Promise<void>((resolve) => (signed = resolve));
+    let calls = 0;
+    const { settle, store, hooks, order } = setup(async (opts) => {
+      if (calls++ > 0) return landing("success", "b".repeat(64))(opts);
+      await opts.onSigned?.(HASH, BOUNDS);
+      signed();
+      await landed;
+      return result();
+    });
+    hooks.listingOf.mockReturnValue(listing);
+    const claims = recordClaims(store, order);
+    const first = settle(payload(), requirements);
+    await isSigned;
+    const waiting = settle(payload([authEntry(payer, "8")]), requirements);
+    await delay(50);
+    land();
+    expect((await first).response.success).toBe(true);
+    expect((await waiting).response.success).toBe(true);
+    const secondKey = `${network}:${payer}:8`;
+    expect(claims.mock.calls.filter(([s]) => s.key === secondKey).length).toBeGreaterThan(1);
+    // One call per `/settle`: a claim tried again carries the same payment's listing.
+    expect(hooks.listingOf).toHaveBeenCalledTimes(2);
+    expect(claims.mock.calls.map(([s]) => s.listing)).toEqual(claims.mock.calls.map(() => listing));
+  });
+
+  it("asks listingOf nothing for a payment the checks refuse, as nothing is claimed (0154)", async () => {
+    const check: Check = async () => ({
+      response: { isValid: false, invalidReason: "invalid_exact_stellar_payload", payer },
+    });
+    const { settle, hooks } = setup(landing(), { check });
+    expect((await settle(payload(), requirements)).response.success).toBe(false);
+    expect(hooks.listingOf).not.toHaveBeenCalled();
   });
 });
 

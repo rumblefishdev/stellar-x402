@@ -13,7 +13,8 @@
  * 5. The seller raises it again but answers the check with a redirect (0085): the payment settles,
  *    the attempt's reason is `redirect`, the redirect is not followed and the listing keeps step 4.
  *
- * Env: DATABASE_URL (default: the compose database, schema `catalog_smoke`, recreated).
+ * Env: DATABASE_URL (default, also when blank: the compose database, schema `catalog_smoke`,
+ * recreated).
  * Fresh friendbot-funded keys; the facilitator pays the fees.
  *
  *   cd apps/facilitator && npx tsx test/live/catalog-smoke.ts
@@ -39,7 +40,9 @@ import pg from "pg";
 import { Agent, fetch } from "undici";
 import { migrate } from "../../src/adapters/postgres-schema.js";
 import { main } from "../../src/main.js";
+import { databaseUrlOrCompose } from "../compose-database.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
+import { startSearchModel } from "../search-model.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -49,7 +52,7 @@ const http = new Agent({ headersTimeout: 120_000 });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const SCHEMA = "catalog_smoke";
-const base = process.env.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:15432/postgres";
+const base = databaseUrlOrCompose();
 const databaseUrl = (() => {
   const url = new URL(base);
   url.searchParams.set("options", `-c search_path=${SCHEMA}`);
@@ -94,9 +97,11 @@ if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.statu
 
 // The fake OpenBao holds this run's key: a testnet account funded for the run.
 const openbao = await fakeOpenBao(facilitator);
+const searchModel = await startSearchModel();
 const facilitatorServer = await main(
   {
     ...signerEnv(facilitator.publicKey(), openbao.socketPath),
+    SEARCH_MODEL_URL: searchModel.url,
     DATABASE_URL: databaseUrl,
     CLIENT_IP: "socket",
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
@@ -315,6 +320,7 @@ try {
   sellerServer.close();
   await facilitatorServer.close();
   openbao.close();
+  await searchModel.stop();
   await db.end();
   await admin.end();
 }

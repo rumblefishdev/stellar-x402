@@ -13,6 +13,8 @@ export type ErrorCode =
   | "over_price_limit"
   | "over_budget"
   | "insufficient_funds"
+  | "payer_trustline_missing"
+  | "payto_trustline_missing"
   | "payment_failed"
   | "payment_rejected"
   | "payment_unknown";

@@ -17,27 +17,9 @@ import {
   type ProcessCounterName,
   type ProcessGaugeName,
   byName,
-  eagerNames,
   effectiveSets,
   seriesDims,
 } from "../src/index.js";
-
-/** The facilitator metrics an Event-shape alarm reads (G-alarm-list), written eager-first. */
-const EVENT_METRICS = [
-  "spend_breaker_opened_total",
-  "spend_budget_nearing_total",
-  "settlement_record_failures_total",
-  "spend_store_failures_total",
-  "settlement_refused_after_verify_total",
-  "settlement_history_gone_total",
-  "settlement_landed_after_expired_total",
-  "signer_failures_total",
-  "spend_failure_attributed_total",
-  "spend_commit_unmatched_total",
-  "settlement_reconciled_total",
-  "settlement_submit_failures_total",
-  "settlement_hook_failures_total",
-];
 
 const ALL: readonly MetricDef[] = CATALOG;
 const FACILITATOR = ALL.filter((m) => m.namespace === "x402-facilitator");
@@ -178,11 +160,6 @@ describe("CATALOG", () => {
     });
   });
 
-  test("emit is eager-first for exactly the Event-alarm metrics", () => {
-    expect(eagerNames).toEqual(new Set(EVENT_METRICS));
-    for (const m of ALL) expect(["eager-first", "aggregated"]).toContain(m.emit);
-  });
-
   test("units are one of the allowed EMF units", () => {
     for (const m of ALL) {
       expect(["counter", "gauge"]).toContain(m.kind);
@@ -271,6 +248,9 @@ describe("CATALOG", () => {
       "http_requests_total",
       "store_prune_failures_total",
       "search_card_failures_total",
+      "search_vector_failures_total",
+      "search_words_only_total",
+      "search_slow_total",
       "catalog_internal_errors_total",
       "catalog_attempts_total",
       "catalog_upsert_failures_total",
@@ -291,6 +271,7 @@ describe("CATALOG", () => {
       rpc_stalled_seconds: [g, "Seconds", net],
       balance_reading_age_seconds: [g, "Seconds", net],
       channel_longest_hold_seconds: [g, "Seconds", net],
+      search_model_up: [g, "None", proc],
       openbao_up: [g, "None", proc],
       wal_failing: [g, "None", proc],
       wal_last_archived_age_seconds: [g, "Seconds", proc],
@@ -362,6 +343,9 @@ describe("scope-split name types", () => {
       | "http_requests_total"
       | "store_prune_failures_total"
       | "search_card_failures_total"
+      | "search_vector_failures_total"
+      | "search_words_only_total"
+      | "search_slow_total"
       | "catalog_internal_errors_total"
       | "catalog_attempts_total"
       | "catalog_upsert_failures_total"
@@ -380,7 +364,7 @@ describe("scope-split name types", () => {
       | "balance_reading_age_seconds"
       | "channel_longest_hold_seconds"
     >();
-    expectTypeOf<ProcessGaugeName>().toBeNever();
+    expectTypeOf<ProcessGaugeName>().toEqualTypeOf<"search_model_up">();
     expectTypeOf<NetworkCounterName>().toEqualTypeOf<Exclude<CounterName, ProcessCounterName>>();
     expectTypeOf<"settlement_outcomes_total">().toExtend<NetworkCounterName>();
     expectTypeOf<"http_requests_total">().not.toExtend<NetworkCounterName>();

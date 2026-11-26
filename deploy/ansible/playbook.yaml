@@ -322,6 +322,39 @@
         group: root
         mode: "0644"
 
+    # compose.yaml requires these from .env (ADR 0015, 0048). Once it is copied, any start of x402@
+    # stops at interpolation without them, so a server that has a .env must hold all four first.
+    # A new server has none yet: the runbook writes it after this playbook ("Before the first
+    # deploy").
+    - name: The environment's .env, if any
+      ansible.builtin.stat:
+        path: "/srv/x402/{{ x402_environment }}/.env"
+      register: x402_env_file
+
+    - name: Read the environment's .env
+      ansible.builtin.slurp:
+        src: "/srv/x402/{{ x402_environment }}/.env"
+      register: x402_env_content
+      when: x402_env_file.stat.exists
+
+    # Read the way Compose reads .env: `export ` and leading blanks allowed, and an empty value
+    # (`NAME=`, `NAME=""`) counts as missing, since `${NAME:?}` stops on it too.
+    - name: The .env holds every name compose.yaml requires, with a value
+      ansible.builtin.assert:
+        that: (x402_env_content.content | b64decode) is search(x402_env_set | replace('NAME', item))
+        fail_msg: >-
+          /srv/x402/{{ x402_environment }}/.env has no {{ item }} with a value: add it before
+          this playbook copies compose.yaml (runbook, "Before the first deploy").
+        quiet: true
+      vars:
+        x402_env_set: '(?m)^[ \t]*(export[ \t]+)?NAME=[ \t]*(?![''"]{2}[ \t]*$)\S'
+      loop:
+        - FACILITATOR_ADDRESS_TESTNET
+        - CHANNELS_TESTNET
+        - OPENBAO_KEY_TESTNET
+        - OPENBAO_KEY_VERSION_TESTNET
+      when: x402_env_file.stat.exists
+
     # The portal's two beside the facilitator's (0106): its own project and forced command.
     - name: The compose files and the deploy keys' forced commands
       ansible.builtin.copy:

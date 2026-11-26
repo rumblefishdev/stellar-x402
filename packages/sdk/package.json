@@ -1,0 +1,45 @@
+{
+  "name": "@stellar-x402/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Helpers for sellers, buyers and agents paying with x402 on Stellar through this facilitator",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./buyer": {
+      "types": "./dist/buyer/index.d.ts",
+      "default": "./dist/buyer/index.js"
+    },
+    "./seller": {
+      "types": "./dist/seller/index.d.ts",
+      "default": "./dist/seller/index.js"
+    },
+    "./bazaar": {
+      "types": "./dist/bazaar/index.d.ts",
+      "default": "./dist/bazaar/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^16.4.1",
+    "@x402/extensions": "~2.31.0",
+    "zod": "^3.25.76"
+  },
+  "peerDependencies": {
+    "@x402/core": "~2.31.0",
+    "@x402/stellar": "~2.31.0"
+  },
+  "devDependencies": {
+    "@stellar-x402/bazaar": "workspace:*",
+    "@x402/core": "~2.31.0",
+    "@x402/stellar": "~2.31.0"
+  }
+}

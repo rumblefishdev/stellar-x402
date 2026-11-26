@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # The facilitator's image (ADR 0011). Built from the repo root, for the server's platform:
 #   docker build --platform linux/amd64 -f apps/facilitator/Dockerfile .
-# The same image runs the service (`node dist/server.js`) and its migrations (`node dist/migrate.js`).
+# The same image runs the service (`node dist/server.js`), its migrations (`node dist/migrate.js`)
+# and the search model's server (`node /search-model/dist/main.js`, ADR 0014).
 
 # node:22-slim (bookworm), pinned: a new digest is a reviewed change.
 ARG NODE_IMAGE=node:22-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
@@ -15,8 +16,27 @@ RUN corepack enable && corepack install
 RUN pnpm fetch
 COPY . .
 RUN pnpm install --offline --frozen-lockfile --filter @stellar-x402/facilitator... \
-  && pnpm --filter @stellar-x402/facilitator... build \
-  && pnpm --filter @stellar-x402/facilitator deploy --prod /out
+    --filter @stellar-x402/search-model... \
+  && pnpm --filter @stellar-x402/facilitator... --filter @stellar-x402/search-model... build \
+  && pnpm --filter @stellar-x402/facilitator deploy --prod /out \
+  && pnpm --filter @stellar-x402/search-model deploy --prod /out-search-model
+# The model's files at the revision `apps/search-model/src/model.ts` pins, each checked against
+# the SHA-256 it names there, so its container downloads nothing when it starts.
+RUN node apps/search-model/scripts/fetch-model.mjs /out-search-model/model
+# onnxruntime-node ships every platform's runtime (about 308 MB); the image keeps its own Linux
+# one (about 48 MB). TARGETARCH is the image's platform, so a local arm64 build keeps arm64's.
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      amd64) keep=x64 ;; \
+      arm64) keep=arm64 ;; \
+      *) echo "no onnxruntime-node build for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+  && napi=$(find /out-search-model -type d -path '*/onnxruntime-node/bin/napi-v6') \
+  && test -d "$napi/linux/$keep" \
+  && mv "$napi/linux/$keep" /tmp/onnxruntime-keep \
+  && rm -rf "$napi"/* \
+  && mkdir "$napi/linux" \
+  && mv /tmp/onnxruntime-keep "$napi/linux/$keep"
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production
@@ -24,6 +44,12 @@ WORKDIR /app
 # Owned by root and read by `node`, so the process can't change its own code; the compose file
 # also makes the root filesystem read-only.
 COPY --from=build /out ./
+# The search model's server and its files, run as a container of its own from this image.
+COPY --from=build /out-search-model /search-model
+ENV MODEL_DIR=/search-model/model
+# onnxruntime's official builds send usage telemetry to Microsoft from every start; today only
+# the network without a way out and the missing CA bundle stop it.
+ENV ORT_DISABLE_TELEMETRY=1
 USER node
 # The commit this image is built from; `/health` reports it. Last, so the layers above stay cached.
 ARG GIT_COMMIT

@@ -121,4 +121,6 @@ From Oskar's review of #93:
 - [ ] Each network's spend budgets, the global one included, count only its own fee account's fees
 - [ ] `deploy/` gives each network its own secret files, OpenBao socket mount and AppRole files
 - [ ] The "until 0126" notes in ADR 0004, ADR 0011 and the spine are gone
+- [ ] Once pubnet has its database, the mainnet sellers are seeded into its catalog with
+      `pnpm seed` (0155 decision 6: testnet's catalog holds testnet's listings only)
 - [ ] The open questions above are decided and recorded in ADR 0012 or the spine

@@ -4,7 +4,12 @@ import type { RequestHandler } from "express";
 import { z } from "zod";
 import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
-import type { CatalogSearch, CatalogSearchPosition, CatalogStore } from "../ports/index.js";
+import type {
+  CatalogSearch,
+  CatalogSearchPosition,
+  CatalogStore,
+  Embedder,
+} from "../ports/index.js";
 import {
   CATALOGED_EXTENSIONS,
   CATALOGED_SCHEMES,
@@ -18,10 +23,22 @@ import {
 export const MAX_QUERY_LENGTH = 2_000;
 /**
  * A cursor holds a listing's key, whose URL alone may take 2,048 characters (`LIMITS.urlChars`),
- * with a tool name of 128, an address, a network and the field names: under 3,400 characters in
- * base64url.
+ * with a tool name of 128, an address, a network, the model's name (82 characters for granite at
+ * its pinned revision) and the field names: under 3,400 characters in base64url.
  */
 const MAX_CURSOR_LENGTH = 4_096;
+/**
+ * Seconds a client waits before it pages on with a fused cursor while search runs on words, as
+ * `/settle` and `/verify` ask on their own 503s (app.ts): no measurement of how fast the model
+ * comes back sets it.
+ */
+const SEARCH_MODEL_RETRY_AFTER_S = 5;
+/**
+ * A fused query this slow is logged and counted (`search-slow`): half of the discovery pool's
+ * 2 s statement timeout, so the alarm comes before searches fail with a 500. The exact scan grows
+ * with the catalog (ADR 0014); this is the sign to measure and index it.
+ */
+export const SEARCH_SLOW_MS = 1_000;
 /** The parameters upstream's `search` sends: the list's filters and `limit`, a query, a cursor. */
 const QUERY = LIST_QUERY.omit({ offset: true }).extend({
   query: z
@@ -46,13 +63,7 @@ const RANK = z
     return /^0(\.0+)?$/.test(rank) || (value >= 1e-37 && value <= 1e37);
   });
 
-/**
- * What the cursor carries: the last result's rank and key, and the ranking that wrote it. A rank
- * from another ranking has another scale, so its cursor is refused (ADR 0014). PR 2 of 0120 adds
- * the fused ranking and its model.
- */
-const CURSOR = z.object({
-  ranking: z.literal("words"),
+const POSITION = {
   rank: RANK,
   key: z.object({
     network: z.enum([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]),
@@ -60,9 +71,25 @@ const CURSOR = z.object({
     method: text,
     resourceUrl: z.string().regex(/^\P{Cc}*$/u),
   }),
-});
+};
 
-function readCursor(cursor: string): CatalogSearchPosition | undefined {
+/**
+ * What the cursor carries: the last result's rank and key, and the ranking that wrote it, fused
+ * with the model whose vectors it read, or words alone. A rank from another ranking or model has
+ * another scale, so the route refuses its cursor (ADR 0014).
+ */
+const CURSOR = z.discriminatedUnion("ranking", [
+  z.object({ ranking: z.literal("words"), ...POSITION }),
+  z.object({ ranking: z.literal("fused"), model: text, ...POSITION }),
+]);
+
+/** How the page a cursor came from was ranked: fused, with its model, or words alone. */
+interface Ranking {
+  ranking: "words" | "fused";
+  model?: string;
+}
+
+function readCursor(cursor: string): (CatalogSearchPosition & Ranking) | undefined {
   let decoded: unknown;
   try {
     decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
@@ -72,20 +99,21 @@ function readCursor(cursor: string): CatalogSearchPosition | undefined {
   }
   const parsed = CURSOR.safeParse(decoded);
   if (!parsed.success) return undefined;
-  return { rank: parsed.data.rank, key: parsed.data.key };
+  return parsed.data;
 }
 
-function writeCursor({ rank, key }: CatalogSearchPosition): string {
-  return Buffer.from(JSON.stringify({ ranking: "words", rank, key })).toString("base64url");
+function writeCursor({ rank, key }: CatalogSearchPosition, ranked: Ranking): string {
+  return Buffer.from(JSON.stringify({ ...ranked, rank, key })).toString("base64url");
 }
 
 /**
  * What the route does with a request. `empty` is a well-formed query nothing in the catalog can
  * match: a scheme we never settle or an extension we never catalog. `search.limit` is one more
- * than the page, so the route knows whether a next page exists.
+ * than the page, so the route knows whether a next page exists. `cursor` is how the page before
+ * was ranked, when the request sent one.
  */
 export type SearchQuery =
-  | { kind: "query"; search: CatalogSearch; limit: number; ignored: string[] }
+  | { kind: "query"; search: CatalogSearch; limit: number; ignored: string[]; cursor?: Ranking }
   | { kind: "empty"; ignored: string[] }
   | { kind: "invalid"; param: string };
 
@@ -113,18 +141,25 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
   )
     return { kind: "empty", ignored };
   const search: CatalogSearch = { text: query, ...filters, limit: limit + 1 };
-  if (after !== undefined) search.after = after;
-  return { kind: "query", search, limit, ignored };
+  if (after === undefined) return { kind: "query", search, limit, ignored };
+  search.after = { rank: after.rank, key: after.key };
+  const { ranking, model } = after;
+  return { kind: "query", search, limit, ignored, cursor: { ranking, model } };
 }
 
 /**
- * `GET /discovery/search` (0120) with upstream's search types, ranked by words alone: the meaning
- * part comes in the next PR, and until then `partialResults` is `true`, as ADR 0014 answers when
- * matches by meaning were not looked for. A store failure rejects, and the shared error handler
- * answers it with a 500.
+ * `GET /discovery/search` (0120) with upstream's search types (ADR 0014). It asks the search model
+ * for the query's vector and ranks by meaning and words fused; every match is ranked, so
+ * `partialResults` is `false` unless a listing that passes the filters has no vector yet. When the model fails or doesn't answer within its timeout, it ranks
+ * by words alone, logged and counted, and `partialResults` is `true`:
+ * matches by meaning were not looked for. A fused cursor while it ranks by words gets a 503 to
+ * retry; a cursor of another ranking or model, a 400. A fused query slower than `SEARCH_SLOW_MS`
+ * is logged and counted. A store failure rejects, and the shared error handler answers it with a
+ * 500.
  */
 export function discoverySearch(
   catalog: CatalogStore,
+  embedder: Embedder,
   logger: Logger,
   metrics: ProcessMetrics,
 ): RequestHandler {
@@ -151,16 +186,52 @@ export function discoverySearch(
       res.json(body);
       return;
     }
-    const hits = await catalog.search(parsed.search);
+    let meaning: number[] | undefined;
+    try {
+      meaning = await embedder.embed(parsed.search.text, "query");
+    } catch (error) {
+      logger.warn("search_words_only", { error });
+      metrics.increment("search_words_only_total");
+    }
+    const ranked: Ranking =
+      meaning === undefined
+        ? { ranking: "words" }
+        : { ranking: "fused", model: catalog.searchModel };
+    if (parsed.cursor?.ranking === "fused" && ranked.ranking === "words") {
+      // The server fell back, not the client: the same cursor goes on once the model answers.
+      res.setHeader("Retry-After", `${SEARCH_MODEL_RETRY_AFTER_S}`);
+      res.status(503).json({ error: "search_model_unavailable", param: "cursor" });
+      return;
+    }
+    if (
+      parsed.cursor !== undefined &&
+      (parsed.cursor.ranking !== ranked.ranking || parsed.cursor.model !== ranked.model)
+    ) {
+      // Its rank has another scale than this ranking's, for good (a words cursor from before the
+      // model, or another model's): the client starts again.
+      res.status(400).json({ error: "bad_request", param: "cursor" });
+      return;
+    }
+    const startedAt = performance.now();
+    const hits = await catalog.search(
+      meaning === undefined ? parsed.search : { ...parsed.search, meaning },
+    );
+    const ms = Math.round(performance.now() - startedAt);
+    if (meaning !== undefined && ms > SEARCH_SLOW_MS) {
+      logger.warn("search_slow", { ms, hits: hits.length });
+      metrics.increment("search_slow_total");
+    }
     const page = hits.slice(0, parsed.limit);
     const more = hits.length > parsed.limit;
     const body: SearchDiscoveryResourcesResponse = {
       x402Version: 2,
       resources: page.map((hit) => hit.resource),
-      partialResults: true,
+      // Partial too while a listing that passes the filters has no vector yet: search by meaning
+      // can't find it (ADR 0014).
+      partialResults: meaning === undefined || (await catalog.waitingForVector(parsed.search)),
       pagination: {
         limit: page.length,
-        cursor: more ? writeCursor(page.at(-1)!) : null,
+        cursor: more ? writeCursor(page.at(-1)!, ranked) : null,
       },
     };
     res.json(body);

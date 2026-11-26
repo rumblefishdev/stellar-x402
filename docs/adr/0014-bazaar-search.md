@@ -1,9 +1,12 @@
 # ADR 0014: Search the Bazaar by words and by meaning in PostgreSQL, fused by rank
 
 - Status: accepted
-- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks), 2026-11-23
-  (task 0154: the quality score) and 2026-11-24 (task 0120: each listing's search card in a table
-  of its own)
+- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks, reversed
+  2026-11-26: each network's catalog holds only its own listings), 2026-11-23 (task 0154: the
+  quality score), 2026-11-24 (task 0120: each listing's search card in a table of its own; the
+  vector on the card, the model's own server in the facilitator's image, when vectors are written,
+  the timeout, and no words-only window for a model change) and 2026-11-25 (task 0154: a payment's
+  listing on its settlement's row)
 
 ## Context
 
@@ -25,11 +28,12 @@ opaque cursor because the ranked set can shift.
 What this has to fit:
 
 - All facilitator state is in PostgreSQL, a database per network
-  ([ADR 0012](0012-facilitator-state-store.md)); the catalog is one table for both networks
-  (task 0155), and which database holds it is still open (task 0126). The M1 evidence already told SCF that Tranche #2's search is planned on PostgreSQL.
+  ([ADR 0012](0012-facilitator-state-store.md)); each network's catalog holds
+  only that network's listings (task 0155), and how one process serves both is still open (task
+  0126). The M1 evidence already told SCF that Tranche #2's search is planned on PostgreSQL.
 - The server is shared: our containers were limited to 1.875 GiB together while production serves
   testnet, and the facilitator to 512 MiB and one CPU ([ADR 0011](0011-facilitator-hosting.md)).
-  The server itself has 125 GiB, so ADR 0011 now adds 512 MiB for the model.
+  The server itself has 125 GiB, so ADR 0011 now adds 768 MiB for the model.
 - The catalog is small. Testnet holds one listing; the largest public catalog, CDP's, held 34,782
   on 2026-11-18, 1,637 of them on Stellar pubnet from 21 hosts, all with English descriptions.
 
@@ -51,7 +55,7 @@ The measurements are in
   One TypeScript function, `searchFields` in `@stellar-x402/bazaar`, builds the fields from the
   stored listing, next to the validator that knows its shape. They go into the listing's search
   card: a row of its own table, `catalog_search`, one per catalog listing, which the words part,
-  the meaning part and the text's hash all read, so they can't disagree about what a listing says.
+  the meaning part and the vector's write all read, so they can't disagree about what a listing says.
   The catalog's write stores the listing and its card in one statement, so search finds what the
   catalog holds from the moment it holds it. Each release, as it starts, rewrites every card once
   in the background with its own rules, so a change to the rules, the listings stored before cards
@@ -75,12 +79,18 @@ The measurements are in
   - the query's words are OR-ed, so a long sentence still matches, and ranked by `ts_rank_cd`.
 - **Meaning.**
   - The model is `ibm-granite/granite-embedding-30m-english`: 30M parameters, 384 dimensions,
-    Apache-2.0, CLS pooling, no query prefix, inputs cut at 512 tokens. Listings and queries are
-    embedded the same way and the vectors normalized. The meaning part reads the fields joined,
+    Apache-2.0, CLS pooling, no query prefix. A listing is cut at 512 tokens, a query at 256
+    (about 1,200 characters), so a long query costs about half as much; the queries measured (at
+    most 31 tokens) are never cut. Listings and queries are otherwise embedded the same way and
+    the vectors normalized. The meaning part reads the fields joined,
     cut at 2,000 characters.
-  - Vectors, from `pgvector`, each with the model that made it and the hash of the text it was
-    made from; search reads only vectors of the current model. Where they are stored is task
-    0120's meaning part to decide.
+  - Vectors, from `pgvector`, on the listing's search card: `embedding`, one vector per listing,
+    with `embedded_model`, the model that made it, and `embedded_hash`, the hash of the text it
+    was made from. The database keeps `text_hash` of the card's current text itself, whatever
+    writes it, and `model`, the model of a vector of that text, empty while the two hashes differ:
+    every reader reads `model` alone, no writer has to clear an old vector (the release before this
+    one included), and `model` can't be written. Search reads only vectors whose `model` is the
+    current model.
   - Search compares the query's vector with every listing's that passes the filters (an exact
     scan, no index).
   - A listing whose cosine similarity to the query is below 0.60 is not a match, so a query
@@ -95,17 +105,28 @@ The measurements are in
   `public` schema, so the tests' per-file schemas all see the type.
 - **Where the model runs.**
   - In a container of its own, with its own memory limit, reached by the facilitator over the
-    environment's internal network. The model file is in the image, pinned by its revision, so
-    nothing is downloaded when it starts.
-  - It holds no database password. The facilitator reads listings whose vector is missing or
-    stale (another model, another text hash), asks the container for each vector without holding
-    a lock, and writes it only `WHERE` the text hash is still the one it embedded.
+    environment's internal network. It runs from the facilitator's image with a command of its
+    own, as the migrations do, so one digest deploys both. The image's build fetches the model's
+    files at the pinned revision, so nothing is downloaded when it starts.
+  - The facilitator starts the model's container but never waits for it: a model that can't start
+    leaves search on words alone, and `/settle` up.
+  - The server is our own Node process on `onnxruntime-node` 1.31.1, with the model's own
+    tokenizer read by `@huggingface/tokenizers`: no LGPL dependency
+    (`docs/scf/milestone-1-license-audit.md`).
+  - It holds no database password. One loop in the facilitator writes the vectors: a run at
+    the start, then one every 30 s. A run asks the container's health once, then embeds every card
+    without a vector of its current text, so a listing the catalog writes gets its vector within
+    30 s, and the catalog's write knows nothing of vectors. A vector of an older text no longer
+    counts (the hashes above), so the next run embeds the card again. The loop asks the
+    container for each vector without holding a lock, and writes it only `WHERE` the card's fields
+    are still the ones it embedded, so a vector never lands on a newer text.
   - The facilitator sends the container one listing at a time, so a backlog never takes the CPU
     that queries need.
-  - A listing the container fails on is tried again on the next pass. Failures are logged with
-    their cause and counted in a metric, so monitoring can alert on a listing that keeps failing.
-  - The runtime is ONNX Runtime; 0120 picks the library, with no LGPL dependency
-    (`docs/scf/milestone-1-license-audit.md`).
+  - A container that is down ends the run, and the next tick resumes: a listing written meanwhile
+    gets its vector within 30 s of the container's return. A listing the container fails on while
+    it answers failed on its own text: it is logged with the cause, counted in a metric that
+    monitoring alerts on, and not tried again until its text changes or the facilitator restarts.
+    The same health check, every 30 s at least, is `search_model_up`.
 - **Fusion.** Weighted RRF over every match, k = 20: a listing scores
   4 / (20 + its rank by meaning) + 1 / (20 + its rank by words), with no words term for a match
   that holds no query word. Ties go by the listing's key. Nothing is cut: on the 0134 set,
@@ -116,12 +137,19 @@ The measurements are in
   evaluation set, which only scores the ranking, so its nDCG@10 is not fitted to it.
 - **When a listing has no vector yet.** A new listing joins search only once its vector is stored,
   so a search never mixes listings that were scored two ways. `/discovery/resources` lists it at
-  once. A listing whose text changes keeps its old vector until the new one is written.
+  once. A listing whose text changes leaves search by meaning until its new vector is written,
+  within 30 s of the write, by the loop's next run. While a listing that passes the filters waits
+  for its vector, the answer says `partialResults: true`, so a client knows search by meaning may
+  have missed it.
 - **When the model can't be used.** The facilitator ranks by words alone, in the same response
-  shape, when the container doesn't answer within a timeout (0120 sets it from a measurement on
-  the server) and while a new model's vectors are being written for the network. Every listing is
-  then scored one way, so the answer includes listings with no current vector. Each fallback is
-  logged with its cause and counted in a metric that monitoring can alert on.
+  shape, when the container doesn't answer within 2,000 ms or answers an error. The timeout stays
+  until a measurement on the server sets it. Every listing is then scored one way, so the answer
+  includes listings with no current vector. Each fallback is logged with its cause and counted in
+  a metric that monitoring can alert on.
+- **When the model changes.** The model is named once, in the shared config (`SEARCH_MODEL_ID`),
+  which the model's image and the facilitator both read. The loop embeds every card whose
+  vector is of another model, and meanwhile search reads only the current model's vectors and
+  answers partial. No words-only window: anything more is decided when a change comes.
 - **Quality score.** A listing's score is its fused score times a quality factor q (task 0154), in
   the fused ranking and in words alone:
   - q = (1 + 0.2 × p / (p + 2)) × 0.9 on a tunnel host × 0.9 with an empty description, where p is
@@ -144,28 +172,35 @@ The measurements are in
   - An empty description is a missing one, an empty one or one of spaces only. A short
     description gets no penalty.
   - q is computed when the search runs, from the payments stored at that moment.
-- **How a payment reaches its listing.** A table holds one row per settled payment that names a
-  listing: the settlement's key, the network, `payTo`, method, listing URL, payer and the time the
-  row is written. The settlement's key makes the row unique, since a success can be reported twice, by settle and by
-  reconcile. The cataloger writes the row right after it derives the listing's key from the
-  payment, also when the listing's copy is unchanged. A settlement recorded twice keeps its first
-  row. Rows are kept; the count reads the last 30
-  days. The table starts empty when it ships. A failed write is logged.
+- **How a payment reaches its listing.** The settlement's row already holds the network, `payTo`,
+  payer and paid asset; it gains the listing's method and URL. `/settle` reads them from the
+  payment's `extensions.bazaar` copy, with the same validation and key the catalog uses, and the
+  claim stores them with the record, so no later write can miss them; a payment without a valid
+  copy names no listing. A failure there leaves the record without one, logged and counted, and
+  never changes the settlement (AD-8). The asset counts because a payment's terms come from its
+  caller, not from the listing: a seller can pay itself in a token its listing never offers.
+  Every claim names its listing, so the count reads only `success` settlements, of the last 30
+  days; settlements are kept. Settlements from before the release name no listing, so the count
+  starts empty.
 - **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
   0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
 - **When the ranking is served.** There is no separate curation-only mode. 0135's run decides
   when search is offered on pubnet (task 0120): not before it reaches nDCG@10 ≥ 0.75, as §4
   promises.
-- **Network.** A search reads the one catalog, which holds both networks (task 0155): without a
-  `network` filter it ranks both, as `/discovery/resources` lists both.
+- **Network.** A search reads the catalog of the database it runs on, which holds that network's
+  listings only (task 0155); `network` filters, as on `/discovery/resources`.
 - **Cursor.** Opaque to the client; it carries the last result's score and listing key, and the
-  next page starts after it. Each new listing above it shifts the next page by one, so a result
-  may repeat or be skipped at a page boundary. It also carries how the page was ranked, fused or
-  words alone, and the model: the two scores differ in scale, so a cursor from another ranking or
-  model is refused with `400` and the client starts again.
+  next page starts after it. A listing written between two pages can shift the next one: the
+  fused rank of a listing depends on its position among the others, so a few results (up to 4 in a
+  simulation of the formula) may repeat or be skipped at a page boundary. It also carries how the page was ranked, fused or
+  words alone, and the model: the two scores differ in scale. A fused cursor while search runs on
+  words alone gets `503` with `Retry-After: 5`: the server fell back, and the same cursor goes on
+  once the model answers. A words cursor while the model answers, or one of another model, is
+  refused with `400` for good, and the client starts again.
 - **`partialResults`** keeps the spec's meaning: `true` when matches were left out that no page
   will return. Every match is ranked and the cursor reaches the last one, so it is `false`, except
-  while search answers by words alone: matches by meaning were not looked for, so it is `true`.
+  while search answers by words alone (matches by meaning were not looked for) and while a
+  listing that passes the filters waits for its vector (it may match): then it is `true`.
 
 ## Rationale
 
@@ -193,11 +228,14 @@ The measurements are in
 - **Typos need no trigram index while the model runs.** The meaning part handles them: fused 0.672
   against words-only 0.288 on typo queries. Words-only fallback has no typo handling.
 - **An exact scan is likely enough at this size.** 3,000 vectors scan in 0.18 ms in NumPy on an
-  M4, and the whole public catalog of all networks is about twelve times that. pgvector's scan
-  inside PostgreSQL is not measured yet; 0120 measures it on the server, with the vector stored in
-  line (`SET STORAGE PLAIN`), as pgvector's README suggests for scans.
+  M4, and the whole public catalog of all networks is about twelve times that. In PostgreSQL 18
+  with pgvector, with the vector stored in line (`SET STORAGE PLAIN`), the fused search took 4-14
+  ms over 1,637 cards and 140-411 ms over 40,000 with a quarter matching; with all 40,000 matching
+  and 32 common words it reached the 2 s statement timeout in 4 of 50 runs (random vectors,
+  measured locally on arm64, 2026-11-25). The server's figure follows the first deploy.
 - **A container of its own** keeps the model's memory out of the facilitator's 512 MiB and its
-  CPU off the `/settle` path, and lets search fall back to words when it is down.
+  CPU off the `/settle` path, and lets search fall back to words when it is down. Run from the
+  facilitator's image, it needs no image, build or deploy step of its own.
 - **A listing joins search whole.** A listing ranked by words only, among listings ranked by both,
   would sit too low; holding it back until its vector exists keeps one scoring for all.
 - **Quality is a small correction, not a second ranking.** Adding CDP's payer counts to the fused
@@ -226,12 +264,13 @@ The measurements are in
   on Stellar; the testnet catalog's one listing is on `trycloudflare.com`. `workers.dev` holds 580
   of the 1,292 Stellar listings there (44.9%), so a penalty for shared hosting would lower many
   real listings.
-- **A table, because reading payments per search does not scale.** Deriving each payment's
+- **The key is stored, because deriving it per search does not scale.** Deriving each payment's
   listing key from the stored settlements at search time took 36 ms at 155 payments in 30 days,
-  219 ms at 2,539 (pubnet's 30-day volume across all facilitators) and 2.2 s at 25,000; the table
-  answers in 0.9, 6.5 and 7.8 ms (local PostgreSQL, synthetic payments of 4.3 KB). The table ran
-  with an index on all its columns; it ships with its key only, and an index comes when a
-  measurement of the shipped search query needs it.
+  219 ms at 2,539 (pubnet's 30-day volume across all facilitators) and 2.2 s at 25,000. Counting
+  from the stored listing columns on `settlements`, for a page of 20 listings, took 1.4 ms at
+  2,539 and 15 ms at 25,000 without an index, and 0.7 and 1.6 ms with one (local PostgreSQL 18,
+  synthetic payments of 4.3 KB, whose `payment_requirements` of about 260 bytes stays inline). It
+  ships without an index; one comes when a measurement of the shipped search query needs it.
 - **The numbers above** are in
   [R-quality-measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md).
 - **Curation needs a proof, not a judgement.** A list kept by hand would have the operator vouch
@@ -252,6 +291,8 @@ The measurements are in
   (its floor keeping 98% of relevant listings is 0.443), 0.702 nDCG@10 against granite's 0.725.
   Memory no longer decides: the server has room for its 710 MB. Rejected on quality.
 - **An embedding API.** Puts an outside service on the request path, which §4 rules out. Rejected.
+- **transformers.js for the model's server.** It runs the same ONNX model, but its dependency
+  `sharp` ships libvips under LGPL-3.0, which the licence commitment rules out. Rejected.
 - **The model inside the facilitator.** Its 512 MiB and one CPU serve `/settle`. Rejected.
 - **BM25 or TF-IDF over a token table of our own, as §4 describes.** It may rank words better than
   `ts_rank_cd`, but adds a table and its upkeep; not measured here.
@@ -286,7 +327,9 @@ The measurements are in
 ## Consequences
 
 - Production, CI and local compose switch to the pgvector image pinned as above, and one
-  more container, limited to 512 MiB, which ADR 0011's totals now count.
+  more container, limited to 768 MiB, which ADR 0011's totals now count.
+- A model that never starts, as on a rollback to an image from before this one, leaves search on
+  words alone and fires `search-words-only`; the facilitator and `/settle` start as before.
 - The cards are a table of their own, added with a `CREATE TABLE` that touches no catalog row. A
   catalog column computed by PostgreSQL was the first shape: adding it rewrote the catalog under
   its lock (285–576 ms for 2,500 listings, 5.5 s for 35,000), and so would every later change to
@@ -305,7 +348,7 @@ The measurements are in
 - Paging reaches every match. On the 0134 set a query has a median of 158 matches, 76 among the
   Stellar listings alone, and at most 744.
 - Changing the model means embedding every listing again: about 5 minutes for 34,782 listings at
-  granite's speed on an M4, while search answers by words alone.
+  granite's speed on an M4. How search answers meanwhile is decided when a change comes.
 - The cursor carries the score with q in it. A payment between two pages can move a listing, as a
   new listing can.
 - Changing how a payment's listing key is derived leaves old rows under the old key; the rows can

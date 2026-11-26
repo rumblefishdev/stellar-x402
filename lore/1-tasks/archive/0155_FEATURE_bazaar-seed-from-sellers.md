@@ -57,7 +57,7 @@ but the task as first written could not run and was larger than needed.
 - Deleted or deferred: removal on request (decision 7) and a mark for listings not yet paid
   through us (decision 14).
 - Changed in the code, not asked: `catalog.ledger` and `catalog_attempts.payer` allow no value, a
-  seeded check is paced below the per-host budget, and a seller's file is read only for its own
+  seeded check keeps its own pace instead of the per-host budget (decision 12), and a seller's file is read only for its own
   host.
 
 ## Context
@@ -83,17 +83,17 @@ but the task as first written could not run and was larger than needed.
 | # | What is decided | From | Vs the task | Who does the same (checked) | Code | Test |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | The catalog takes every reachable Stellar seller; a payment through us is one more signal, not the condition | owner, 2026-11-19 | matches | no standard | | |
-| 2 | Listings come only from the seller's own `/.well-known/x402` and its unpaid 402, through the same seller check a settlement triggers; no other catalog is read. The seed keeps its own pace (decision 12) instead of the per-host check budget, since it already asks more slowly |  owner, 2026-11-19 | matches | upstream proposal PR #2646 (`/.well-known/x402`) | | |
+| 2 | Listings come only from the seller's own `/.well-known/x402` and its unpaid 402, through the same seller check a settlement triggers; no other catalog is read. The seed keeps its own pace (decision 12) instead of the per-host check budget |  owner, 2026-11-19 | matches | upstream proposal PR #2646 (`/.well-known/x402`) | | |
 | 3 | Host names come from the list kept outside the repo. The seed reads each host's `robots.txt` (RFC 9309) and skips every URL it disallows for our robot, the seller's file included, named in the report with the reason `robots`; a 4xx means no rules, any other non-200 answer stops the host | owner, 2026-11-20; changed by owner 2026-11-23 | matches: the task honored `robots.txt` | RFC 9309 §2.3.1.3–2.3.1.4 | `apps/facilitator/src/catalog/seed.ts` `readRobots` | `apps/facilitator/test/seed.test.ts` robots tests |
 | 4 | One run now; a periodic refresh is a later decision | owner, 2026-11-19 | matches | no standard | | |
 | 5 | Only free checks: the facilitator never pays for a test call | owner, 2026-11-19 | matches | no standard | | |
-| 6 | One catalog holds both networks' listings, each row with its network; the seed runs once now for mainnet and testnet sellers alike, although the facilitator settles only on testnet | owner, 2026-11-20 | beyond it; settles half of the point ADR 0012 left to 0126 (`docs/adr/0012-facilitator-state-store.md:65-70`): one table for both networks, while which database holds it stays with 0126 | no standard; the bazaar spec leaves storage to the implementation (`specs/extensions/bazaar.md`) | | |
+| 6 | ~~One catalog holds both networks' listings~~ Reversed by the owner 2026-11-26: each network's catalog holds only that network's listings; every listing still carries its network and discovery filters by it. Mainnet sellers are seeded into pubnet's database once it exists (0126). Measured 2026-11-26, one 402 from each of the 35 answering hosts: 32 offer Stellar on mainnet only, 2 on testnet only, 1 on both | owner, 2026-11-20; reversed 2026-11-26 | beyond it; keeps ADR 0012's database per network for the catalog too | no standard; the bazaar spec leaves storage to the implementation (`specs/extensions/bazaar.md`) | | |
 | 7 | No removal mechanism until the first seller asks to be removed | owner, 2026-11-20 | changes it: the task asked for removal on request | no standard | | |
 | 8 | Every request to a seller names our robot: `User-Agent: stellar-bazaar/1 (+<docs URL>)`, so a seller can tell it apart and block it by name; the name has no digits, as RFC 9309 §2.2.1 asks of a product token | owner, 2026-11-20; name changed by owner 2026-11-23 | beyond it | RFC 9309 §2.2.1 product token | | |
 | 9 | Only resource URLs on the host that serves the file are asked; every other entry is skipped and named in the report with its reason (the AC asks for every refused URL) | agent, then owner 2026-11-20 | beyond it | no standard | | |
-| 10 | One request per URL, by the file's method or GET: its 402 is the check's answer for every Stellar account it names. The seller is asked once more only when the 402 declares another method or an MCP tool (measured: 103 of 784 listings in a sample declare another method) | agent, then owner 2026-11-20 | beyond it | upstream: no standard | | |
+| 10 | One request per URL, by the file's method or GET: its 402 is the check's answer for every Stellar account it names. The seller is asked once more only when the 402 declares another method or an MCP tool, once for each Stellar account it names (measured: 1 of 2,639 URLs has several accounts and another method, 2026-11-19; 103 of 784 listings in a sample declare another method) | agent, then owner 2026-11-20 | beyond it | upstream: no standard | | |
 | 11 | The seller's file is read up to 512 KiB, twice the largest measured (219,455 B) | agent | beyond it | no standard | | |
-| 12 | The seed asks each host more slowly than the 30-a-minute check budget, so checks after real payments keep their share; the run report lists every `payTo` seen on more than one host | agent | beyond it | no standard | | |
+| 12 | The seed asks each host once a second, so the largest measured file (581 URLs) takes about 10 minutes; checks after real payments keep their own budget (they peaked at 3 a minute on testnet, 2026-11-03 to 11-25); the run report lists every `payTo` seen on more than one host | agent | beyond it | no standard | | |
 | 13 | The seed is an operator command, `pnpm seed <hosts file>`, like `pnpm keys`; the hosts file is read from the path given and stays outside git | owner, 2026-11-20 | matches | no standard | | |
 | 14 | A seeded listing carries no mark of its own; whether anyone paid through us comes from settlements, in the ranking of task 0154 | owner, 2026-11-20 | matches | the bazaar spec has no such field (`specs/extensions/bazaar.md`) | | |
 | 15 | One failing resource never stops the rest: each URL is asked on its own, a host whose file fails never stops the other hosts, and every failure is a line in the run report with its reason | owner, 2026-11-20 | beyond it | no standard | | |
@@ -101,8 +101,8 @@ but the task as first written could not run and was larger than needed.
 ## Implementation
 
 - Amend ADR 0008: seeded listings and what proves them without our payment. Amend ADR 0012 and
-  ADR 0014: the catalog holds both networks, and discovery filters by network instead of refusing
-  the one it doesn't settle on (`apps/facilitator/src/http/discovery.ts:87-104`).
+  ADR 0014: discovery filters by network instead of refusing the one it doesn't settle on (the
+  catalog holding both networks was reversed 2026-11-26, decision 6) (`apps/facilitator/src/http/discovery.ts:87-104`).
 - Run the seed: for each host, read its `/.well-known/x402`, then send each resource through the
   existing seller check (`apps/facilitator/src/catalog/seller-check.ts`), so a seeded listing
   passes the same gates as one from a settlement.

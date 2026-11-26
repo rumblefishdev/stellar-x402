@@ -8,8 +8,8 @@ the servers write.
 
 The scenarios (E-01…E-23) were written from the README, the tool list and the acceptance criteria
 only, by a reviewer who had not read the code; E-09h, E-14b, E-14c and E-24 came from a second,
-independent review of what the first set left out. E-25 comes from the search tool's acceptance
-criteria (task 0137).
+independent review of what the first set left out. E-14d and E-14e came with task 0092, which also
+changed E-14's code. E-25 comes from the search tool's acceptance criteria (task 0137).
 
 ## Run
 
@@ -25,13 +25,16 @@ It needs `.env.e2e-testnet` at the repo root (git-ignored), or the file named by
 | `E2E_BUYER_SECRET`  | its secret key; only ever passed to the server in its env        |
 | `E2E_SELLER_PUBLIC` | testnet account with a USDC trustline that receives the payments |
 
-It also needs a PostgreSQL for its facilitator: `TEST_DATABASE_URL`, else the local one from
-`compose.yaml` (`docker compose up -d`). The run works in a schema of its own and drops it at the end.
+It also needs a PostgreSQL with pgvector for its facilitator: `TEST_DATABASE_URL`, else the local one
+from `compose.yaml` (`docker compose up -d`). The run works in a schema of its own and drops it at the end.
+It starts the search model beside the facilitator; the first run downloads the model's files, 121 MB,
+into `node_modules/.cache/search-model`.
 
 The run checks balances on Horizon, so these accounts must not be used by another run at the same
 time. Testnet USDC comes from Circle's faucet; friendbot gives only XLM. The run also creates two
-fresh accounts with friendbot for `insufficient_funds`: one without a USDC trustline, one with a
-trustline and no USDC.
+fresh accounts with friendbot: one without a USDC trustline, for `payer_trustline_missing` and, as
+a seller's `payTo`, `payto_trustline_missing`; one with a trustline and no USDC, for
+`insufficient_funds`.
 
 ## Scenarios
 

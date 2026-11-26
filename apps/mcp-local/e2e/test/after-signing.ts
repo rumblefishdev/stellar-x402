@@ -65,7 +65,7 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
     await fake.close();
   });
 
-  it("E-14 an unfunded payer is insufficient_funds, twice, with the cause only in the log", async () => {
+  it("E-14 a payer without the USDC trustline is payer_trustline_missing, twice, the account and the asset named", async () => {
     const xlmBefore = await xlmBalance(unfunded.publicKey());
     const server = await startServer(
       paying({
@@ -79,8 +79,17 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
     row(
       "E-14",
       "both calls (the second is not over_budget: the amount came back)",
-      ["insufficient_funds", "insufficient_funds"],
+      ["payer_trustline_missing", "payer_trustline_missing"],
       [code(first), code(second)],
+    );
+    row(
+      "E-14",
+      "the tool text names the payer's account and the asset, in both calls",
+      [true, true, true, true],
+      [unfunded.publicKey(), terms.accepts[0]!.asset].flatMap((name) => [
+        first.text.includes(name),
+        second.text.includes(name),
+      ]),
     );
     // A missing trustline fails in the asset contract (Error(Contract, #13), measured on testnet).
     row(
@@ -107,6 +116,52 @@ describe("call_paid_http after signing (fake seller, no money moves)", () => {
       ["insufficient_funds", true, false],
       [code(answer), server.stderr().includes("#10"), answer.text.includes("#10")],
     );
+  });
+
+  /** A seller whose `payTo` can't be paid in USDC: refused before anything is sent. */
+  async function payToRefused(id: string, payTo: string) {
+    const fake = await startFakeSeller(terms, {
+      "/no-trustline": { unpaid: (res, t) => answer402(withOffers(t, { payTo }))(res) },
+    });
+    const dir = freshDir();
+    const server = await startServer(paying({ STELLAR_X402_STATE_DIR: dir }));
+    const answer = await server.call("call_paid_http", httpArgs(`${fake.url}/no-trustline`));
+    await server.close();
+    row(
+      id,
+      "refused, nothing sent, the amount given back",
+      ["payto_trustline_missing", 0, "0"],
+      [code(answer), paidAt(fake), counted(dir)],
+    );
+    row(
+      id,
+      "the tool text names the seller's account and the asset, and not the payer's",
+      [true, true, false],
+      [
+        answer.text.includes(payTo),
+        answer.text.includes(terms.accepts[0]!.asset),
+        answer.text.includes(keys.buyerPublic),
+      ],
+    );
+    // The seller's missing trustline is the asset contract's #13 too, as the payer's in E-14.
+    row(
+      id,
+      "cause in the log, not in the tool text",
+      [true, false],
+      [server.stderr().includes("Contract"), answer.text.includes("Contract")],
+    );
+    await fake.close();
+  }
+
+  it("E-14d a seller whose payTo has no USDC trustline is payto_trustline_missing, nothing sent", async () => {
+    // The seller's side fails in the asset contract only once the payer's passed: the buyer here
+    // holds the trustline and the funds, and `unfunded` exists without a trustline.
+    await payToRefused("E-14d", unfunded.publicKey());
+  });
+
+  it("E-14e a seller whose payTo does not exist is payto_trustline_missing, nothing sent", async () => {
+    // Never funded, so the account doesn't exist: the asset contract finds no trustline for it.
+    await payToRefused("E-14e", Keypair.random().publicKey());
   });
 
   it("E-14c a seller that does not pay the network fees is refused before signing", async () => {

@@ -312,6 +312,56 @@ history:
     status: active
     who: karolkow
     note: "From 0029, closed: 0026 turns on the upstream alarm group with the next production deploy, and reruns the conformance gate after the testnet reset of 2026-12-16 (two new criteria)."
+  - date: "2026-11-25"
+    status: active
+    who: okarcz
+    note: >
+      OpenBao's snapshot job set up on the server (runbook, OpenBao snapshots, setup steps 2-5).
+      Borg 1.2.8 on the server; step 3 made the repokey-blake2 repository and wrote
+      borg_passphrase and borg_key_export to the backup secret (version d62ee577, read back the
+      same); step 4 made the x402-snapshot policy and AppRole from a root token generated from
+      the recovery key, then revoked it. The first run saved openbao-2026-11-25T10:34:43Z (32281
+      bytes), snapshot_age_seconds dropped from 1e9 to 44 at 10:35 UTC, and the timer is started
+      (next run 2026-11-26 03:21 UTC). The snapshots flag stays off until Stan's switch to 0139's
+      rules (#242), at his request: today the flag also makes the CloudWatch alarm #242 removes.
+      Step 3's credential came out 0644 (systemd-creds follows the umask) and was set to 0600 by
+      hand; no runbook change (okarcz), since every creds directory is root 0700 (playbook), so
+      the file's mode exposes nothing.
+  - date: "2026-11-25"
+    status: active
+    who: okarcz
+    note: "Criterion on the durable stores and the runbook's deploy and rollback steps ticked, with its evidence."
+  - date: "2026-11-25"
+    status: active
+    who: okarcz
+    note: >
+      OpenBao's restore drill passed, run by okarcz in Docker on okarcz's machine from the new runbook
+      section (OpenBao snapshots, The restore drill), using only the backup secret (version
+      d62ee577) and the Storage Box. The laptop stands in for ADR 0013's throwaway machine
+      (okarcz): the restored OpenBao and Borg ran with no network, and the only connection out
+      was rsync from the read-only account u595862-sub3. The copy of the repository with its
+      own key removed refused, then opened with the secret's borg_key_export and passphrase
+      (Borg 1.2.8); openbao-2026-11-25T10:34:43Z gave the 32281-byte snapshot the server logged.
+      A fresh OpenBao 2.7.2 with the secret's seal key (ID and SHA-256 checked, no previous key,
+      seal stanza and version equal to the secret's) took the restore without -force and
+      unsealed by itself; the secret's recovery key generated a root token, x402-testnet's
+      AppRole logged in, and stellar-testnet's Transit key is GAVE5V5I...KKRP, the fee account
+      in production.json and its only signer on Horizon. CloudTrail's GetSecretValue on the
+      secret over 90 days: Stan's setup reads of 2026-11-02/03, okarcz's of 2026-11-05 and
+      today's setup and drill, none unknown. Two runbook fixes from the run: config.hcl also
+      needs chmod 0444 (step 1's umask made it 0600, and OpenBao exited on permission denied),
+      and the removal uses shred -f for the 0444 files. Next drill: quarterly, or after a seal
+      key rotation, Borg passphrase change or OpenBao upgrade.
+  - date: "2026-11-26"
+    status: active
+    who: okarcz
+    note: >
+      The snapshots alarm group turned on by pull request, after Stan's switch to 0139's rules:
+      "snapshots": true in production.json and make rules, which adds x402-snapshot-age to the
+      monitoring VM's rule file; no AWS deploy, since the group makes no CloudWatch alarm now.
+      monitoring.md gets the snapshot-age section, and the runbook's turn-on step follows the
+      rules. After the merge Stan puts the rules on the VM, okarcz fires it once, and Stan
+      records it in monitoring.md.
 ---
 
 # Public testnet deployment
@@ -623,8 +673,8 @@ CloudWatch change, as backlog task 0118.
 - [x] Given a running instance, when a new version is deployed, then the old process stops before the new one starts; the process is long-lived and never scaled to zero (2026-11-05, the second deploy, run 42021731996: the old container was gone at 12:15:59 before the new one started at 12:15:59.7, healthy at 12:16:17)
 - [x] Given the facilitator key, when the service is deployed, then it signs through the testnet OpenBao Transit key, the raw key never reaches the facilitator's process, the image or the logs, and it is a testnet-only key (ADR 0013) (2026-11-05: 0029's 18 trial settlements signed through `transit/sign/stellar-testnet`, 0 errors in the audit log, fee bumps paid by `GAVE5V5I…KKRP` on testnet; no secret seed in the containers' env or the facilitator's journal; the key is `exportable=false`)
 - [x] Given `DATABASE_URL_FILE` or `RPC_URLS_FILE`, when the service starts, then it reads the value from that file, and with neither set it falls back to `DATABASE_URL` and `RPC_URLS`
-- [ ] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps
-- [ ] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed (2026-11-05: signing over the socket, no seed in the server's files, and the backup secret since 2026-11-02 are shown; the restore drill is left, and it waits for the backups)
+- [x] Given the durable stores from 0022, when the service runs, then it uses them, and `docs/runbook.md` has the deploy and rollback steps (2026-11-25: every store is PostgreSQL, the config refuses any other (`config.ts`), and production's `/health` at `0ff9b906` answers `ready` and `listed`, which need the lease and the sweep's read of open records from it; the runbook has Deploy and Rollback, the migration run before the restart and a rollback by an earlier digest)
+- [x] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed (2026-11-05: signing over the socket, no seed in the server's files, and the backup secret since 2026-11-02 are shown; 2026-11-25: the restore drill passed, runbook "The restore drill", see history)
 - [x] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao) (2026-11-06: rotated at 00:00:15 UTC; OpenBao made the new `audit.log` on the SIGHUP (`nocreate`); after a facilitator restart at 08:16:02 its first entry is 08:16:16, the signer check's AppRole login and `transit/sign`, logged `signer_checked` at 08:16:16.279, and `/health` `signer: ok`; removal past a year rests on `rotate 365` and `maxage 365`)
 - [ ] Given pgBackRest archiving WAL with a first backup made, and OpenBao's daily snapshot run once, when each is true, then `make check-series` passes for its alarm group (`backups`: `wal-failing`, `wal-stale`, `backup-age`; `snapshots`: `snapshot-age`), the group is turned on and deployed, each alarm has fired once on purpose, and `docs/monitoring.md` says how and when (moved from 0027, its decision 71)
 - [ ] Given the next production deploy, when it deploys the Watch stack with the upstream and library sections (#149, #191) and a 08:00 UTC run has published, then `make check-series GROUP=upstream` passes in the 3 hours after it, `"upstream": true` goes in `infra/envs/production.json`, the Alarms stack is deployed, `make fire-test` runs, and `docs/monitoring.md` moves `upstream-changed` and `upstream-library-behind` out of the alarms that are off (moved from 0029, its decision 23)

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Keypair, Networks, rpc } from "@stellar/stellar-sdk";
 import { buildCreateChannelsTx } from "@stellar-x402/signer-pool";
 import { fakeOpenBao, signerEnv } from "../../../facilitator/test/fake-openbao.js";
+import { startSearchModel } from "../../../facilitator/test/search-model.js";
 import { friendbot } from "./horizon.js";
 
 const SERVER = fileURLToPath(new URL("../../../facilitator/dist/server.js", import.meta.url));
@@ -12,8 +13,8 @@ const SERVER = fileURLToPath(new URL("../../../facilitator/dist/server.js", impo
  * Starts our facilitator, built, so the example seller's payments don't depend on a public service:
  * a fresh friendbot account pays the fees, and one fresh channel carries the settlements. Its key
  * signs through the fake OpenBao, which holds nothing but this run's testnet account. It catalogs
- * the example seller, so search can find it (E-25). Its log goes
- * to stderr, so a refused or failed settlement shows its cause.
+ * the example seller, so search can find it (E-25), and starts the search model beside it. Its
+ * log goes to stderr, so a refused or failed settlement shows its cause.
  */
 export async function startFacilitator(databaseUrl: string) {
   const key = Keypair.random();
@@ -34,12 +35,14 @@ export async function startFacilitator(databaseUrl: string) {
   if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.status}`);
 
   const openbao = await fakeOpenBao(key);
+  const searchModel = await startSearchModel();
   const child = spawn(process.execPath, [SERVER], {
     env: {
       ...signerEnv(key.publicKey(), openbao.socketPath),
       DATABASE_URL: databaseUrl,
       CLIENT_IP: "socket",
       CHANNELS: channel.publicKey(),
+      SEARCH_MODEL_URL: searchModel.url,
       PORT: "0",
       // The example seller runs on this machine; without it the catalog drops its listing (0054).
       CATALOG_LIST_LOCAL: "true",
@@ -65,6 +68,7 @@ export async function startFacilitator(databaseUrl: string) {
         await once(child, "exit");
       }
       openbao.close();
+      await searchModel.stop();
     },
   };
 }
