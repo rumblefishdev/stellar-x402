@@ -41,6 +41,7 @@ import {
   searchCardStoreContract,
   catalogSearchContract,
   catalogMeaningContract,
+  catalogQualityContract,
   rateLimitStoreContract,
   settlement,
   holdLease,
@@ -213,6 +214,14 @@ describe("PostgreSQL stores", () => {
     catalog: (await stores()).catalog,
     setVector: (key, model, vector) => setVector(pool, key, model, vector),
   }));
+  catalogQualityContract(async () => {
+    const all = await stores();
+    return {
+      catalog: all.catalog,
+      settlements: all.settlements,
+      setVector: (key, model, vector) => setVector(pool, key, model, vector),
+    };
+  });
   searchCardStoreContract(async () => {
     const all = await stores();
     return { catalog: all.catalog, cards: all.searchCards };
@@ -1259,10 +1268,10 @@ describe("PostgreSQL stores", () => {
     const entry = catalogEntry();
     await catalog.upsert(entry);
     await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
-    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10, now: Date.now() })).toBe(false);
     // As after a rewrite that could not read the listings: the listing stands, its card is gone.
     await pool.query("DELETE FROM catalog_search");
-    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10, now: Date.now() })).toBe(true);
   });
 
   it("refuses a write of a card's model: only the database says which vector is current", async () => {
@@ -1278,13 +1287,13 @@ describe("PostgreSQL stores", () => {
     const entry = catalogEntry();
     await catalog.upsert(entry);
     await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
-    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10, now: Date.now() })).toBe(false);
     // As the release before this one writes a card: the text only, its vector untouched.
     await pool.query("UPDATE catalog_search SET description = 'Currency rates'");
     expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
       [null, null],
     ]);
-    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10, now: Date.now() })).toBe(true);
     // The start's pass reads it again, and the search by meaning leaves it out meanwhile.
     expect((await searchCards.cards("0", 10)).map((card) => card.description)).toEqual([
       "Currency rates",
@@ -1293,6 +1302,7 @@ describe("PostgreSQL stores", () => {
       await catalog.search({
         text: "x",
         limit: 10,
+        now: Date.now(),
         meaning: unitVector(0.8),
       }),
     ).toEqual([]);

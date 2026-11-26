@@ -60,6 +60,8 @@ export interface CatalogSearch {
   after?: CatalogSearchPosition;
   /** The query's vector, of the store's model; without it, search ranks by words alone. */
   meaning?: number[];
+  /** The app's clock, in ms: the payments of the 30 days before it raise a listing (ADR 0014). */
+  now: number;
 }
 
 /**

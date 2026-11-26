@@ -1,3 +1,4 @@
+import type { Request, Response } from "express";
 import { Keypair } from "@stellar/stellar-sdk";
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
@@ -6,17 +7,23 @@ import { withBazaar, type SearchDiscoveryResourcesResponse } from "@x402/extensi
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { DISCOVERY_LIMIT } from "../src/http/discovery.js";
-import { MAX_QUERY_LENGTH, parseSearchQuery } from "../src/http/search.js";
+import { discoverySearch, MAX_QUERY_LENGTH, parseSearchQuery } from "../src/http/search.js";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger } from "../src/logger.js";
 import { memoryMetrics } from "../src/metrics.js";
-import type { Stores } from "../src/ports/index.js";
+import type {
+  CatalogStore,
+  Embedder,
+  NewSettlement,
+  SettlementKey,
+  Stores,
+} from "../src/ports/index.js";
 import type { Settle } from "../src/settlement/settle.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { start, type Started } from "../src/start.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
-import { noSearchModel } from "./vectors.js";
+import { noSearchModel, unitVector } from "./vectors.js";
 
 const SERVED = STELLAR_NETWORKS.testnet;
 const OTHER = STELLAR_NETWORKS.pubnet;
@@ -343,5 +350,145 @@ describe("GET /discovery/search", () => {
     if (data.pagination !== undefined && data.pagination !== null)
       expect(typeof data.pagination.limit).toBe("number");
     if (data.partialResults !== undefined) expect(typeof data.partialResults).toBe("boolean");
+  });
+});
+
+/** Calls the route's handler with `query`, as express would; resolves the JSON body it answered. */
+async function callRoute(
+  handler: ReturnType<typeof discoverySearch>,
+  query: Record<string, string>,
+) {
+  let status = 200;
+  let body: unknown;
+  const res = {
+    status: (code: number) => ((status = code), res),
+    json: (value: unknown) => ((body = value), res),
+    setHeader: () => res,
+  } as unknown as Response;
+  await handler({ query } as unknown as Request, res, () => {});
+  return { status, body: body as SearchDiscoveryResourcesResponse };
+}
+
+describe("GET /discovery/search's clock (0154)", () => {
+  /** A catalog that records what the route hands it and finds nothing. */
+  function recordingCatalog() {
+    const catalog = {
+      search: vi.fn<CatalogStore["search"]>(async () => []),
+      waitingForVector: vi.fn<CatalogStore["waitingForVector"]>(async () => false),
+      searchModel: "m",
+    };
+    return catalog;
+  }
+  const model: Embedder = { embed: async () => unitVector(0.8) };
+  const route = (catalog: CatalogStore, embedder: Embedder, now?: () => number) =>
+    discoverySearch(catalog, embedder, jsonLogger("error"), memoryMetrics(), now);
+
+  it("hands the store its clock's value as the search's now, by words alone", async () => {
+    const catalog = recordingCatalog();
+    const { status } = await callRoute(
+      route(catalog as unknown as CatalogStore, noSearchModel, () => 1_234),
+      { query: "weather" },
+    );
+    expect(status).toBe(200);
+    expect(catalog.search).toHaveBeenCalledWith(expect.objectContaining({ now: 1_234 }));
+  });
+
+  it("hands the store its clock's value by meaning too, and to waitingForVector", async () => {
+    const catalog = recordingCatalog();
+    await callRoute(
+      route(catalog as unknown as CatalogStore, model, () => 5_678),
+      {
+        query: "weather",
+      },
+    );
+    expect(catalog.search).toHaveBeenCalledWith(
+      expect.objectContaining({ now: 5_678, meaning: expect.any(Array) }),
+    );
+    expect(catalog.waitingForVector).toHaveBeenCalledWith(expect.objectContaining({ now: 5_678 }));
+  });
+
+  it("reads the clock on each request, Date.now when none is given", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const catalog = recordingCatalog();
+      const handler = route(catalog as unknown as CatalogStore, noSearchModel);
+      vi.setSystemTime(1_000_000);
+      await callRoute(handler, { query: "weather" });
+      vi.setSystemTime(2_000_000);
+      await callRoute(handler, { query: "weather" });
+      expect(catalog.search.mock.calls.map(([search]) => search.now)).toEqual([
+        1_000_000, 2_000_000,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("GET /discovery/search ranks a paid listing first (0154 task AC2)", () => {
+  const db = testDatabase();
+  /** The route's clock, years before the database's: a count by the database clock finds nothing. */
+  const CLOCK = Date.UTC(2020, 0, 1);
+  const offer = {
+    scheme: "exact",
+    network: SERVED,
+    asset: "CASSET",
+    amount: "1000",
+    payTo: "GSELLER",
+    maxTimeoutSeconds: 60,
+    extra: {},
+  };
+
+  it("task AC2: of two listings matching a query equally, the one with paying wallets ranks first", async () => {
+    await db.empty();
+    const stores = db.stores();
+    // Without q, equal ranks go by key: the unpaid listing's URL sorts first.
+    const unpaid = "https://a-unpaid.example.com/x";
+    const paid = "https://b-paid.example.com/x";
+    for (const resourceUrl of [unpaid, paid])
+      await stores.catalog.upsert({
+        keyVersion: CATALOG_KEY_VERSION,
+        ledger: null,
+        checkedAt: 1,
+        key: { network: SERVED, payTo: offer.payTo, method: "GET", resourceUrl },
+        resource: {
+          resource: resourceUrl,
+          type: "http",
+          x402Version: 2,
+          accepts: [offer],
+          lastUpdated: "2026-11-26T00:00:00.000Z",
+          description: "weather forecast",
+        },
+      });
+    for (const payer of ["GWALLETA", "GWALLETB"]) {
+      const settlement: NewSettlement = {
+        key: `${SERVED}:${payer}:1` as SettlementKey,
+        network: SERVED,
+        payer,
+        nonce: "1",
+        fingerprint: `fp-${payer}`,
+        paymentPayload: { x402Version: 2, accepted: offer, payload: { tx: "AAAA" } },
+        paymentRequirements: offer,
+        createdAt: CLOCK - 86_400_000,
+        listing: { method: "GET", resourceUrl: paid },
+      };
+      expect(await stores.settlements.claim(settlement)).toMatchObject({ claimed: true });
+      expect(
+        await stores.settlements.transition(settlement.key, "claimed", {
+          state: "success",
+          updatedAt: settlement.createdAt,
+        }),
+      ).toMatchObject({ state: "success" });
+    }
+    const handler = discoverySearch(
+      stores.catalog,
+      noSearchModel,
+      jsonLogger("error"),
+      memoryMetrics(),
+      () => CLOCK,
+    );
+    const { status, body } = await callRoute(handler, { query: "weather" });
+    expect(status).toBe(200);
+    expect(body.resources.map((item) => item.resource)).toEqual([paid, unpaid]);
   });
 });
