@@ -835,14 +835,19 @@ a run the timer starts after a reboot is skipped).
    `sudo systemctl reset-failed x402-openbao-snapshot.service` before starting it again.
 
    Then the `snapshots` alarm group goes on (`infra/README.md`), so a run that fails every night
-   alerts instead of showing only in the journal. From `infra/`:
+   alerts instead of showing only in the journal. Since 0139's switch its alarm is the Prometheus
+   rule `x402-snapshot-age` on the monitoring VM, not a CloudWatch alarm
+   ([monitoring, The Prometheus rules](monitoring.md#the-prometheus-rules)), so no AWS deploy.
+   From `infra/`:
 
    ```sh
-   make check-series GROUP=snapshots   # until it passes: the stamp's age has reached CloudWatch
-   # then "snapshots": true in infra/envs/production.json, by pull request
-   make deploy-production-alarms
-   make fire-test
+   # "snapshots": true in infra/envs/production.json, by pull request, with:
+   make rules   # adds x402-snapshot-age to deploy/metrics/rules/x402-production.yml
    ```
+
+   After the merge the rule file goes on the VM, where `snapshot_age_seconds{project="x402"}`
+   must return a series, and the rule is fired once on purpose and recorded in
+   [monitoring.md](monitoring.md#as-prometheus-rules).
 
 ### Changing Borg's passphrase
 
