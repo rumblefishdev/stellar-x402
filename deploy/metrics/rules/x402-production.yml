@@ -32,6 +32,20 @@
           }
         },
         {
+          "alert": "x402-search-model-down",
+          "expr": "max(max_over_time(search_model_up{project=\"x402\"}[1m])) < 1",
+          "for": "4m",
+          "labels": {
+            "check": "search-model-down",
+            "severity": "warning",
+            "shape": "level",
+            "project": "x402"
+          },
+          "annotations": {
+            "description": "The search model has not answered the facilitator's health check for 5 minutes, whether anyone searched or not: search runs on words alone and no listing gets a vector. Next: Check the search-model container on the server (x402-compose production ps search-model, then logs search-model): a restart loop, out of memory, or an image without the model. No data: Resolves once its series stops, which is no recovery; facilitator-silent covers a stopped process. OK once it is back within its threshold; the next crossing fires it again. Runbook: docs/monitoring.md, search-model-down."
+          }
+        },
+        {
           "alert": "x402-pending",
           "expr": "max by (network) (max_over_time(settlement_oldest_open_seconds{project=\"x402\"}[1m])) > 900",
           "for": "2m",

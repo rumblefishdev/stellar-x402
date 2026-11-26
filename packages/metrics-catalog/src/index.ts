@@ -342,6 +342,16 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
   },
+  // 1 while the search model answers its health check, checked every 30 s whether anyone searches
+  // (0120); the model serves every network.
+  {
+    namespace: FAC,
+    name: "search_model_up",
+    kind: "gauge",
+    unit: "None",
+    scope: "process",
+    sets: PLAIN,
+  },
   // A search answered by words alone because the model couldn't be used (0120); the route serves
   // every network.
   {

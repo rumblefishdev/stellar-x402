@@ -445,6 +445,19 @@ can. That is expected; a fallback outside a restart is not.
    sudo /usr/local/libexec/x402/x402-compose production restart search-model
    ```
 
+### search-model-down
+
+The search model has not answered the facilitator's health check for 5 minutes. The facilitator
+checks it every 30 s whether anyone searches or not ([ADR 0014](adr/0014-bazaar-search.md)), so
+this fires with no traffic, when `search-words-only` and `search-vector-failed` can't. Search runs
+on words alone meanwhile, and no listing gets a vector.
+
+1. The model container's state: `sudo /usr/local/libexec/x402/x402-compose production ps
+search-model`, then `logs search-model`: a restart loop, out of memory, or an image without the
+   model.
+2. Once it answers again, the next search ranks by meaning, and the start's next pass embeds the
+   listings still without a vector.
+
 ### search-vector-failed
 
 The search model gave no vector for a listing the catalog wrote, or the start's pass could not
@@ -980,6 +993,7 @@ CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are Clo
 | `store_prune_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `search_card_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `search_vector_failures_total`              | `x402-facilitator` | counter, Count | none                                                     | [search-vector-failed](#search-vector-failed)                                                                 |
+| `search_model_up`                           | `x402-facilitator` | gauge, None    | none                                                     | [search-model-down](#search-model-down)                                                                       |
 | `search_words_only_total`                   | `x402-facilitator` | counter, Count | none                                                     | [search-words-only](#search-words-only)                                                                       |
 | `catalog_internal_errors_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_attempts_total`                    | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |

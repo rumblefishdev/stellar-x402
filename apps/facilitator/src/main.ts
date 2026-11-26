@@ -45,6 +45,7 @@ import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metri
 import type { LeaseFence, SettlementStore } from "./ports/index.js";
 import { createPruner } from "./pruner.js";
 import { createRpcStallTracker, type RpcStallTracker } from "./rpc-stall.js";
+import { createSearchModelWatch, type SearchModelWatch } from "./search-model-watch.js";
 import { checkChannels } from "./settlement/channel-check.js";
 import { checkRpcNetworks } from "./settlement/network-check.js";
 import { feeSettings, type FeeSettings } from "./settlement/fees.js";
@@ -359,6 +360,8 @@ export function compose(
   rpcStall: RpcStallTracker;
   /** Unstarted: `main()` starts the pass after the search card rewrite. */
   vectors: SearchVectors;
+  /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
+  searchModelWatch: SearchModelWatch;
 } {
   const { logger } = opts;
   const { stores } = opts;
@@ -377,6 +380,11 @@ export function compose(
     logger,
     metrics: root,
   });
+  // The model's health whether anyone searches or not (ADR 0014); the model serves every network.
+  const searchModelWatch = createSearchModelWatch({
+    ready: () => searchModelReady(config.searchModel),
+  });
+  root.registerGauge("search_model_up", () => ({ value: searchModelWatch.up() }));
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
   // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
@@ -515,6 +523,7 @@ export function compose(
     signer,
     rpcStall,
     vectors,
+    searchModelWatch,
   };
 }
 
@@ -538,6 +547,7 @@ export async function main(
     | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   let rpcStall: RpcStallTracker | undefined;
+  let searchModelWatch: SearchModelWatch | undefined;
   /** `/metrics`'s listener, for the catch: a start that failed closes it. */
   let metricsServer: Server | undefined;
   try {
@@ -587,6 +597,8 @@ export async function main(
     // rising `rpc_stalled_seconds`.
     rpcStall = composed.rpcStall;
     rpcStall.start();
+    searchModelWatch = composed.searchModelWatch;
+    searchModelWatch.start();
     // AD-12: the service starts only when no other key can move a channel. An RPC that doesn't
     // answer fails the check with its error. `compose()` only wires parts, so nothing has called
     // the RPC yet.
@@ -647,6 +659,7 @@ export async function main(
         }
       } finally {
         rpcStall?.stop();
+        searchModelWatch?.stop();
         await closeMetrics(metricsServer);
       }
     };
@@ -679,6 +692,7 @@ export async function main(
     // It wrote no liveness series (above), so a crash loop shows as missing data.
     await closeMetrics(metricsServer);
     rpcStall?.stop();
+    searchModelWatch?.stop();
     await endPools();
     throw error;
   }

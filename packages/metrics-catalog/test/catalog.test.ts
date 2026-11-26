@@ -269,6 +269,7 @@ describe("CATALOG", () => {
       rpc_stalled_seconds: [g, "Seconds", net],
       balance_reading_age_seconds: [g, "Seconds", net],
       channel_longest_hold_seconds: [g, "Seconds", net],
+      search_model_up: [g, "None", proc],
       openbao_up: [g, "None", proc],
       wal_failing: [g, "None", proc],
       wal_last_archived_age_seconds: [g, "Seconds", proc],
@@ -359,7 +360,7 @@ describe("scope-split name types", () => {
       | "balance_reading_age_seconds"
       | "channel_longest_hold_seconds"
     >();
-    expectTypeOf<ProcessGaugeName>().toBeNever();
+    expectTypeOf<ProcessGaugeName>().toEqualTypeOf<"search_model_up">();
     expectTypeOf<NetworkCounterName>().toEqualTypeOf<Exclude<CounterName, ProcessCounterName>>();
     expectTypeOf<"settlement_outcomes_total">().toExtend<NetworkCounterName>();
     expectTypeOf<"http_requests_total">().not.toExtend<NetworkCounterName>();

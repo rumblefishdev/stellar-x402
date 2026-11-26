@@ -52,6 +52,24 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     },
   });
 
+  // The model's health from the facilitator's own check every 30 s (ADR 0014): with no searches and
+  // no catalog writes, the two alarms beside this one never fire, so a model in a restart loop
+  // would go unseen. Five minutes, as rpc-stalled waits, so a restart's few seconds don't fire it.
+  f.level("search-model-down", {
+    group: "facilitator",
+    signal: { catalog: "search_model_up" },
+    statistic: "Maximum",
+    periodMinutes: 1,
+    periods: 5,
+    comparison: "<",
+    threshold: 1,
+    description: {
+      what: "The search model has not answered the facilitator's health check for 5 minutes, whether anyone searched or not: search runs on words alone and no listing gets a vector.",
+      next: `Check the search-model container on the server (x402-compose ${c.envName} ps search-model, then logs search-model): a restart loop, out of memory, or an image without the model.`,
+      noData: "Keeps its state; facilitator-silent covers a stopped process.",
+    },
+  });
+
   // A listing without a vector is left out of search by meaning until the next start (ADR 0014),
   // so each failure is worth a message.
   f.event("search-vector-failed", {
