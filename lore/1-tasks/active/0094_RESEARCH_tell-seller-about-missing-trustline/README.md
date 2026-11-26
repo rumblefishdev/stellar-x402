@@ -2,14 +2,16 @@
 id: "0094"
 title: "Find how a seller can learn that their payTo has no trustline"
 type: RESEARCH
-status: backlog
+status: active
+owner: akot
 milestone: 2
 related_adr: []
-related_tasks: ["0078", "0092"]
+related_tasks: ["0078", "0092", "0102"]
 tags: [facilitator, payments, priority-low, effort-small]
 links:
   - ../../archive/0078_FEATURE_missing-trustline-reason.md
-  - ../0092_FEATURE_sdk-missing-trustline-step.md
+  - ../../archive/0092_FEATURE_sdk-missing-trustline-step.md
+  - ../../archive/0102_FEATURE_sdk-helpers-from-the-rfp/README.md
 history:
   - date: "2026-11-02"
     status: backlog
@@ -17,6 +19,13 @@ history:
     note: >
       Spawned from a check of 0078 and 0092: neither tells the seller, so a seller who offers an
       asset without a trustline doesn't learn it from us.
+  - date: "2026-11-26"
+    status: active
+    who: akot
+    note: >
+      Started. Since it was written, 0092 closed and 0102 added `checkTrustline` to
+      `@stellar-x402/sdk/seller`, which `examples/http-api` runs at start; the pin is `~2.31.0`, not
+      `~2.28.0`. The research starts from that.
 ---
 
 # Find how a seller can learn that their payTo has no trustline

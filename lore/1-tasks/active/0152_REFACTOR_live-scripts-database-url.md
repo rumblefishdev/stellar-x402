@@ -2,7 +2,8 @@
 id: "0152"
 title: "One compose database URL for the live scripts, with blank DATABASE_URL read as unset"
 type: REFACTOR
-status: backlog
+status: active
+owner: bstruzyk
 milestone: 2
 related_adr: []
 related_tasks: ["0081", "0064"]
@@ -15,6 +16,12 @@ history:
     note: >
       Spawned from 0081's PR review (#202, karczuRF): the blank-value handling and the duplicated
       compose URL lived only in 0081's notes.
+  - date: "2026-11-26"
+    status: active
+    who: bstruzyk
+    note: >
+      Started: one compose database URL for the live scripts and test/database.ts, and blank
+      DATABASE_URL read as unset in the four scripts that fall back to it.
 ---
 
 # One compose database URL for the live scripts, with blank DATABASE_URL read as unset

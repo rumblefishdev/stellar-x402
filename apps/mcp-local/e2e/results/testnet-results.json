@@ -1,6 +1,6 @@
 {
-  "ranAt": "2026-11-25T13:42:42.647Z",
-  "commit": "9313fd8ed4419f23e05a099fb35e27893c489ffb",
+  "ranAt": "2026-11-26T12:47:43.348Z",
+  "commit": "30995a041c3a69b1260e0f07d2cc65d84f829028",
   "rows": 132,
   "failed": 0,
   "results": [
@@ -1105,7 +1105,7 @@
     },
     {
       "id": "E-06",
-      "check": "call_paid_http {\"url\":\"http://127.0.0.1:36165/ok\",\"method\":\"HEAD\"}: -32602",
+      "check": "call_paid_http {\"url\":\"http://127.0.0.1:45139/ok\",\"method\":\"HEAD\"}: -32602",
       "expected": [
         true,
         true
@@ -1156,8 +1156,8 @@
     {
       "id": "E-07",
       "check": "buyer balance unchanged",
-      "expected": "390000",
-      "got": "390000",
+      "expected": "200080000",
+      "got": "200080000",
       "pass": true
     },
     {
@@ -1347,7 +1347,7 @@
     },
     {
       "id": "E-09g",
-      "check": "get_resource http://127.0.0.1.nip.io:33903/free",
+      "check": "get_resource http://127.0.0.1.nip.io:38743/free",
       "expected": "unsafe_url",
       "got": "unsafe_url",
       "pass": true
@@ -1512,7 +1512,7 @@
         true
       ],
       "pass": true,
-      "transaction": "c0c90a3099e7ab4335a22a53202a1be2adaa6370de423df0152779b33b2f8306"
+      "transaction": "fa9dc75211a22067c7c0a695cfcc5c7346743b780978517498ce35a3d7bde3fb"
     },
     {
       "id": "E-21",
@@ -1534,7 +1534,7 @@
         }
       ],
       "pass": true,
-      "transaction": "c0c90a3099e7ab4335a22a53202a1be2adaa6370de423df0152779b33b2f8306"
+      "transaction": "fa9dc75211a22067c7c0a695cfcc5c7346743b780978517498ce35a3d7bde3fb"
     },
     {
       "id": "E-21",
@@ -1550,7 +1550,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "c0c90a3099e7ab4335a22a53202a1be2adaa6370de423df0152779b33b2f8306"
+      "transaction": "fa9dc75211a22067c7c0a695cfcc5c7346743b780978517498ce35a3d7bde3fb"
     },
     {
       "id": "E-22a",
@@ -1574,7 +1574,7 @@
         true
       ],
       "pass": true,
-      "transaction": "d5cc23b468ee01ac994bc993bd1f96b077f6288aaefb175c82ffea896e9ebc7c"
+      "transaction": "e56ff0982d6815f31665a2c8f59611dd5a55ea9b4066e303e4f37f345f7867e7"
     },
     {
       "id": "E-22a",
@@ -1596,7 +1596,7 @@
         }
       ],
       "pass": true,
-      "transaction": "d5cc23b468ee01ac994bc993bd1f96b077f6288aaefb175c82ffea896e9ebc7c"
+      "transaction": "e56ff0982d6815f31665a2c8f59611dd5a55ea9b4066e303e4f37f345f7867e7"
     },
     {
       "id": "E-22a",
@@ -1612,7 +1612,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "d5cc23b468ee01ac994bc993bd1f96b077f6288aaefb175c82ffea896e9ebc7c"
+      "transaction": "e56ff0982d6815f31665a2c8f59611dd5a55ea9b4066e303e4f37f345f7867e7"
     },
     {
       "id": "E-22b",
@@ -1632,12 +1632,12 @@
       "id": "E-22",
       "check": "buyer balance unchanged after b and after c",
       "expected": [
-        "370000",
-        "370000"
+        "200060000",
+        "200060000"
       ],
       "got": [
-        "370000",
-        "370000"
+        "200060000",
+        "200060000"
       ],
       "pass": true
     },
@@ -1649,7 +1649,7 @@
         true,
         "stellar:testnet",
         [
-          "http://127.0.0.1:41685/weather"
+          "http://127.0.0.1:35035/weather"
         ],
         true
       ],
@@ -1658,7 +1658,7 @@
         true,
         "stellar:testnet",
         [
-          "http://127.0.0.1:41685/weather"
+          "http://127.0.0.1:35035/weather"
         ],
         true
       ],
@@ -1686,7 +1686,7 @@
         true
       ],
       "pass": true,
-      "transaction": "d79d4e4d6105d73414e8fdadca530ccb670fddd7461842b49076595fcf03d5c3"
+      "transaction": "dff0c143934e44a2122d1233d30cb6280cef91e3e77804cbfa8a8e8ce9b770d6"
     },
     {
       "id": "E-25",
@@ -1708,7 +1708,7 @@
         }
       ],
       "pass": true,
-      "transaction": "d79d4e4d6105d73414e8fdadca530ccb670fddd7461842b49076595fcf03d5c3"
+      "transaction": "dff0c143934e44a2122d1233d30cb6280cef91e3e77804cbfa8a8e8ce9b770d6"
     },
     {
       "id": "E-25",
@@ -1724,39 +1724,39 @@
         "0"
       ],
       "pass": true,
-      "transaction": "d79d4e4d6105d73414e8fdadca530ccb670fddd7461842b49076595fcf03d5c3"
+      "transaction": "dff0c143934e44a2122d1233d30cb6280cef91e3e77804cbfa8a8e8ce9b770d6"
     },
     {
       "id": "E-23",
-      "check": "no buyer secret in 280 captures from 58 processes",
+      "check": "no buyer secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no buyer without its S secret in 280 captures from 58 processes",
+      "check": "no buyer without its S secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no unfunded secret in 280 captures from 58 processes",
+      "check": "no unfunded secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no drained (E-14b) secret in 280 captures from 58 processes",
+      "check": "no drained (E-14b) secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no malformed key of E-01l secret in 280 captures from 58 processes",
+      "check": "no malformed key of E-01l secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true

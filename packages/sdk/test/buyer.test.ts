@@ -1,5 +1,10 @@
 import { Asset, Networks } from "@stellar/stellar-sdk";
-import { encodePaymentRequiredHeader, encodePaymentResponseHeader } from "@x402/core/http";
+import {
+  encodePaymentRequiredHeader,
+  encodePaymentResponseHeader,
+  MAX_CONTROL_PLANE_RESPONSE_BYTES,
+  ResponseBodyTooLargeError,
+} from "@x402/core/http";
 import type { PaymentRequired, SchemeNetworkClient } from "@x402/core/types";
 import {
   InsufficientBalanceError,
@@ -368,6 +373,37 @@ describe("createPayingFetch", () => {
     const error = await failure(createPayingFetch(config(shop))(PAID_URL));
     expect([error.code, error.paid]).toEqual(["payment_unknown", "unknown"]);
     expect(error.cause).toMatch(/^status 500 without a settlement, unreadable: /);
+  });
+
+  it("sends the request's method and body again with the payment", async () => {
+    const shop = seller();
+    const answered = shop.fetch;
+    const seen: string[] = [];
+    shop.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      const paying = request.headers.has("PAYMENT-SIGNATURE") ? "paid" : "unpaid";
+      seen.push(`${paying} ${request.method} ${await request.clone().text()}`);
+      return answered(request);
+    };
+    const response = await createPayingFetch(config(shop))(PAID_URL, {
+      method: "POST",
+      body: '{"days":3}',
+    });
+    expect(response.payment).toBeDefined();
+    expect(seen).toEqual(['unpaid POST {"days":3}', 'paid POST {"days":3}']);
+  });
+
+  it("says unknown when the seller answers the payment with a 402 too large to read", async () => {
+    const shop = seller();
+    const answered = shop.fetch;
+    shop.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      if (!request.headers.has("PAYMENT-SIGNATURE")) return answered(request);
+      return new Response("x".repeat(MAX_CONTROL_PLANE_RESPONSE_BYTES + 1), { status: 402 });
+    };
+    const error = await failure(createPayingFetch(config(shop))(PAID_URL));
+    expect([error.code, error.paid]).toEqual(["payment_unknown", "unknown"]);
+    expect(error.cause).toBeInstanceOf(ResponseBodyTooLargeError);
   });
 });
 

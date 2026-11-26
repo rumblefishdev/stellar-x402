@@ -274,7 +274,9 @@ export const CATALOG = [
     scope: "network",
     sets: PLAIN,
     fields: ["hook"],
-    fieldValues: { hook: ["beforeSubmit", "onFinal", "extensionResponses", "onSuccess", "other"] },
+    fieldValues: {
+      hook: ["beforeSubmit", "onFinal", "extensionResponses", "listingOf", "onSuccess", "other"],
+    },
   },
   {
     namespace: FAC,

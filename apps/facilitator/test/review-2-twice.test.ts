@@ -171,6 +171,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     }),
     onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
     onSuccess: vi.fn<SettlementHooks["onSuccess"]>(async () => {}),
+    listingOf: vi.fn<SettlementHooks["listingOf"]>(() => undefined),
   };
   const lines: string[] = [];
   const metrics = memoryMetrics();

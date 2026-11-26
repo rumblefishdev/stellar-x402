@@ -71,7 +71,8 @@ What each party must trust:
 - **Mitigation:** The key can only authorize `settle_upto` calls the client already signed: the
   money goes to the signed `payTo`, at most the signed ceiling, within the signed window. It holds
   no funds. In facilitator-delegated mode the facilitator holds this authority instead, and the
-  server trusts it to charge only the amount asked for.
+  server trusts it to charge only the amount asked for; a stolen facilitator key is covered under
+  "Facilitator key" below.
 - **Residual risk:** A stolen key can charge every open authorization up to its ceiling, to the
   seller's own `payTo`. The exposure is the same as a dishonest seller's (see the trust note
   above), bounded by the ceilings and windows. Open authorizations are bound to the key, so it
@@ -711,7 +712,7 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   expire. The theft alarm detects it, the runbook destroys the secret ID, and the float caps the
   loss.
 - **Residual risk:** Accepted at today's stakes, as for root on the server: they can also lock us
-  out of the channels (0048).
+  out of the channels ([ADR 0015](adr/0015-hot-key-full-power.md)).
 
 #### Root on the server
 
@@ -721,9 +722,24 @@ the channels' reserves, about 130 XLM at launch (a 100 XLM float plus ~30 XLM of
   a channel, or a Horizon effect on them other than a credit or a claimable balance naming them,
   read off the server) and the low-balance alarms catch it; the float caps the loss. The float has no
   upper limit, so the weekly review re-checks that this custody still fits it.
-- **Residual risk:** Accepted at today's stakes. The hot key is each account's only signer (0048's
-  cold key was declined for now), so a thief can also lock us out of the channels. Upgrades: TPM-bound
-  credentials, OpenBao on its own machine, a KMS, and 0048 re-checked before mainnet.
+- **Residual risk:** Accepted at today's stakes ([ADR 0015](adr/0015-hot-key-full-power.md)). The
+  hot key is each account's only signer with every threshold at 0, so a thief can also lock us out
+  of the channels; we rebuild under a new key (runbook, "lost access"). Revisited when the float
+  and reserves pass 500 XLM or before `upto` reaches mainnet. Upgrades: TPM-bound credentials,
+  OpenBao on its own machine, a second key in KMS in a separate AWS account with both keys needed
+  for high (ADR 0015's B0).
+
+#### A stolen key charges open `upto` authorizations
+
+- **Attack:** Once `upto` is live (task 0015), the facilitator key is the receiver authorizer of
+  every open authorization in facilitator-delegated mode. A thief settles each at its full
+  `max_amount` before its `deadline`.
+- **Mitigation:** The money goes only to the signed `payTo`, at most the signed ceiling, within the
+  signed window ("Receiver authorizer key" above). Short windows bound it. A rebuild moves to a new
+  key and address, so new authorizations bind the new one.
+- **Residual risk:** Payers pay up to their ceilings on authorizations open at the theft, and those
+  can't be revoked before they expire. This is why `upto` on mainnet triggers a re-check of the
+  key's power ([ADR 0015](adr/0015-hot-key-full-power.md)).
 
 #### A copied disk or snapshot
 

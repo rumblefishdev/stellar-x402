@@ -381,6 +381,16 @@ CREATE VIEW account_usage AS
 `,
   },
   {
+    // 0154: the listing a settled payment paid for, so the search's quality score counts its payer
+    // (ADR 0014). The rest of the key, the payer and the asset are already in the row. Nullable
+    // columns without a default change only the table's metadata (16.5 ms under its lock at
+    // 600,000 rows, measured locally on 18), and the release before never reads them.
+    name: "0019_settlement_listing",
+    sql: `
+ALTER TABLE settlements ADD COLUMN listing_method text, ADD COLUMN listing_url text;
+`,
+  },
+  {
     // 0120: each card's vector (ADR 0014), the model that made it, and the hash of the text it was
     // made from. The database keeps `text_hash` of the card's current text itself, whatever writes
     // it (the release before included), and `model`, the model of a vector of that text, empty
@@ -389,7 +399,7 @@ CREATE VIEW account_usage AS
     // `public`, so every schema sees the type. The vector is kept in the row (`PLAIN`), as
     // pgvector's README suggests for an exact scan: a 384-number vector fits a page. The generated
     // column rewrites the table once: 1 listing in production (2026-11-23).
-    name: "0019_catalog_search_vector",
+    name: "0020_catalog_search_vector",
     sql: `
 CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
 ALTER TABLE catalog_search

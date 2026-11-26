@@ -3,7 +3,7 @@ id: "0042"
 title: "A seller that always answers in the testnet catalog, found and paid from Claude Desktop"
 type: FEATURE
 status: active
-owner: bstruzyk
+owner: akot
 milestone: 2
 related_adr: []
 related_tasks: ["0037", "0032", "0041", "0063", "0137", "0026", "0044", "0069"]
@@ -34,6 +34,13 @@ history:
     note: >
       Review of the plan: the 402 must name https, the seller's check stays out of the
       facilitator's watchdog, its own network, and reset recovery is part of the task.
+  - date: "2026-11-26"
+    status: active
+    who: akot
+    note: >
+      Handoff from bstruzyk: Adam takes the task over. The seller's code is in PR #254
+      (lore-0042-mcp-claude-desktop-e2e), still under review; the deploy files, the hostname, the
+      probe and the Claude Desktop run remain.
 ---
 
 # A seller that always answers in the testnet catalog, found and paid from Claude Desktop

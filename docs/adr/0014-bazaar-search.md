@@ -1,10 +1,12 @@
 # ADR 0014: Search the Bazaar by words and by meaning in PostgreSQL, fused by rank
 
 - Status: accepted
-- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks), 2026-11-23
-  (task 0154: the quality score) and 2026-11-24 (task 0120: each listing's search card in a table
-  of its own; the vector on the card, the model's own server in the facilitator's image, when
-  vectors are written, the timeout, and no words-only window for a model change)
+- Date: 2026-11-19, amended 2026-11-20 (task 0155: one catalog for both networks, reversed
+  2026-11-26: each network's catalog holds only its own listings), 2026-11-23 (task 0154: the
+  quality score), 2026-11-24 (task 0120: each listing's search card in a table of its own; the
+  vector on the card, the model's own server in the facilitator's image, when vectors are written,
+  the timeout, and no words-only window for a model change) and 2026-11-25 (task 0154: a payment's
+  listing on its settlement's row)
 
 ## Context
 
@@ -26,8 +28,9 @@ opaque cursor because the ranked set can shift.
 What this has to fit:
 
 - All facilitator state is in PostgreSQL, a database per network
-  ([ADR 0012](0012-facilitator-state-store.md)); the catalog is one table for both networks
-  (task 0155), and which database holds it is still open (task 0126). The M1 evidence already told SCF that Tranche #2's search is planned on PostgreSQL.
+  ([ADR 0012](0012-facilitator-state-store.md)); each network's catalog holds
+  only that network's listings (task 0155), and how one process serves both is still open (task
+  0126). The M1 evidence already told SCF that Tranche #2's search is planned on PostgreSQL.
 - The server is shared: our containers were limited to 1.875 GiB together while production serves
   testnet, and the facilitator to 512 MiB and one CPU ([ADR 0011](0011-facilitator-hosting.md)).
   The server itself has 125 GiB, so ADR 0011 now adds 768 MiB for the model.
@@ -169,20 +172,23 @@ The measurements are in
   - An empty description is a missing one, an empty one or one of spaces only. A short
     description gets no penalty.
   - q is computed when the search runs, from the payments stored at that moment.
-- **How a payment reaches its listing.** A table holds one row per settled payment that names a
-  listing: the settlement's key, the network, `payTo`, method, listing URL, payer and the time the
-  row is written. The settlement's key makes the row unique, since a success can be reported twice, by settle and by
-  reconcile. The cataloger writes the row right after it derives the listing's key from the
-  payment, also when the listing's copy is unchanged. A settlement recorded twice keeps its first
-  row. Rows are kept; the count reads the last 30
-  days. The table starts empty when it ships. A failed write is logged.
+- **How a payment reaches its listing.** The settlement's row already holds the network, `payTo`,
+  payer and paid asset; it gains the listing's method and URL. `/settle` reads them from the
+  payment's `extensions.bazaar` copy, with the same validation and key the catalog uses, and the
+  claim stores them with the record, so no later write can miss them; a payment without a valid
+  copy names no listing. A failure there leaves the record without one, logged and counted, and
+  never changes the settlement (AD-8). The asset counts because a payment's terms come from its
+  caller, not from the listing: a seller can pay itself in a token its listing never offers.
+  Every claim names its listing, so the count reads only `success` settlements, of the last 30
+  days; settlements are kept. Settlements from before the release name no listing, so the count
+  starts empty.
 - **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
   0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
 - **When the ranking is served.** There is no separate curation-only mode. 0135's run decides
   when search is offered on pubnet (task 0120): not before it reaches nDCG@10 ≥ 0.75, as §4
   promises.
-- **Network.** A search reads the one catalog, which holds both networks (task 0155): without a
-  `network` filter it ranks both, as `/discovery/resources` lists both.
+- **Network.** A search reads the catalog of the database it runs on, which holds that network's
+  listings only (task 0155); `network` filters, as on `/discovery/resources`.
 - **Cursor.** Opaque to the client; it carries the last result's score and listing key, and the
   next page starts after it. A listing written between two pages can shift the next one: the
   fused rank of a listing depends on its position among the others, so a few results (up to 4 in a
@@ -258,12 +264,13 @@ The measurements are in
   on Stellar; the testnet catalog's one listing is on `trycloudflare.com`. `workers.dev` holds 580
   of the 1,292 Stellar listings there (44.9%), so a penalty for shared hosting would lower many
   real listings.
-- **A table, because reading payments per search does not scale.** Deriving each payment's
+- **The key is stored, because deriving it per search does not scale.** Deriving each payment's
   listing key from the stored settlements at search time took 36 ms at 155 payments in 30 days,
-  219 ms at 2,539 (pubnet's 30-day volume across all facilitators) and 2.2 s at 25,000; the table
-  answers in 0.9, 6.5 and 7.8 ms (local PostgreSQL, synthetic payments of 4.3 KB). The table ran
-  with an index on all its columns; it ships with its key only, and an index comes when a
-  measurement of the shipped search query needs it.
+  219 ms at 2,539 (pubnet's 30-day volume across all facilitators) and 2.2 s at 25,000. Counting
+  from the stored listing columns on `settlements`, for a page of 20 listings, took 1.4 ms at
+  2,539 and 15 ms at 25,000 without an index, and 0.7 and 1.6 ms with one (local PostgreSQL 18,
+  synthetic payments of 4.3 KB, whose `payment_requirements` of about 260 bytes stays inline). It
+  ships without an index; one comes when a measurement of the shipped search query needs it.
 - **The numbers above** are in
   [R-quality-measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md).
 - **Curation needs a proof, not a judgement.** A list kept by hand would have the operator vouch

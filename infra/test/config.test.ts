@@ -55,7 +55,7 @@ describe("envs/production.json", () => {
 
   test("names the fee account /supported shows as the signer", () => {
     expect(production().feeAccounts).toEqual({
-      "stellar:testnet": "GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP",
+      "stellar:testnet": "GDV2PC2U7QGHWHOFNA34XRGIINFTZDPMJSJOTVNQ72UIBL6IY2KESBWP",
     });
   });
 

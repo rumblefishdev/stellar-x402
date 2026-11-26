@@ -121,9 +121,6 @@ importers:
       '@x402/core':
         specifier: ~2.31.0
         version: 2.31.0
-      '@x402/extensions':
-        specifier: ~2.31.0
-        version: 2.31.0(typescript@6.0.3)
       '@x402/stellar':
         specifier: ~2.31.0
         version: 2.31.0
@@ -134,6 +131,9 @@ importers:
       '@stellar/stellar-sdk':
         specifier: ^16.4.1
         version: 16.4.1
+      '@x402/extensions':
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
 
   apps/mcp-local/e2e:
     dependencies:
@@ -254,6 +254,9 @@ importers:
 
   examples/http-api:
     dependencies:
+      '@stellar-x402/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@stellar/stellar-sdk':
         specifier: ^16.4.1
         version: 16.4.1
@@ -355,13 +358,19 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@x402/fetch':
-        specifier: ~2.31.0
-        version: 2.31.0
-    devDependencies:
       '@stellar/stellar-sdk':
         specifier: ^16.4.1
         version: 16.4.1
+      '@x402/extensions':
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      '@stellar-x402/bazaar':
+        specifier: workspace:*
+        version: link:../bazaar
       '@x402/core':
         specifier: ~2.31.0
         version: 2.31.0
@@ -1120,9 +1129,6 @@ packages:
 
   '@x402/extensions@2.31.0':
     resolution: {integrity: sha512-hFq11UtXNWPirZSZjZuWFHvjetYvFQmkQSZcNEMaQYxOz70ZLNFmIdXfG2J/B8YGE2nS2d223Hz9Lnkrxw+Sqw==}
-
-  '@x402/fetch@2.31.0':
-    resolution: {integrity: sha512-Td+Nxhy0TIwKMZ4G7q+lv+oD5SsRI1T0peGE34lSZaaZwXvqQbeR/TQDzex6tQpljq12+D7Mjwp1wX0Maa2Zeg==}
 
   '@x402/mcp@2.31.0':
     resolution: {integrity: sha512-l0qxG1d+f5EQ5rL8D01OuYl+gC2/xfLT650bmM7XfAljGn8mIEByYjKejvBun9tq02bFrwfUNDLWeOi6+pBrZg==}
@@ -3093,10 +3099,6 @@ snapshots:
       - ethers
       - typescript
       - utf-8-validate
-
-  '@x402/fetch@2.31.0':
-    dependencies:
-      '@x402/core': 2.31.0
 
   '@x402/mcp@2.31.0':
     dependencies:

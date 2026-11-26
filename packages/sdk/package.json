@@ -9,6 +9,14 @@
     "./buyer": {
       "types": "./dist/buyer/index.d.ts",
       "default": "./dist/buyer/index.js"
+    },
+    "./seller": {
+      "types": "./dist/seller/index.d.ts",
+      "default": "./dist/seller/index.js"
+    },
+    "./bazaar": {
+      "types": "./dist/bazaar/index.d.ts",
+      "default": "./dist/bazaar/index.js"
     }
   },
   "files": [
@@ -21,14 +29,16 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@x402/fetch": "~2.31.0"
+    "@stellar/stellar-sdk": "^16.4.1",
+    "@x402/extensions": "~2.31.0",
+    "zod": "^3.25.76"
   },
   "peerDependencies": {
     "@x402/core": "~2.31.0",
     "@x402/stellar": "~2.31.0"
   },
   "devDependencies": {
-    "@stellar/stellar-sdk": "^16.4.1",
+    "@stellar-x402/bazaar": "workspace:*",
     "@x402/core": "~2.31.0",
     "@x402/stellar": "~2.31.0"
   }

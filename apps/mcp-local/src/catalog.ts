@@ -1,4 +1,3 @@
-import { LIMITS } from "@stellar-x402/bazaar";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { z } from "zod";
 
@@ -23,18 +22,6 @@ const SUMMARY = z.object({
     .optional()
     .describe("How to call it: HTTP method and parameters, or MCP tool name and input schema"),
 });
-
-const ENTRY = z.object({
-  resource: z.string(),
-  type: z.string(),
-  accepts: z.array(ACCEPT),
-  description: z.string().optional(),
-  serviceName: z.string().optional(),
-  extensions: z.record(z.unknown()).optional(),
-});
-
-/** Read the catalog's answer, never trust its shape: a malformed page becomes an upstream_error. */
-const PAGE = z.object({ items: z.array(ENTRY), pagination: PAGINATION });
 
 /** The list_resources tool's input and output, as server.ts registers it. */
 const LIST_RESOURCES_INPUT = z
@@ -82,12 +69,8 @@ const SEARCH_RESOURCES_INPUT = LIST_RESOURCES_INPUT.omit({ offset: true }).exten
     ),
 });
 
-/** Upstream's search answer; the spec makes `partialResults` and `pagination` optional. */
-const SEARCH_PAGE = z.object({
-  resources: z.array(ENTRY),
-  partialResults: z.boolean().optional(),
-  pagination: z.object({ limit: z.number(), cursor: z.string().nullable() }).nullish(),
-});
+/** A search page's place: the spec makes it optional. */
+const SEARCH_PAGINATION = z.object({ limit: z.number(), cursor: z.string().nullable() }).nullish();
 
 const SEARCH_RESOURCES_OUTPUT = {
   items: z.array(SUMMARY).describe("Best match first"),
@@ -95,70 +78,14 @@ const SEARCH_RESOURCES_OUTPUT = {
     .boolean()
     .optional()
     .describe("true: some matches were left out, and no later page returns them"),
-  pagination: SEARCH_PAGE.shape.pagination.describe(
+  pagination: SEARCH_PAGINATION.describe(
     "cursor: pass it back for the next page; null when there is none",
   ),
 };
 
-/**
- * The parameter a catalog's `400` names, read from upstream's error: its client throws a plain
- * Error whose message is `… failed (<status>): <body>`, and our route's body is
- * `{"error":"bad_request","param":"<name>"}`. Anything else gives `undefined`. Only a name of the
- * tool's own inputs is kept, `""` otherwise: the body is the catalog's text, and the agent's model
- * reads the message.
- */
-function refusedParam(error: unknown): string | undefined {
-  const answer = /failed \(400\): (.*)$/s.exec(String(error));
-  if (!answer) return undefined;
-  try {
-    const body: unknown = JSON.parse(answer[1]!);
-    const param = (body as { param?: unknown }).param;
-    return typeof param === "string" && Object.hasOwn(SEARCH_RESOURCES_INPUT.shape, param)
-      ? param
-      : "";
-  } catch {
-    // A 400 without our route's body still names the agent's input as the cause.
-    return "";
-  }
-}
-
-type Entry = z.infer<typeof ENTRY>;
-
-/** The upstream `listResources` takes no abort signal, so a catalog that never answers is cut off here. */
-function deadline<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`no answer in ${ms} ms`)), ms);
-  });
-  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
-}
-
-/**
- * The catalog is written by sellers: keep their free text short before it reaches the model. The
- * input description is passed as the catalog holds it; our catalog bounds its size and depth on intake.
- */
-function summary(item: Entry) {
-  const bazaar = item.extensions?.bazaar as
-    { info?: { input?: Record<string, unknown> } } | undefined;
-  return {
-    resource: item.resource,
-    type: item.type,
-    description: item.description?.slice(0, LIMITS.descriptionChars),
-    serviceName: item.serviceName?.slice(0, LIMITS.descriptionChars),
-    // Parsing with ACCEPT already dropped the payment terms the agent does not choose by.
-    accepts: item.accepts,
-    input: bazaar?.info?.input,
-  };
-}
-
 export {
   LIST_RESOURCES_INPUT,
   LIST_RESOURCES_OUTPUT,
-  PAGE,
-  SEARCH_PAGE,
   SEARCH_RESOURCES_INPUT,
   SEARCH_RESOURCES_OUTPUT,
-  deadline,
-  refusedParam,
-  summary,
 };

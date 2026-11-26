@@ -1,7 +1,7 @@
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import type { ExtensionResponses } from "@stellar-x402/bazaar";
-import type { SettlementKey, SettlementRecord } from "../ports/index.js";
+import type { SettlementKey, SettlementListing, SettlementRecord } from "../ports/index.js";
 
 /**
  * Who sent a request on a network that requires an API key (0105): `stellar:pubnet`. A network
@@ -95,6 +95,16 @@ export interface SettlementHooks {
    * `extensions.bazaar`.
    */
   extensionResponses(record: SettlementRecord): ExtensionResponses | undefined;
+  /**
+   * Pure and synchronous: the Bazaar listing the payment pays for, read from its
+   * `extensions.bazaar` before the claim, so the claim stores it with the record (0154).
+   * `undefined` when the payload has no valid copy. A throw leaves the record without one; the
+   * settlement module logs and counts it.
+   */
+  listingOf(
+    payload: PaymentPayload,
+    requirements: PaymentRequirements,
+  ): SettlementListing | undefined;
   /**
    * Runs once when a record turns `success` (AD-8): after the settle response is sent, or when a
    * `resolved` event, the startup re-check or a submission past the settle budget finalizes it

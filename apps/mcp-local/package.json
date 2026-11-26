@@ -20,12 +20,12 @@
     "@stellar-x402/sdk": "workspace:*",
     "@stellar-x402/seller-fetch": "workspace:*",
     "@x402/core": "~2.31.0",
-    "@x402/extensions": "~2.31.0",
     "@x402/stellar": "~2.31.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@stellar/stellar-sdk": "^16.4.1"
+    "@stellar/stellar-sdk": "^16.4.1",
+    "@x402/extensions": "~2.31.0"
   },
   "bin": {
     "stellar-x402-mcp": "./dist/index.js"

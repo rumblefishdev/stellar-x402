@@ -79,7 +79,7 @@ export interface SeedResult {
   detail?: string;
 }
 
-export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"> & {
+export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "listingOf" | "onSuccess"> & {
   /** Resolves once every in-flight `onSuccess` has settled (tests, graceful shutdown). */
   drain(): Promise<void>;
   /**
@@ -452,6 +452,15 @@ export function createCataloger({
         internalError("header", context(record, "settle"), "settle", error);
         return { bazaar: { status: "rejected", rejectedReason: "internal_error" } };
       }
+    },
+    listingOf(payload, requirements) {
+      // The same validation and key as the catalog's entry, so the search's quality score
+      // (ADR 0014) counts the payer under the listing the catalog holds. A throw reaches the
+      // settlement module, which logs and counts it as a hook failure.
+      const result = bazaar.validate(payload, requirements, options);
+      if (!result?.ok) return undefined;
+      const { method, resourceUrl } = bazaar.normalize(result, requirements).key;
+      return { method, resourceUrl };
     },
     onSuccess(record, origin) {
       // Never rejects: an unhandled rejection would fail `/settle`'s process.

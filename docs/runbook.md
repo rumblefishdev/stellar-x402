@@ -225,14 +225,34 @@ ADR 0013's first upgrade (Not here yet).
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
 - The signer (0036), and the key's account and channels (OpenBao, step 6).
-- `/srv/x402/production/.env` with the key's address and its channels, from OpenBao's steps 4
-  and 6: public values, so a plain file, owned by `x402`, mode 0644, which the playbook leaves
-  alone. `compose.yaml` requires both: without them `x402@`, the deploy's `migrate-testnet` and
-  the `docker compose` commands here stop at interpolation.
+- `/srv/x402/production/.env` with the Transit key's name and version, its address and its
+  channels, from OpenBao's steps 4 and 6: public values, so a plain file, owned by `x402`,
+  mode 0644, which the playbook leaves alone. They change together, so they live together, and a
+  new key needs no pull request (ADR 0015). `compose.yaml` requires all four: without them `x402@`,
+  the deploy's `migrate-testnet` and the `docker compose` commands here stop at interpolation.
 
   ```sh
-  printf 'FACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' ADDRESS CHANNELS |
+  printf 'OPENBAO_KEY_TESTNET=%s\nOPENBAO_KEY_VERSION_TESTNET=%s\nFACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' \
+    KEY_NAME KEY_VERSION ADDRESS CHANNELS |
     ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+  ```
+
+  `KEY_NAME` and `KEY_VERSION` are the Transit key's, from OpenBao's step 4: `stellar-testnet`
+  and `1` on a first setup, and something else after a "lost access" rebuild. This writes the
+  whole file, so use it only for a new `.env`; to change one value, edit only its line, as
+  [channel-quarantined](monitoring.md#channel-quarantined) does for `CHANNELS_TESTNET`.
+
+  A server set up before the key's name and version moved here (2026-11-24, task 0048) has only
+  the last two lines: add the first two before the playbook run that copies this `compose.yaml`.
+  From that copy on, any start of `x402@` stops at interpolation without them, so the playbook
+  refuses to copy the compose files while an existing `.env` lacks any of the four names. The
+  command adds the lines once, after a newline if the file doesn't end with one:
+
+  ```sh
+  ssh SERVER 'sudo sh -euc '\''f=/srv/x402/production/.env
+    grep -q "^OPENBAO_KEY_TESTNET=" "$f" && exit 0
+    [ -z "$(tail -c1 "$f")" ] || echo >> "$f"
+    printf "OPENBAO_KEY_TESTNET=stellar-testnet\nOPENBAO_KEY_VERSION_TESTNET=1\n" >> "$f"'\'''
   ```
 
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server
@@ -889,6 +909,148 @@ place), `X402_OPENBAO_DIR` (a copy of `deploy/openbao` with its own volume names
 implementation notes have the run of 2026-11-05: a snapshot, the restore of it into a second
 OpenBao through a copy of the repository with its key imported from the export, and the same
 Transit key after it.
+
+## Lost access to the facilitator's accounts
+
+The key keeps its full power on the fee account and the channels
+([ADR 0015](adr/0015-hot-key-full-power.md)), so a thief can add a signer, remove ours and take
+the float. This section moves the facilitator to a new key, a new fee account and new channels,
+and abandons the old ones with their XLM (about 130 XLM at launch). Shown for testnet; mainnet's
+names come with 0038.
+
+**When:**
+
+- The facilitator refuses to start with `extra-signer` from `checkChannel`, or a channel or the fee
+  account has a signer, threshold or weight nobody on the team set.
+- XLM left the fee account that no settlement or top-up explains (`balance-critical`, the theft
+  alarm once 0127 turns it on).
+- OpenBao's data is lost and a restore from a snapshot failed.
+
+Not for a planned rotation while our key still works: that one keeps the accounts (ADR 0013, 0099;
+not here yet).
+
+1. **Stop the facilitator** and note the time:
+
+   ```sh
+   sudo systemctl stop x402@production
+   ```
+
+2. **Decide whether this server stays.** A new key in an OpenBao that someone else can read is
+   stolen the same way.
+
+   | What happened                                                                                                                                     | Then                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+   | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | A secret ID or token seen outside the server, and OpenBao's audit log shows every signature came from the facilitator's token at its settle times | Not this section: the key wasn't used. OpenBao has no network (`network_mode: none`), so a credential can't sign from outside the server. Keep the accounts and cut off the one that leaked: testnet's secret ID or an AppRole token, step 3's `revoke-prefix`, `destroy` and new secret ID lines; a root token, by its accessor ([A lost shell](#openbao)); the snapshots' secret ID, step 3's `destroy` loop on `x402-snapshot`, then a new one with step 4 of "OpenBao snapshots → Setting it up". Then start `x402@production` again: step 1 stopped it, and it reads a new secret ID only at a start. |
+   | A signature the facilitator didn't make, root on the server, code in the facilitator's container, or you don't know                               | The server doesn't stay: whoever signed was on the server or in the container. Stop here: a clean server, set up with "Before the first deploy" and OpenBao's steps 1–6 with the two changes below, and every secret the server held rotated ([Credentials](#credentials)). Then steps 6 and 7 below.                                                                                                                                                                                                                                                                                                      |
+   | OpenBao's disk, with no break-in, and the restore failed                                                                                          | The server stays. OpenBao starts over with new volumes, as its "Setting it up" says (stop `x402-openbao`, `compose down`, the two volumes removed and made again): the failed restore's Raft data makes `init` refuse, and a running OpenBao keeps the old seal key, so the next restart can't unseal. Then OpenBao's steps 1–5 make a new `stellar-testnet` at version 1, with the two changes below; skip step 3.                                                                                                                                                                                        |
+
+   The backup secret lives in AWS, so it outlives any server: in the last two rows it already
+   exists, and two of OpenBao's steps change:
+
+   - **Step 3 updates the backup secret, it doesn't create it.** `create-secret` fails on the
+     existing `x402/production/openbao-backup`. Never delete it and create it again: its Borg
+     passphrase and key export are the only copy of them off the server, and the backups need
+     them. Write the new seal key,
+     recovery key and seal config into it and keep its Borg and Storage Box fields, with the
+     variables of step 3:
+
+     ```sh
+     id=x402/production/openbao-backup
+     cur=$(aws secretsmanager get-secret-value --region eu-central-1 --secret-id $id --query SecretString --output text)
+     new=$(printf %s "$cur" | seal_key=$seal_key recovery_key=$(printf %s "$init" | jq -r '.recovery_keys_b64[0]') \
+       sha=$(printf %s "$seal_key" | shasum -a 256 | cut -d' ' -f1) \
+       seal_config=$(sed -n '/^seal "static"/,/^}/p' deploy/openbao/config.hcl) \
+       jq -c '.seal_key_hex = env.seal_key | .seal_key_sha256 = env.sha | .recovery_key = env.recovery_key
+         | .seal_config = env.seal_config | .updated = (now | todate)')
+     printf %s "$new" | aws secretsmanager put-secret-value --region eu-central-1 --secret-id $id \
+       --secret-string file:///dev/stdin --query VersionId --output text
+     ```
+
+   - **Then the snapshots' AppRole again:** "OpenBao snapshots → Setting it up", step 4. The old
+     one went with the old storage, so every nightly snapshot fails until it runs.
+
+3. **A new version of the key, and new credentials.** In a root shell with a root token ([A new
+   root token](#openbao)), one line at a time, as in OpenBao's step 4. The key keeps its name, so
+   the AppRole's policy (`transit/sign/stellar-testnet`) still fits and nothing in the repo
+   changes. `min_encryption_version` stops anyone signing with an older version; then every token
+   the AppRole issued is revoked and every secret ID destroyed, and a new secret ID goes into the
+   facilitator's credential.
+
+   ```sh
+   sudo -i
+   cd /srv/x402/openbao
+   read -rs BAO_TOKEN && export BAO_TOKEN   # paste the root token, Enter
+   bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
+   n=testnet
+   bao write -f transit/keys/stellar-$n/rotate </dev/null >/dev/null
+   v=$(bao read -field=latest_version transit/keys/stellar-$n </dev/null) && echo "version $v"
+   bao write transit/keys/stellar-$n/config min_encryption_version=$v </dev/null >/dev/null
+   bao write -f sys/leases/revoke-prefix/auth/approle/login </dev/null
+   for a in $(bao list -format=json auth/approle/role/x402-$n/secret-id </dev/null | python3 -c 'import json, sys; print(" ".join(json.load(sys.stdin)))'); do bao write auth/approle/role/x402-$n/secret-id-accessor/destroy secret_id_accessor=$a </dev/null && echo "destroyed $a"; done
+   s=$(bao write -f -field=secret_id auth/approle/role/x402-$n/secret-id </dev/null) && [ -n "$s" ] &&
+     printf %s "$s" | systemd-creds encrypt --with-key=host --name=approle-secret-id.$n - \
+       /srv/x402/production/creds/approle-secret-id.$n.cred
+   unset s
+   bao read -format=json transit/keys/stellar-$n </dev/null   # .data.keys["<v>"].public_key
+   bao token revoke -self; unset BAO_TOKEN
+   ```
+
+   The address comes from that public key with OpenBao's step 4 `node -e` line. Note `v`: it goes
+   into `.env` in step 5.
+
+4. **A new fee account and new channels** for that address: OpenBao's step 6. On testnet Friendbot
+   funds the fee account with 10,000 XLM; mainnet's float comes from the company's exchange account
+   ([Topping up the fee account](#topping-up-the-fee-account)).
+
+5. **The four values in `.env`**, written whole, with the version from step 3:
+
+   ```sh
+   printf 'OPENBAO_KEY_TESTNET=%s\nOPENBAO_KEY_VERSION_TESTNET=%s\nFACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' \
+     stellar-testnet VERSION ADDRESS CHANNELS |
+     ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+   ```
+
+6. **Start it, and check the signer.** A well-formed version, or an address the channels accept,
+   doesn't stop the start, even when it's wrong: the
+   facilitator runs, `/health` says `signer: failed`, the log has `signer_failed` with its reason
+   (`address_mismatch` for a wrong address, `error` for a version below `min_encryption_version`,
+   which OpenBao answers with a 500, `denied` for a credential), and every settle fails until it
+   is fixed.
+
+   ```sh
+   sudo systemctl start x402@production
+   sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator \
+     node -e "fetch('http://127.0.0.1:4021/health').then((r) => r.text()).then(console.log)"
+   curl -s https://x402-facilitator.sorobanscan.com/supported   # signers: the new address
+   ```
+
+   `ready`, `listed` and `signer: "ok"`, and one paid request settles.
+
+   Two mistakes stop the start instead, before `/health` exists, so the check above has nothing
+   to talk to: a malformed version (`VERSION`, `v2`, `0`) fails the config check, and an address
+   that isn't the channels' signer fails `checkChannels` with `facilitator-not-signer`. `x402@`
+   restarts until systemd gives up (5 starts in 5 minutes). The journal has only systemd's
+   `status=1/FAILURE`; the reason (`startup_failed`, `facilitator-not-signer`) is in the
+   facilitator's own log, as in [The watchdog](#the-watchdog):
+   `sudo tail -n 20 /var/log/x402/production/facilitator.log`. Fix `.env`, then
+   `sudo systemctl reset-failed x402@production` and start it again.
+
+7. **The alarms on the new fee account:** a pull request that changes `feeAccounts` in
+   `infra/envs/production.json`, then in `infra/` both stacks that hold the address:
+   `make diff-production-watch` and `make deploy-production-watch` (what Watch reads), then
+   `make diff-production-alarms` and `make deploy-production-alarms` (the text of `balance-low`
+   and `balance-critical`, "Top up <account>"). Until both run, those alarms read the old account
+   and fire as it drains, and their text tells whoever is on call to top up the abandoned account
+   the thief holds: don't. The facilitator doesn't wait for this.
+
+**After it:**
+
+- The old addresses stay under the old key for good. Nothing may trust them: no contract may take a
+  channel address as an authority, and `upto`'s receiver authorizer is always the current key
+  (ADR 0015).
+- Open `upto` authorizations bound to the old address can't be revoked; they expire within their
+  window (threat model, "A stolen key charges open `upto` authorizations").
+- Record the time, the abandoned addresses and the XLM left behind in the weekly review.
 
 ## Topping up the fee account
 

@@ -78,3 +78,21 @@ the window. Median of 20 warm runs, in ms. The Mac was busy, so read every figur
   ships with its key only; an index comes when a measurement of the shipped search query needs it.
 - Both ways gave the same count for every listing at every size.
 - Writing one row took 0.3–0.4 ms.
+
+## The payer count from listing columns on `settlements` (2026-11-25)
+
+The table above was not built: the listing's method and URL went onto the settlement's row instead.
+Same setup on PostgreSQL 18.6, a page of 20 listings, median in ms. Counted from `settlements` by the
+two listing columns, with network, `payTo` and asset from the row's `payment_requirements` (about
+260 bytes, stored inline).
+
+| Payments in 30 days | No index | Index on the listing columns |
+| --- | --- | --- |
+| 155 | 0.46 | 0.57 |
+| 2,539 | 1.39 | 0.70 |
+| 25,000 | 15.1 | 1.55 |
+| 250,000 | 226 | 27.7 |
+
+- The count matched the derived one for every listing at every size.
+- Writing the two columns took 0.3–0.4 ms; adding them took 0.4–16.5 ms under the table's lock up
+  to 600,000 rows, a change to the table's metadata only.
