@@ -7,3 +7,4 @@ export {
   type PayingFetchConfig,
   type Payment,
 } from "./fetch.js";
+export { checkTrustline, type TrustlineCheck, type TrustlineCheckOptions } from "../trustline.js";

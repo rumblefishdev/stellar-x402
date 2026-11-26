@@ -342,10 +342,11 @@ importers:
         version: link:../config
 
   packages/sdk:
-    devDependencies:
+    dependencies:
       '@stellar/stellar-sdk':
         specifier: ^16.4.1
         version: 16.4.1
+    devDependencies:
       '@x402/core':
         specifier: ~2.31.0
         version: 2.31.0
