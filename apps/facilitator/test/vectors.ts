@@ -51,7 +51,7 @@ export async function setVector(
 ): Promise<void> {
   const { searchCards } = postgresStores(pool, {}, model);
   const { rows } = await pool.query<SearchCard>(
-    `SELECT s.seq, s.name, s.tags, s.description, s.parameters, s.model
+    `SELECT s.seq, s.name, s.tags, s.description, s.parameters
        FROM catalog c JOIN catalog_search s USING (seq)
       WHERE c.network = $1 AND c.pay_to = $2 AND c.method = $3 AND c.resource_url = $4`,
     [key.network, key.payTo, key.method, key.resourceUrl],

@@ -48,7 +48,7 @@ export class PostgresSearchCardStore implements SearchCardStore {
 
   async cards(after: string, limit: number): Promise<SearchCard[]> {
     const { rows } = await this.pool.query<SearchCard>(
-      `SELECT seq, name, tags, description, parameters, model
+      `SELECT seq, name, tags, description, parameters
          FROM catalog_search WHERE seq > $1 AND model IS DISTINCT FROM $3 ORDER BY seq LIMIT $2`,
       [after, limit, this.searchModel],
     );

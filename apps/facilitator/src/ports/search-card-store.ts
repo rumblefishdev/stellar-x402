@@ -7,7 +7,7 @@ export interface CardListing {
   resource: DiscoveryResource;
 }
 
-/** A listing's search card as the vectors' loop reads it: its four fields and its vector's model. */
+/** A listing's search card as the vectors' loop reads it: its four fields. */
 export interface SearchCard {
   /** The catalog row's `seq`, as PostgreSQL's text for a bigint. */
   seq: string;
@@ -15,8 +15,6 @@ export interface SearchCard {
   tags: string;
   description: string;
   parameters: string;
-  /** The model that made the stored vector; null while the card has none. */
-  model: string | null;
 }
 
 /**
