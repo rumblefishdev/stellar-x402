@@ -1,13 +1,15 @@
 /**
  * Testnet run for 0094: what a seller sees when its `payTo` can't receive the asset it sells, for
- * each kind of client. The seller is `examples/http-api`'s `createApp` as this package can build
- * it (upstream's Express middleware, the same route and terms, its one log line; not its Bazaar
- * extension, which a refusal never reaches; importing the example breaks this package's
- * `rootDir`), without the
- * example's trustline check at start (`src/index.ts`): a seller on upstream's middleware alone. The
- * facilitator is ours, built by `main()` in this process. A recorder in front of the seller writes
- * down every request it got and its answer; that is this run's view, not the seller's, whose own
- * log is the lines its code and the console wrote (the facilitator logs to its own sink).
+ * each kind of client. The seller is `examples/http-api`'s `createApp` as it was before 0164, as
+ * this package can build it: upstream's Express middleware, the same route and terms, and its one
+ * log line (not its Bazaar extension, which a refusal never reaches; importing the example breaks
+ * this package's `rootDir`). It runs without the example's trustline check at start
+ * (`src/index.ts`): a seller on upstream's middleware alone. The facilitator is ours, built by
+ * `main()` in this process. A recorder in front of the seller writes down every request it got and
+ * its answer; that is this run's view, not the seller's, whose own log is the lines its code and
+ * the console wrote (the facilitator logs to its own sink). Apart from that log, the run records
+ * what 0164's `readVerifyRefusal` reads in the seller's `onAfterVerify` hook, which `createApp`
+ * now logs.
  *
  * 1. `payTo` is a fresh account without a USDC trustline. Two clients ask to pay it:
  *    - our SDK's `createPayingFetch`, which `apps/mcp-local` pays through;
@@ -59,6 +61,8 @@ import {
   checkTrustline,
   createFacilitatorConfig,
   readCatalogAnswer,
+  readVerifyRefusal,
+  type VerifyRefusal,
 } from "@stellar-x402/sdk/seller";
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import { ExactStellarScheme as ExactStellarServer } from "@x402/stellar/exact/server";
@@ -111,6 +115,8 @@ for (const level of ["log", "info", "warn", "error"] as const) {
     original(...args);
   };
 }
+// What 0164's reader read in the seller's `onAfterVerify` hook, kept apart from the seller's log.
+const refusalsRead: VerifyRefusal[] = [];
 // The facilitator's JSON log lines.
 const facilitatorLog: Record<string, unknown>[] = [];
 const write = (line: string) => {
@@ -160,6 +166,9 @@ async function startSeller(name: string, payTo: string, facilitatorUrl: string) 
   resourceServer.onAfterSettle(async ({ result }) => {
     const answer = readCatalogAnswer(result);
     if (answer.status !== "none") sellerLog.push(`seller: Bazaar ${answer.status}`);
+  });
+  resourceServer.onAfterVerify(async ({ result }) => {
+    refusalsRead.push(readVerifyRefusal(result));
   });
   app.use(
     paymentMiddleware(
@@ -335,6 +344,15 @@ try {
     verifyNamesAccount:
       firstAtVerify.invalidMessage?.includes(losing.publicKey()) === true &&
       secondAtVerify.invalidMessage?.includes(losing.publicKey()) === true,
+    readerMarksSellerFix:
+      refusalsRead.length === 2 &&
+      refusalsRead.every(
+        (read) =>
+          read.status === "refused" &&
+          read.sellerMustAct &&
+          read.reason === "invalid_exact_stellar_payto_trustline_missing" &&
+          read.message?.includes(losing.publicKey()) === true,
+      ),
     facilitatorLoggedMessage: verified.some(
       (line) =>
         line.invalidReason === "invalid_exact_stellar_payto_trustline_missing" &&
@@ -366,6 +384,7 @@ try {
     },
     sellerReceived: received,
     sellerLog,
+    refusalsRead,
     facilitatorVerified: verified,
     checks,
   };
