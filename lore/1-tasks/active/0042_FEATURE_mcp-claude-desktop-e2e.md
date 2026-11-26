@@ -77,9 +77,81 @@ pay, any day.
 - [ ] `examples/http-api` runs on the production server next to the facilitator, at its own public
       https hostname, settling through our facilitator; its 402 names an `https://` resource, and it
       is listed in the testnet catalog
-- [ ] The README's catalog line (`apps/mcp-local/README.md`, today
-      `https://your-catalog.example.com`) names our catalog's testnet URL
+- [x] The README's catalog line (`apps/mcp-local/README.md`, today
+      `https://your-catalog.example.com`) names our catalog's testnet URL (`8dee9c1e`)
 - [ ] Given the README's config in Claude Desktop, when an agent searches the catalog, then it finds
       that seller and pays it on testnet; the transaction hash is recorded here
 - [ ] A probe apart from the facilitator's healthcheck alarms when the seller stops answering a 402
       with our `payTo` on `stellar:testnet`
+
+## Implementation Notes
+
+### The seller, ready for the server (2026-11-25)
+
+On this task's branch, four commits:
+
+- `e70e086d` `PUBLIC_ORIGIN`: optional, https and an origin only; the 402 then names
+  `<origin>/weather`. Unset, the seller names the URL the request came in on, as before.
+- `d3733e60` the seller handles SIGTERM: it stops taking requests, lets open ones finish and
+  exits 0.
+- `7158f4a1` `examples/http-api/Dockerfile`, on the facilitator's pinned base.
+- `8dee9c1e` the README's catalog line names `https://x402-facilitator.sorobanscan.com`.
+
+Checked on that code:
+
+- **The catalog's own steps** (`packages/bazaar`, as `apps/facilitator/src/catalog/cataloger.ts`
+  runs them after a settle), fed the seller's real 402 with
+  `PUBLIC_ORIGIN=https://x402-seller.sorobanscan.com`: the payment's copy validates, the check
+  request is `GET https://x402-seller.sorobanscan.com/weather?city=Warsaw`, the seller's answer
+  gives a listing with our `payTo` and 10000 (0.001 USDC), and `sameListing` with the payment's
+  copy is true. Without it, behind the tunnel, the check request is http and the seller-fetch guard
+  refuses it with `not_https`, so no listing is written.
+- **The image**, run as the server would (`--read-only`, `--cap-drop ALL`,
+  `no-new-privileges`) against our facilitator: 402 naming
+  `https://x402-seller.sorobanscan.com/weather`, `stellar:testnet`, amount 10000; a probe from
+  inside the container gets 402; `docker stop` returns at once with exit code 0.
+- **The repo's checks:** lint, typecheck and prettier clean; tests pass in 22 of 23 packages,
+  facilitator included (55 files, with the local Postgres). `deploy` fails in
+  `openbao-snapshot.test.ts` and `portal.test.ts` on macOS (`flock: command not found`), the same
+  two files without these commits.
+
+### Testnet e2e run (2026-11-25)
+
+`pnpm mcp:e2e` (`apps/mcp-local/e2e`, task 0037) on the code of `8dee9c1e`: **26 of 26 scenarios
+passed, 0 failed**, 125 result rows, 188 s. It starts the seller locally without `PUBLIC_ORIGIN`, so
+it proves the payment path still works after these commits, not the https listing behind the tunnel,
+which only the deployed seller can show.
+
+The three real payments of 0.001 testnet USDC, each `successful` on Horizon:
+
+| Scenario                         | Transaction                                                        | Ledger  |
+| -------------------------------- | ------------------------------------------------------------------ | ------- |
+| E-21                             | `263d5b00c6f7440b28d5c3228ea9441ac205ae3729f84c2f7248752f9e74d2ba` | 5917948 |
+| E-22                             | `60a8ef6d533b1ae10599c1bbac63549c82dc9ce0734a712f09279a524e8e4d67` | 5917950 |
+| E-25 (search, then pay)          | `bdebcc1fe02fadf0226d821512ebb88904a6d4dda0a7fc8e15ae3128e7f280c0` | 5917955 |
+
+Accounts, made for this run with friendbot and a USDC trustline each (Circle's faucet funded the
+buyer with 20 USDC); after the run the buyer held 19.997 USDC and the seller 0.003:
+
+- buyer `GAR7V5FFFBZCONTFJM6DM4ERFJ2YPQAGODBAGN2N5HBJKRJQ6ZQOSACM`, kept for the Claude Desktop run
+- seller `GDZ5HHWORH5MRTC4CC6UY63OQMXVSM4Y7MXJ4WGGTZV2HDGMOJQP632X`, for e2e runs only; the deployed
+  seller gets an account of its own
+
+Their keys are in the owner's git-ignored `.env.e2e-testnet`, and go with the testnet reset of
+2026-12-16. `apps/mcp-local/e2e/results/testnet-results.json` was left as it was: the run's commit
+field would name `8f671cbe`, as these commits were not made yet.
+
+## Design Decisions
+
+### Emerged
+
+1. **`PUBLIC_ORIGIN` takes https and an origin only.** An http one would bring back the refused
+   listing, and a path would make the route name a URL other than its own. After Karol's review
+   it must also name a host a catalog lists (no user or password, no IP address, no trailing dot,
+   no single label or private suffix), the rules `packages/bazaar` applies later, so a wrong value
+   stops the start instead of leaving a seller that is never listed. The rules are copied, not
+   imported, so the example needs none of our packages. `trust proxy` in its place was turned
+   down: it rests on the tunnel's forwarded headers, which nothing checked before the deploy.
+2. **The seller handles SIGTERM.** Not in the criteria; without it every `docker stop` and deploy
+   would wait out the grace period and kill it, which the facilitator and the portal avoid the same
+   way.

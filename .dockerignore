@@ -1,4 +1,4 @@
-# The build context of the images (apps/facilitator/Dockerfile, apps/portal/Dockerfile). Never
+# The build context of the images (apps/facilitator, apps/portal, examples/http-api). Never
 # secrets, and nothing a build makes itself.
 **/.env*
 **/.stellar

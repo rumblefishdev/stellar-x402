@@ -9,13 +9,18 @@ export interface SellerConfig {
   payTo: string;
   /** Facilitator that verifies and settles them, e.g. the public x402.org one on testnet. */
   facilitatorUrl: string;
+  /**
+   * The origin buyers reach the seller at, such as `https://seller.example.com`. The 402 then
+   * names `<origin>/weather` as the resource; unset, it names the URL the request came in on.
+   */
+  publicOrigin?: string;
 }
 
 /**
  * A paid weather API on Stellar testnet: `GET /weather?city=` costs 0.001 USDC and is described for
  * the Bazaar, so a facilitator that catalogs on settle lists it after the first payment.
  */
-export function createApp({ payTo, facilitatorUrl }: SellerConfig): Express {
+export function createApp({ payTo, facilitatorUrl, publicOrigin }: SellerConfig): Express {
   const resourceServer = new x402ResourceServer(new HTTPFacilitatorClient({ url: facilitatorUrl }))
     .register("stellar:testnet", new ExactStellarScheme())
     .registerExtension(bazaarResourceServerExtension);
@@ -26,6 +31,7 @@ export function createApp({ payTo, facilitatorUrl }: SellerConfig): Express {
       {
         "GET /weather": {
           accepts: { scheme: "exact", price: "$0.001", network: "stellar:testnet", payTo },
+          ...(publicOrigin && { resource: `${publicOrigin}/weather` }),
           description: "Current temperature for a city",
           mimeType: "application/json",
           extensions: declareDiscoveryExtension({
