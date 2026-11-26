@@ -70,12 +70,6 @@ export interface CatalogSearchHit extends CatalogSearchPosition {
   resource: DiscoveryResource;
 }
 
-/** A settled payment and the listing it paid for, which the search's quality score counts (0154). */
-export interface CatalogPaymentLink {
-  settlementKey: string;
-  key: CatalogKey;
-}
-
 /** `stale`: the stored entry came from a check that started later; nothing was written. */
 export type UpsertOutcome = "inserted" | "updated" | "stale";
 
@@ -102,11 +96,6 @@ export interface CatalogStore {
    * goes on exactly where the page before stopped.
    */
   search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
-  /**
-   * Writes the listing's method and URL on the settlement's row; the rest of the key is already
-   * there. Idempotent; rejects when no settlement has `settlementKey`.
-   */
-  linkPayment(link: CatalogPaymentLink): Promise<void>;
 }
 
 /** Where a listing attempt ended: the payment's copy, or the check of the seller's 402. */

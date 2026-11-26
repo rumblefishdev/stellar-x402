@@ -9,7 +9,6 @@ import type {
   CatalogEntry,
   CatalogKey,
   CatalogPage,
-  CatalogPaymentLink,
   CatalogQuery,
   CatalogSearch,
   CatalogSearchHit,
@@ -196,14 +195,6 @@ export class PostgresCatalogStore implements CatalogStore {
       },
       resource: row.resource,
     }));
-  }
-
-  async linkPayment({ settlementKey, key }: CatalogPaymentLink): Promise<void> {
-    const { rowCount } = await this.pool.query(
-      "UPDATE settlements SET listing_method = $2, listing_url = $3 WHERE key = $1",
-      [settlementKey, key.method, key.resourceUrl],
-    );
-    if (rowCount !== 1) throw new Error(`no settlement ${settlementKey} to link to its listing`);
   }
 }
 

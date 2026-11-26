@@ -153,6 +153,7 @@ describe("PostgreSQL stores", () => {
             beforeSubmit: async () => ({ allow: true }),
             onFinal: async () => {},
             onSuccess: async () => {},
+            listingOf: () => undefined,
           },
           logger: jsonLogger("error"),
           metrics: memoryMetrics(),
@@ -1605,24 +1606,17 @@ describe("PostgreSQL stores", () => {
   });
 
   describe("the listing of a settlement (0154)", () => {
-    const key = {
-      network: "stellar:testnet" as const,
-      payTo: "GPAYTO",
-      method: "GET",
-      resourceUrl: "https://seller.example.com/data",
-    };
+    const listing = { method: "GET", resourceUrl: "https://seller.example.com/data" };
     /** Every settlements row, every column, in key order. */
     const rows = async (on = pool) =>
       (await on.query<Record<string, unknown>>("SELECT * FROM settlements ORDER BY key")).rows;
-    /** Two settlements: the first a success, the second still claimed. */
-    const twoSettled = async (settlements: Stores["settlements"]) => {
-      await settlements.claim(settlement("1"));
-      await settlements.transition(settlement("1").key, "claimed", {
-        state: "success",
-        updatedAt: 3_000,
-      });
-      await settlements.claim(settlement("2"));
-    };
+    /** Each settlement's listing columns, in key order. */
+    const listings = async () =>
+      (
+        await pool.query<Record<string, unknown>>(
+          "SELECT key, listing_method, listing_url FROM settlements ORDER BY key",
+        )
+      ).rows;
 
     it("adds nullable listing_method and listing_url to settlements, NULL on rows written before it (0154)", async () => {
       const fresh = `${schema}_0018`;
@@ -1633,8 +1627,25 @@ describe("PostgreSQL stores", () => {
         const before = MIGRATIONS.findIndex((m) => m.name === "0019_settlement_listing");
         expect(before).toBe(18);
         await migrate(old, 0, MIGRATIONS.slice(0, before));
-        // Written by the release before it.
-        await twoSettled(postgresStores(old).settlements);
+        // Two rows as the release before it wrote them: a success and a claimed one, copied
+        // column by column into the older table, which has no listing columns.
+        const { settlements } = await stores();
+        await settlements.claim(settlement("1"));
+        await settlements.transition(settlement("1").key, "claimed", {
+          state: "success",
+          updatedAt: 3_000,
+        });
+        await settlements.claim(settlement("2"));
+        const { rows: oldColumns } = await old.query<{ column_name: string }>(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_schema = current_schema() AND table_name = 'settlements'
+             AND is_generated = 'NEVER'`,
+        );
+        const columns = oldColumns.map(({ column_name }) => `"${column_name}"`).join(", ");
+        await pool.query(
+          `INSERT INTO ${fresh}.settlements (${columns})
+           SELECT ${columns} FROM ${schema}.settlements`,
+        );
         expect(await migrate(old)).toEqual(["0019_settlement_listing"]);
         expect(
           (await rows(old)).map(({ key, listing_method, listing_url }) => ({
@@ -1646,13 +1657,13 @@ describe("PostgreSQL stores", () => {
           { key: settlement("1").key, listing_method: null, listing_url: null },
           { key: settlement("2").key, listing_method: null, listing_url: null },
         ]);
-        const { rows: columns } = await old.query(
+        const { rows: added } = await old.query(
           `SELECT column_name, data_type, is_nullable FROM information_schema.columns
            WHERE table_schema = current_schema() AND table_name = 'settlements'
              AND column_name IN ('listing_method', 'listing_url')
            ORDER BY column_name`,
         );
-        expect(columns).toEqual([
+        expect(added).toEqual([
           { column_name: "listing_method", data_type: "text", is_nullable: "YES" },
           { column_name: "listing_url", data_type: "text", is_nullable: "YES" },
         ]);
@@ -1662,36 +1673,63 @@ describe("PostgreSQL stores", () => {
       }
     });
 
-    it("sets the listing's method and URL on that settlement's row, and nothing else on any row (0154)", async () => {
-      const { settlements, catalog } = await stores();
-      await twoSettled(settlements);
-      const [first, second] = await rows();
-      await catalog.linkPayment({ settlementKey: settlement("1").key, key });
-      expect(await rows()).toEqual([
-        { ...first, listing_method: "GET", listing_url: "https://seller.example.com/data" },
-        second,
+    it("writes a claim's listing to listing_method and listing_url, and NULL for a claim without one (0154)", async () => {
+      const { settlements } = await stores();
+      await settlements.claim({ ...settlement("1"), listing });
+      await settlements.claim(settlement("2"));
+      expect(await listings()).toEqual([
+        {
+          key: settlement("1").key,
+          listing_method: "GET",
+          listing_url: "https://seller.example.com/data",
+        },
+        { key: settlement("2").key, listing_method: null, listing_url: null },
       ]);
     });
 
-    it("leaves the same values when settle and reconcile link one settlement, in turn or at once (0154)", async () => {
-      const { settlements, catalog } = await stores();
-      await twoSettled(settlements);
-      const link = { settlementKey: settlement("1").key, key };
-      await catalog.linkPayment(link);
-      const linked = await rows();
-      await expect(catalog.linkPayment(link)).resolves.toBeUndefined();
-      await Promise.all(Array.from({ length: 10 }, () => catalog.linkPayment(link)));
-      expect(await rows()).toEqual(linked);
+    it("keeps the winning claim's listing: a claim that loses to the key changes nothing on its row (0154)", async () => {
+      const { settlements } = await stores();
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, i) =>
+          settlements.claim({
+            ...settlement("1"),
+            listing: { method: `M${i}`, resourceUrl: `https://seller.example.com/${i}` },
+          }),
+        ),
+      );
+      const winner = results.findIndex((result) => result.claimed);
+      expect(results.filter((result) => result.claimed)).toHaveLength(1);
+      const [won] = await rows();
+      expect(won).toMatchObject({
+        listing_method: `M${winner}`,
+        listing_url: `https://seller.example.com/${winner}`,
+      });
+
+      // A later claim of the key, with another listing or none, finds the row as it was.
+      await settlements.claim({ ...settlement("1"), listing });
+      await settlements.claim(settlement("1"));
+      expect(await rows()).toEqual([won]);
     });
 
-    it("rejects a link to a settlement no row has, and writes nothing (0154)", async () => {
-      const { settlements, catalog } = await stores();
-      await twoSettled(settlements);
-      const before = await rows();
-      await expect(
-        catalog.linkPayment({ settlementKey: settlement("9").key, key }),
-      ).rejects.toThrow();
-      expect(await rows()).toEqual(before);
+    it("keeps a record's listing when it is reopened (0154)", async () => {
+      const { settlements } = await stores();
+      const s = settlement("1");
+      await settlements.claim({ ...s, listing });
+      await settlements.transition(s.key, "claimed", {
+        state: "rejected",
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        updatedAt: 2_000,
+      });
+      const reopened = await settlements.reopen(
+        s.key,
+        s.fingerprint,
+        [SETTLE_REASONS.noChannelInTime],
+        3_000,
+      );
+      expect(reopened).toMatchObject({ state: "claimed", reopened: 1 });
+      expect(await listings()).toEqual([
+        { key: s.key, listing_method: "GET", listing_url: "https://seller.example.com/data" },
+      ]);
     });
   });
 });

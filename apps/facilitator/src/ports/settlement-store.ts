@@ -100,7 +100,16 @@ export type NewSettlement = Omit<
   | "version"
   | "reopened"
   | "updatedAt"
->;
+> & {
+  /** The Bazaar listing the payment pays for, stored with the claim (0154). */
+  listing?: SettlementListing;
+};
+
+/** A Bazaar listing's method and normalized URL; the record has its network and `payTo`. */
+export interface SettlementListing {
+  method: string;
+  resourceUrl: string;
+}
 
 export type ClaimResult =
   | { claimed: true; record: SettlementRecord }

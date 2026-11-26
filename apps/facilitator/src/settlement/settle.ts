@@ -36,6 +36,7 @@ import {
   type ClaimResult,
   type LeaseFence,
   type SettlementKey,
+  type SettlementListing,
   type SettlementRecord,
   type SettlementStore,
 } from "../ports/index.js";
@@ -92,7 +93,7 @@ export interface SettlerDeps {
   check: Check;
   store: SettlementStore;
   submitter: Submitter;
-  hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
+  hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "listingOf" | "onSuccess">;
   logger: Logger;
   metrics: NetworkMetrics;
   /** Passed to `beforeSubmit` as the most the facilitator can pay for this settlement. */
@@ -939,6 +940,14 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { payer, nonce } = verified;
     const key: SettlementKey = `${network}:${payer}:${nonce}`;
     if (left() <= 0) return unclaimed();
+    // The listing goes into the claim (0154), so no later write can miss it. Cataloging never
+    // blocks settle (AD-8): a hook that throws only leaves the record without one.
+    let listing: SettlementListing | undefined;
+    try {
+      listing = deps.hooks.listingOf(payload, requirements);
+    } catch (error) {
+      records.hookFailed("listingOf", key, error);
+    }
     const settlement = {
       key,
       network,
@@ -948,6 +957,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
       paymentPayload: payload,
       paymentRequirements: requirements,
       createdAt: startedAt,
+      listing,
     };
     // At least the store's grace: a claim cut off by a 0 ms bound may still land. A claim past
     // it is a 500, and the client's repeat finds the record.

@@ -206,7 +206,7 @@ export function buildSettlement(
     fees: FeeSettings;
     checks: VerifierDeps;
     store: SettlementStore;
-    hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
+    hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "listingOf" | "onSuccess">;
     logger: Logger;
     metrics: NetworkMetrics;
     /** The facilitator key's signer. */
@@ -450,6 +450,7 @@ export function compose(
     hooks: {
       beforeSubmit: policy.beforeSubmit,
       onFinal: policy.onFinal,
+      listingOf: cataloger.listingOf,
       onSuccess: cataloger.onSuccess,
     },
     logger,

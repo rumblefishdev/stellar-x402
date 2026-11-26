@@ -147,14 +147,15 @@ The measurements are in
     description gets no penalty.
   - q is computed when the search runs, from the payments stored at that moment.
 - **How a payment reaches its listing.** The settlement's row already holds the network, `payTo`,
-  payer and paid asset; it gains the listing's method and URL. The cataloger writes them right after
-  it derives the listing's key from the payment, also when the listing's copy is unchanged. A
-  success reported twice, by settle and by reconcile, writes the same values. The asset counts
-  because a payment's terms come from its caller, not from the listing: a seller can pay itself in
-  a token its listing never offers. Settlements are kept; the count reads the last 30 days.
-  Settlements from before the release name no listing, so the count starts empty. A failed write
-  is logged. Like the listing's own write, it runs once after the settlement turns final (AD-8),
-  so a process killed in between loses that one payer; nothing writes it again.
+  payer and paid asset; it gains the listing's method and URL. `/settle` reads them from the
+  payment's `extensions.bazaar` copy, with the same validation and key the catalog uses, and the
+  claim stores them with the record, so no later write can miss them; a payment without a valid
+  copy names no listing. A failure there leaves the record without one, logged and counted, and
+  never changes the settlement (AD-8). The asset counts because a payment's terms come from its
+  caller, not from the listing: a seller can pay itself in a token its listing never offers.
+  Every claim names its listing, so the count reads only `success` settlements, of the last 30
+  days; settlements are kept. Settlements from before the release name no listing, so the count
+  starts empty.
 - **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
   0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
 - **When the ranking is served.** There is no separate curation-only mode. 0135's run decides

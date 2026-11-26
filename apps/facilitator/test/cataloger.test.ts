@@ -802,9 +802,108 @@ describe("cataloger, an MCP listing (0063 rows 5, 18)", () => {
 });
 
 describe("cataloger, the listing of a payment (0154)", () => {
-  /** Stores `paid` as a success settlement, the row the cataloger links to its listing. */
-  async function stored(paid: SettlementRecord): Promise<SettlementRecord> {
+  const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };
+  /** Every logger call's event name, at any level. */
+  const events = (logger: Logger) =>
+    [logger.debug, logger.info, logger.warn, logger.error].flatMap((log) =>
+      vi.mocked(log).mock.calls.map(([event]) => event),
+    );
+  /** The key the catalog stored with its one attempt row. */
+  const storedKey = async () => {
+    const { rows } = await db.pool.query<{ method: string; resource_url: string }>(
+      `SELECT method, resource_url FROM catalog_attempts`,
+    );
+    expect(rows).toHaveLength(1);
+    return { method: rows[0]!.method, resourceUrl: rows[0]!.resource_url };
+  };
+
+  it.each([
+    [
+      "a plain GET listing",
+      { info: { input: { type: "http", method: "GET" } } },
+      {},
+      { method: "GET", resourceUrl: "/users/42" },
+    ],
+    [
+      "a POST listing",
+      { info: { input: { type: "http", method: "POST", bodyType: "json", body: {} } } },
+      {},
+      { method: "POST", resourceUrl: "/users/42" },
+    ],
+    ["a route-template listing", valid, {}, { method: "GET", resourceUrl: "/users/:" }],
+  ] as const)(
+    "names %s by the method and URL the catalog stores for the payment, synchronously and without asking the seller (0154)",
+    async (_name, bazaar, resource, expected) => {
+      const { cataloger, list, attempts } = setup();
+      const paid = record(bazaar, {}, resource);
+      seller.paymentRequired = (url) => ({
+        x402Version: 2,
+        resource: { url, description: DESCRIPTION },
+        accepts: [requirements],
+        extensions: { bazaar },
+      });
+      const listing = cataloger.listingOf(paid.paymentPayload, paid.paymentRequirements);
+      expect(listing).toEqual({
+        method: expected.method,
+        resourceUrl: `${seller.url}${expected.resourceUrl}`,
+      });
+      // Pure: nothing asked, nothing written.
+      expect(seller.requests).toEqual([]);
+      expect(await list()).toEqual([]);
+      expect(await attempts()).toEqual([]);
+
+      await cataloger.onSuccess(paid, "settle");
+      expect(listing).toEqual(await storedKey());
+    },
+  );
+
+  it("names an MCP tool listing by its tool and its mcp: URL, as the catalog stores it (0154)", async () => {
+    const { cataloger } = setup();
+    const paid = record(tool, {}, { url: "mcp://tool/weather" });
+    const listing = cataloger.listingOf(paid.paymentPayload, paid.paymentRequirements);
+    expect(listing).toEqual({ method: "weather", resourceUrl: expect.stringMatching(/^mcp:/) });
+    await cataloger.onSuccess(paid, "settle");
+    expect(listing).toEqual(await storedKey());
+  });
+
+  it("names no listing for a payload without a bazaar extension, or whose copy fails validation (0154)", () => {
+    const { cataloger } = setup();
+    const bare = record(undefined);
+    const noExtensions = {
+      ...bare.paymentPayload,
+      extensions: undefined,
+    } as unknown as PaymentPayload;
+    const invalid = record({ info: {} });
+    // A local URL on a facilitator that lists none.
+    const local = setup({ listLocal: false });
+    expect(cataloger.listingOf(bare.paymentPayload, requirements)).toBeUndefined();
+    expect(cataloger.listingOf(noExtensions, requirements)).toBeUndefined();
+    expect(cataloger.listingOf(invalid.paymentPayload, requirements)).toBeUndefined();
+    expect(local.cataloger.listingOf(record(valid).paymentPayload, requirements)).toBeUndefined();
+  });
+
+  it.each(["validate", "normalize"] as const)(
+    "names no listing and logs catalog_internal_error when %s throws, never throwing itself (0154)",
+    (step) => {
+      const boom = () => {
+        throw new Error("boom");
+      };
+      const { cataloger, logger } = setup({
+        bazaar:
+          step === "validate"
+            ? { ...bazaarLib, validate: boom }
+            : { ...bazaarLib, normalize: boom },
+      });
+      const paid = record(valid);
+      expect(cataloger.listingOf(paid.paymentPayload, paid.paymentRequirements)).toBeUndefined();
+      expect(events(logger)).toContain("catalog_internal_error");
+    },
+  );
+
+  it("writes no listing to the settlement after it, and has no link to write (0154)", async () => {
+    const { cataloger, store, logger } = setup();
     const { settlements } = db.stores();
+    const paid = record(valid);
     await settlements.claim({
       key: paid.key,
       network: paid.network,
@@ -819,131 +918,13 @@ describe("cataloger, the listing of a payment (0154)", () => {
       state: "success",
       updatedAt: paid.updatedAt,
     });
-    return paid;
-  }
-  /** The `n`th settlement of `GPAYER`'s, stored, each with a key of its own. */
-  const settled = (n: number, bazaar: unknown = valid, resource: object = {}) =>
-    stored(
-      record(
-        bazaar,
-        { key: `stellar:testnet:GPAYER:${n}`, nonce: String(n), fingerprint: `f${n}` },
-        resource,
-      ),
-    );
-  /** Each settlement's listing columns, in key order. */
-  const links = async () =>
-    (
-      await db.pool.query<Record<string, unknown>>(
-        `SELECT key, listing_method, listing_url FROM settlements ORDER BY key`,
-      )
-    ).rows;
-  const linked = (n: number) => ({
-    key: `stellar:testnet:GPAYER:${n}`,
-    listing_method: "GET",
-    listing_url: `${seller.url}/users/:`,
-  });
-
-  it("links the settlement to its listing key's method and URL (0154)", async () => {
-    const { cataloger } = setup();
-    await cataloger.onSuccess(await settled(1), "settle");
-    expect(await links()).toEqual([linked(1)]);
-  });
-
-  it("links once and logs no failure when settle and reconcile report one settlement, in turn or at once (0154)", async () => {
-    const { cataloger, logger } = setup();
-    const paid = await settled(1);
     await cataloger.onSuccess(paid, "settle");
     await cataloger.onSuccess(paid, "resolved");
-    await Promise.all([cataloger.onSuccess(paid, "settle"), cataloger.onSuccess(paid, "resolved")]);
-    expect(await links()).toEqual([linked(1)]);
-    expect(logger.error).not.toHaveBeenCalledWith(
-      "catalog_payment_write_failed",
-      expect.anything(),
+    const { rows } = await db.pool.query(
+      `SELECT key, listing_method, listing_url FROM settlements`,
     );
-  });
-
-  it("links the payment when the copy is unchanged against the stored listing (0154)", async () => {
-    const { cataloger, counted } = setup();
-    await cataloger.onSuccess(await settled(1), "settle");
-    await cataloger.onSuccess(await settled(2), "settle");
-    expect(counted("payment", "unchanged")).toBe(1);
-    expect(await links()).toEqual([linked(1), linked(2)]);
-  });
-
-  it("links the payment when the seller check is over budget (0154)", async () => {
-    const { cataloger, counted } = setup();
-    await cataloger.onSuccess(await settled(1), "settle");
-    await cataloger.onSuccess(await settled(2, valid, { description: "Changed" }), "settle");
-    expect(counted("payment", "over_budget", "key")).toBe(1);
-    expect(seller.requests).toHaveLength(1);
-    expect(await links()).toEqual([linked(1), linked(2)]);
-  });
-
-  it("links the payment of an MCP tool listing, though the seller isn't asked (0154)", async () => {
-    const tool = { info: { input: { type: "mcp", toolName: "weather", inputSchema: {} } } };
-    const { cataloger, counted } = setup();
-    await cataloger.onSuccess(await settled(1, tool, { url: "mcp://tool/weather" }), "settle");
-    expect(counted("seller", "not_askable", "mcp_tool_url")).toBe(1);
-    // The same key the attempt row carries.
-    const {
-      rows: [attempt],
-    } = await db.pool.query<{ method: string; resource_url: string }>(
-      `SELECT method, resource_url FROM catalog_attempts`,
-    );
-    expect(attempt).toEqual({ method: "weather", resource_url: expect.stringMatching(/^mcp:/) });
-    expect(await links()).toEqual([
-      {
-        key: "stellar:testnet:GPAYER:1",
-        listing_method: "weather",
-        listing_url: attempt?.resource_url,
-      },
-    ]);
-  });
-
-  it("links a payment whose payTo is its payer (0154)", async () => {
-    const { cataloger } = setup();
-    await cataloger.onSuccess(
-      await stored(record(valid, { key: "stellar:testnet:GPAYTO:1", payer: "GPAYTO" })),
-      "settle",
-    );
-    expect(await links()).toEqual([{ ...linked(1), key: "stellar:testnet:GPAYTO:1" }]);
-  });
-
-  it("links nothing for a payment whose copy fails validation (0154)", async () => {
-    const { cataloger, counted } = setup();
-    await cataloger.onSuccess(await settled(1, { info: {} }), "settle");
-    expect(counted("payment", "rejected", "invalid_info")).toBe(1);
-    expect(await links()).toEqual([
-      { key: "stellar:testnet:GPAYER:1", listing_method: null, listing_url: null },
-    ]);
-  });
-
-  it("logs catalog_payment_write_failed with the error, counts nothing for it, and catalogs on (0154)", async () => {
-    // The same payment with a working store, to compare against.
-    const working = setup();
-    const workingIncrements = vi.spyOn(working.metrics, "increment");
-    await working.cataloger.onSuccess(await settled(1), "settle");
-    const listed = await working.list();
-    const attempted = await working.attempts();
-    const requests = seller.requests.length;
-    await db.empty();
-
-    const failing = setup();
-    const error = new Error("down");
-    vi.spyOn(failing.store, "linkPayment").mockRejectedValue(error);
-    const failingIncrements = vi.spyOn(failing.metrics, "increment");
-    await expect(failing.cataloger.onSuccess(await settled(1), "settle")).resolves.toBeUndefined();
-    expect(failing.logger.error).toHaveBeenCalledWith(
-      "catalog_payment_write_failed",
-      expect.objectContaining({ error }),
-    );
-    expect(failingIncrements.mock.calls).toEqual(workingIncrements.mock.calls);
-    // The attempt row, the seller check and the listing happen as before.
-    expect(seller.requests).toHaveLength(2 * requests);
-    expect(await failing.attempts()).toEqual(attempted);
-    expect(await failing.list()).toEqual(listed);
-    expect(await links()).toEqual([
-      { key: "stellar:testnet:GPAYER:1", listing_method: null, listing_url: null },
-    ]);
+    expect(rows).toEqual([{ key: paid.key, listing_method: null, listing_url: null }]);
+    expect("linkPayment" in store).toBe(false);
+    expect(events(logger)).not.toContain("catalog_payment_write_failed");
   });
 });

@@ -79,7 +79,7 @@ export interface SeedResult {
   detail?: string;
 }
 
-export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"> & {
+export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "listingOf" | "onSuccess"> & {
   /** Resolves once every in-flight `onSuccess` has settled (tests, graceful shutdown). */
   drain(): Promise<void>;
   /**
@@ -270,14 +270,6 @@ export function createCataloger({
       const key = echoed.key as CatalogKey;
       const tried = { ...attempt, key, contentHash: contentHash(echoed.resource) };
       known = { ...known, ...tried };
-      // The search's quality score counts this payer (ADR 0014), so the settlement is linked to its
-      // listing whether or not the copy changes the listing. A failed link loses one payer, and
-      // cataloging goes on.
-      try {
-        await store.linkPayment({ settlementKey: record.key, key });
-      } catch (error) {
-        report(() => logger.error("catalog_payment_write_failed", { ...fields, error }));
-      }
       // Upstream's default `mcp://tool/<name>` names the tool, not a server to ask (row 6).
       if (result.resourceUrl.startsWith("mcp:")) {
         const toolUrl = {
@@ -459,6 +451,19 @@ export function createCataloger({
       } catch (error) {
         internalError("header", context(record, "settle"), "settle", error);
         return { bazaar: { status: "rejected", rejectedReason: "internal_error" } };
+      }
+    },
+    listingOf(payload, requirements) {
+      try {
+        // The same validation and key as the catalog's entry, so the search's quality score
+        // (ADR 0014) counts the payer under the listing the catalog holds.
+        const result = bazaar.validate(payload, requirements, options);
+        if (!result?.ok) return undefined;
+        const { method, resourceUrl } = bazaar.normalize(result, requirements).key;
+        return { method, resourceUrl };
+      } catch (error) {
+        internalError("listing", { network: requirements.network }, "settle", error);
+        return undefined;
       }
     },
     onSuccess(record, origin) {

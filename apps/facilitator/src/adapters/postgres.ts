@@ -353,8 +353,8 @@ export class PostgresSettlementStore implements SettlementStore {
       claimed = await inTransaction(this.pool, async (client) => {
         const { rows } = await client.query<SettlementRow>(
           `INSERT INTO settlements (key, network, payer, nonce, fingerprint, state, payment_payload,
-             payment_requirements, created_at, updated_at, reopened)
-           VALUES ($1, $2, $3, $4, $5, 'claimed', $6, $7, $8, $8, 0)
+             payment_requirements, created_at, updated_at, reopened, listing_method, listing_url)
+           VALUES ($1, $2, $3, $4, $5, 'claimed', $6, $7, $8, $8, 0, $9, $10)
            ON CONFLICT (key) DO NOTHING
            RETURNING *`,
           [
@@ -366,6 +366,8 @@ export class PostgresSettlementStore implements SettlementStore {
             JSON.stringify(s.paymentPayload),
             JSON.stringify(s.paymentRequirements),
             s.createdAt,
+            s.listing?.method ?? null,
+            s.listing?.resourceUrl ?? null,
           ],
         );
         if (!rows[0]) return undefined;

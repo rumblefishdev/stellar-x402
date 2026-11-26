@@ -122,19 +122,13 @@ describe("pruner", () => {
   });
 
   it("keeps a success settlement's listing through a prune run (0154)", async () => {
-    const { settlements, catalog } = db.stores();
+    const { settlements } = db.stores();
     const paid = refusedAt("1", NOW - 365 * DAY);
-    await settlements.claim(paid);
-    await settlements.transition(paid.key, "claimed", { state: "success", updatedAt: NOW });
-    await catalog.linkPayment({
-      settlementKey: paid.key,
-      key: {
-        network: "stellar:testnet",
-        payTo: "GPAYTO",
-        method: "GET",
-        resourceUrl: "https://seller.example.com/data",
-      },
+    await settlements.claim({
+      ...paid,
+      listing: { method: "GET", resourceUrl: "https://seller.example.com/data" },
     });
+    await settlements.transition(paid.key, "claimed", { state: "success", updatedAt: NOW });
     await settlements.refuse(refusedAt("2", NOW - DAY), { errorReason: FEE }, [], NOW);
     await createPruner(deps({ settlements })).runOnce();
     const { rows } = await db.pool.query(
