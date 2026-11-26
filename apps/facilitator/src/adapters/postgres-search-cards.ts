@@ -29,11 +29,12 @@ export class PostgresSearchCardStore implements SearchCardStore {
     const { rowCount } = await this.pool.query(
       `WITH listing AS (
          SELECT seq FROM catalog WHERE seq = $1 AND resource = $2::jsonb FOR SHARE)
-       INSERT INTO catalog_search (seq, name, tags, description, parameters)
-       SELECT seq, $3, $4, $5, $6 FROM listing
-       ON CONFLICT (seq) DO UPDATE SET name = $3, tags = $4, description = $5, parameters = $6
+       INSERT INTO catalog_search (seq, name, tags, description, parameters, host)
+       SELECT seq, $3, $4, $5, $6, $7 FROM listing
+       ON CONFLICT (seq) DO UPDATE SET name = $3, tags = $4, description = $5, parameters = $6,
+         host = $7
        WHERE (catalog_search.name, catalog_search.tags, catalog_search.description,
-              catalog_search.parameters) IS DISTINCT FROM ($3, $4, $5, $6)`,
+              catalog_search.parameters, catalog_search.host) IS DISTINCT FROM ($3, $4, $5, $6, $7)`,
       [
         listing.seq,
         JSON.stringify(listing.resource),
@@ -41,6 +42,7 @@ export class PostgresSearchCardStore implements SearchCardStore {
         fields.tags,
         fields.description,
         fields.parameters,
+        fields.host,
       ],
     );
     return rowCount === 1;

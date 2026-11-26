@@ -169,7 +169,8 @@ The measurements are in
     `ngrok.io`, `ngrok.app`, `ngrok-free.app`, `ngrok-free.dev`, `loca.lt`, `lhr.life`,
     `lhr.rocks`, `pinggy.link` and `pinggy-free.link`, or a name ending in a dot and one of them:
     `x.ts.net` is a tunnel host, `getbits.net` is not. Shared hosting such as `workers.dev` or
-    `vercel.app` gets no penalty.
+    `vercel.app` gets no penalty. The host is the listing URL's, as the WHATWG URL parser reads it
+    when the listing's search card is written; the card keeps it.
   - An empty description is a missing one, an empty one or one of spaces only. A short
     description gets no penalty.
   - q is computed when the search runs, from the payments stored at that moment.

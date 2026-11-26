@@ -92,6 +92,7 @@ export class PostgresCatalogStore implements CatalogStore {
       card.tags,
       card.description,
       card.parameters,
+      card.host,
     ];
     const inserted = await this.pool.query(
       `WITH listing AS (
@@ -100,8 +101,8 @@ export class PostgresCatalogStore implements CatalogStore {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (network, pay_to, method, resource_url) DO NOTHING
          RETURNING seq)
-       INSERT INTO catalog_search (seq, name, tags, description, parameters)
-       SELECT seq, $11, $12, $13, $14 FROM listing`,
+       INSERT INTO catalog_search (seq, name, tags, description, parameters, host)
+       SELECT seq, $11, $12, $13, $14, $15 FROM listing`,
       values,
     );
     if (inserted.rowCount === 1) return "inserted";
@@ -113,9 +114,10 @@ export class PostgresCatalogStore implements CatalogStore {
            extension_keys = $10
          WHERE ${CATALOG_KEY_WHERE} AND coalesce(checked_at, 0) <= $7
          RETURNING seq)
-       INSERT INTO catalog_search (seq, name, tags, description, parameters)
-       SELECT seq, $11, $12, $13, $14 FROM listing
-       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14`,
+       INSERT INTO catalog_search (seq, name, tags, description, parameters, host)
+       SELECT seq, $11, $12, $13, $14, $15 FROM listing
+       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14,
+         host = $15`,
       values,
     );
     return updated.rowCount === 1 ? "updated" : "stale";
@@ -177,8 +179,7 @@ export class PostgresCatalogStore implements CatalogStore {
     const { text, type, payTo, network, limit, after, now } = query;
     const { rows } = await this.listPool.query<HitRow>(
       `WITH m AS MATERIALIZED (
-               SELECT seq, network, pay_to, method, resource_url, description, resource->'accepts' AS accepts,
-                      substring(resource_url from '://([^/:]+)') AS host,
+               SELECT seq, network, pay_to, method, resource_url, description, resource->'accepts' AS accepts, host,
                       ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query) AS base
                  FROM catalog
                  JOIN catalog_search USING (seq),
@@ -281,7 +282,7 @@ export class PostgresCatalogStore implements CatalogStore {
                                ELSE 1 / (20 + row_number() OVER (ORDER BY words_rank DESC NULLS LAST, network, pay_to, method, resource_url))::float8
                           END AS base
                  FROM (SELECT seq, network, pay_to, method, resource_url, description,
-                              resource->'accepts' AS accepts, substring(resource_url from '://([^/:]+)') AS host,
+                              resource->'accepts' AS accepts, host,
                               1 - public.cosine_distance(embedding, $5::public.vector) AS similarity,
                               CASE WHEN words @@ words_query
                                    THEN ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query)
