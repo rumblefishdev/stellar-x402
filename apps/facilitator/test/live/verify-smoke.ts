@@ -95,6 +95,8 @@ async function verifyWith(
     LOG_LEVEL: "info",
     MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
     RPC_URLS: process.env.RPC_URLS,
+    // Required by the config; /verify never asks the search model, so nothing listens here.
+    SEARCH_MODEL_URL: "http://127.0.0.1:9",
   });
   const logger = jsonLogger(config.logLevel, write, config.rpcUrls);
   const rpc = buildRpc(config, logger);
