@@ -4,7 +4,7 @@ import { afterAll, beforeAll } from "vitest";
 import { createPool, postgresStores } from "../src/adapters/postgres.js";
 import { migrate } from "../src/adapters/postgres-schema.js";
 import type { Stores } from "../src/ports/index.js";
-import { COMPOSE_DATABASE_URL } from "./compose-database.js";
+import { urlOrCompose } from "./compose-database.js";
 
 export interface TestDatabase {
   /** This file's schema, migrated in `beforeAll`. */
@@ -24,12 +24,13 @@ export interface TestDatabase {
 }
 
 /**
- * A migrated schema of this test file's own in the test database: `TEST_DATABASE_URL`, else the
- * repo's compose database (`docker compose up -d`). Files run in parallel, so each gets its own
- * schema. Without a database every test of the file fails, naming the address it tried.
+ * A migrated schema of this test file's own in the test database: `TEST_DATABASE_URL`, else (also
+ * when it is blank) the repo's compose database (`docker compose up -d`). Files run in parallel, so
+ * each gets its own schema. Without a database every test of the file fails, naming the address it
+ * tried.
  */
 export function testDatabase(max = 10): TestDatabase {
-  const base = process.env.TEST_DATABASE_URL ?? COMPOSE_DATABASE_URL;
+  const base = urlOrCompose("TEST_DATABASE_URL");
   const schema = `x402_test_${randomBytes(4).toString("hex")}`;
   const urlFor = (searchPath: string, options = "") => {
     const url = new URL(base);
