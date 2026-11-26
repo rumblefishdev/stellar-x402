@@ -21,8 +21,9 @@ export class PostgresSearchCardStore implements SearchCardStore {
    * `FOR SHARE` waits for a catalog write of the listing under way and then re-reads the row, so
    * a listing changed meanwhile writes no card; one this write holds waits for it, and then writes
    * its own card over this one. A card whose text is already this one is not written again: on
-   * CDP's 39,577 listings that cut a restart's WAL from 48 MiB to 15 MiB. A card written anew
-   * keeps its vector, which no longer counts: its text's hash changed (ADR 0014).
+   * CDP's 39,577 listings that cut a restart's WAL from 48 MiB to 15 MiB. A card written with new
+   * text keeps its vector, which no longer counts: its text's hash changed (ADR 0014). The host is
+   * not in that hash, so a card whose host alone changed keeps a vector that still counts.
    */
   async write(listing: CardListing): Promise<boolean> {
     const fields = searchFields(listing.resource);
