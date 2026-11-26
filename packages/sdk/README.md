@@ -6,11 +6,11 @@ published `@x402/*` packages and this repository's facilitator. The Rust crate i
 
 Part 1 of the TypeScript SDK (task 0102). Its entry points come one per pull request:
 
-| Entry point | For      | What it holds                                                     | State    |
-| ----------- | -------- | ----------------------------------------------------------------- | -------- |
-| `/buyer`    | a buyer  | `createPayingFetch`: pays a seller's 402 within limits you set    | done     |
-| `/seller`   | a seller | the facilitator's config, the catalog's answer, a trustline check | done     |
-| `/bazaar`   | an agent | a client to list and search the Bazaar                            | this one |
+| Entry point | For      | What it holds                                                                       | State    |
+| ----------- | -------- | ----------------------------------------------------------------------------------- | -------- |
+| `/buyer`    | a buyer  | `createPayingFetch`: pays a seller's 402 within limits you set                      | done     |
+| `/seller`   | a seller | the facilitator's config, the catalog's answer, a refusal reader, a trustline check | done     |
+| `/bazaar`   | an agent | a client to list and search the Bazaar                                              | this one |
 
 Not on npm before part 2 (task 0163). From this repository it is `@stellar-x402/sdk` in the
 workspace, as the MCP server (`apps/mcp-local`) uses it.
@@ -120,14 +120,20 @@ sent, its amount goes back, and the signal's reason is thrown.
 
 ## Sell a resource
 
-`/seller` holds three small things around upstream's own server (`@x402/express`,
-`x402ResourceServer`); [`examples/http-api`](../../examples/http-api) uses all three.
+`/seller` holds four small things around upstream's own server (`@x402/express`,
+`x402ResourceServer`); [`examples/http-api`](../../examples/http-api) uses all four.
+
+Before your first sale, check that `payTo` can receive each asset you sell. Without the trustline,
+or without the account, every buyer's client stops before signing and sends nothing, so you would
+see only unpaid requests and no error anywhere. `checkTrustline` below does it; outside TypeScript,
+`GET /accounts/{payTo}` on Horizon lists the account's trustlines.
 
 ```ts
 import {
   checkTrustline,
   createFacilitatorConfig,
   readCatalogAnswer,
+  readVerifyRefusal,
 } from "@stellar-x402/sdk/seller";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { x402ResourceServer } from "@x402/express";
@@ -150,6 +156,11 @@ resourceServer.onAfterSettle(async ({ result }) => {
   const answer = readCatalogAnswer(result);
   if (answer.status === "rejected") console.warn(`not listed in the Bazaar: ${answer.reason}`);
 });
+resourceServer.onAfterVerify(async ({ result }) => {
+  const refusal = readVerifyRefusal(result);
+  if (refusal.status === "refused" && refusal.sellerMustAct)
+    console.warn(`payments to you are refused: ${refusal.message ?? refusal.reason}`);
+});
 ```
 
 - **`createFacilitatorConfig({ apiKey?, url?, timeoutMs? })`** returns upstream's
@@ -162,6 +173,14 @@ resourceServer.onAfterSettle(async ({ result }) => {
   from a settlement: `processing` (taken for cataloging), `rejected` with its `reason`, or `none`.
   Whether the route was then cataloged isn't sent back: cataloging runs after the settlement's
   answer.
+- **`readVerifyRefusal(result)`** reads why the facilitator refused a payment at `/verify`: `none`
+  for a valid one, or `refused` with its `reason`, the facilitator's `message`, and `sellerMustAct`,
+  true when only the seller can fix it (`payTo` without the trustline or the account, or a contract
+  `payTo` without a first balance), so every buyer is refused until then. Use it in
+  `onAfterVerify`: upstream's server answers the buyer with the reason alone and logs nothing, and
+  `onVerifyFailure` doesn't run for a refusal. The message is the facilitator's text, returned on
+  one line without control characters, at most 500 characters (`REFUSAL_MESSAGE_CHARS`). A reason
+  not in a facilitator's shape is `unknown`.
 - **`checkTrustline({ account, asset, network, rpcUrl?, timeoutMs? })`** says, without signing,
   whether an account can receive an asset: `ok`, `missing` (no trustline, one not authorized, or
   no account) or `unknown` (a contract account, a token that is not a Stellar Asset Contract or
