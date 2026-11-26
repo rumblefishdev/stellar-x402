@@ -1,5 +1,9 @@
 import express, { type Express } from "express";
-import { createFacilitatorConfig, readCatalogAnswer } from "@stellar-x402/sdk/seller";
+import {
+  createFacilitatorConfig,
+  readCatalogAnswer,
+  readVerifyRefusal,
+} from "@stellar-x402/sdk/seller";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/extensions/bazaar";
@@ -12,7 +16,10 @@ export interface SellerConfig {
   facilitatorUrl?: string;
   /** The facilitator's API key, sent on /verify and /settle; pubnet requires one, testnet none. */
   apiKey?: string;
-  /** Where the catalog's answer after each settlement is written; the console by default. */
+  /**
+   * Where the catalog's answer after each settlement, and the reason for each refused payment, are
+   * written; the console by default.
+   */
   log?: (line: string) => void;
 }
 
@@ -38,6 +45,19 @@ export function createApp({
     const answer = readCatalogAnswer(result);
     if (answer.status === "processing") log("Bazaar: the listing was taken for cataloging");
     if (answer.status === "rejected") log(`Bazaar: the listing was refused (${answer.reason})`);
+  });
+  // The facilitator says why it refused a payment, but upstream's middleware tells the buyer the
+  // reason alone and logs nothing. A refusal the seller must fix, such as a `payTo` that can't
+  // receive USDC, refuses every buyer until it is fixed.
+  resourceServer.onAfterVerify(async ({ result }) => {
+    const refusal = readVerifyRefusal(result);
+    if (refusal.status === "none") return;
+    const why = refusal.message ? `${refusal.reason}: ${refusal.message}` : refusal.reason;
+    log(
+      refusal.sellerMustAct
+        ? `Payment refused, fix this on your side (${why})`
+        : `Payment refused (${why})`,
+    );
   });
 
   const app = express();
