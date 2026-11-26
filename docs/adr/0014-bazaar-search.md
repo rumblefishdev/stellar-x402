@@ -151,7 +151,8 @@ The measurements are in
   because a payment's terms come from its caller, not from the listing: a seller can pay itself in
   a token its listing never offers. Settlements are kept; the count reads the last 30 days.
   Settlements from before the release name no listing, so the count starts empty. A failed write
-  is logged.
+  is logged. Like the listing's own write, it runs once after the settlement turns final (AD-8),
+  so a process killed in between loses that one payer; nothing writes it again.
 - **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
   0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
 - **When the ranking is served.** There is no separate curation-only mode. 0135's run decides
