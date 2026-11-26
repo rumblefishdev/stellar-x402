@@ -23,8 +23,10 @@ What a theft reaches today:
 
 - **About 130 XLM:** the fee account's 100 XLM float and 1.5 XLM of reserve per channel, about
   30 XLM at 20 channels. The key can't move buyers' or sellers' tokens (ADR 0013).
-- **Downtime:** a rebuild takes about an hour once the leak is closed. Finding and closing the leak
-  takes hours, or days after a break-in on the shared server.
+- **Downtime:** a rebuild takes about an hour once the leak is closed; the testnet drill of
+  2026-11-26 had the facilitator down 17 minutes, planned and in the day, 4 of them a mistake,
+  the alarms' redeploy not counted (task 0048). Finding and closing the leak takes
+  hours, or days after a break-in on the shared server.
 - **Nothing on chain:** `upto-proxy` has no admin and takes its receiver authorizer per payment;
   `exact` names neither the facilitator nor a channel; no contract gives a channel address any power
   (task 0048, Implementation Notes). A new key works for `exact` and `upto` without a redeploy.
@@ -33,7 +35,7 @@ A theft and the loss of OpenBao with its backup end the same way: abandon the ol
 new ones under a new key.
 
 The options, compared in
-[R-hot-key-reach-without-cold-key](../../lore/1-tasks/active/0048_FEATURE_channel-signer-thresholds/notes/R-hot-key-reach-without-cold-key.md):
+[R-hot-key-reach-without-cold-key](../../lore/1-tasks/archive/0048_FEATURE_channel-signer-thresholds/notes/R-hot-key-reach-without-cold-key.md):
 
 - **A, raise the thresholds above the key's weight with no other signer:** the key can only pay fee
   bumps (fee account low 1 / medium 2 / high 2) and settle (channels low 1 / medium 1 / high 2).
@@ -129,5 +131,5 @@ The options, compared in
 - [ADR 0013](0013-facilitator-key-custody.md): key custody, the theft alarm, the weekly review
 - [M1 architecture spine](../architecture/m1-spine.md): AD-12
 - [Threat model](../threat-model.md): "Facilitator key", "Receiver authorizer key"
-- Task 0048 (`lore/1-tasks/active/0048_FEATURE_channel-signer-thresholds/`): the decisions, the
+- Task 0048 (`lore/1-tasks/archive/0048_FEATURE_channel-signer-thresholds/`): the decisions, the
   contract check, and the research note with every option and its sources
