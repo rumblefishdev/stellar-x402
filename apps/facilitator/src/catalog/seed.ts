@@ -10,11 +10,13 @@ import { SELLER_USER_AGENT } from "./seller-check.js";
  */
 export const SEED_FILE_BYTES = 512 * 1024;
 /**
- * The wait after each request the seed sends a host: 20 a minute, below the 30 checks a minute a
- * host's budget allows checks after payments (ADR 0008), which keep their share (decision 12). A
+ * The wait after each URL, per request it cost (a second request to the same URL follows the
+ * first at once; an MCP check counts as one): 60 a minute, so the largest measured file
+ * (581 URLs, 2026-11-23) is seeded in about 10 minutes. Checks after payments, which peaked at 3 a
+ * minute across all sellers (testnet, 2026-11-03 to 11-25), keep their own budget (decision 12). A
  * URL costs one request, a second when its 402 declares another method or an MCP tool.
  */
-export const REQUEST_GAP_MS = 3_000;
+export const REQUEST_GAP_MS = 1_000;
 /** The robots.txt size a parser must read, RFC 9309 §2.5. */
 const ROBOTS_BYTES = 500 * 1024;
 /** Our robot's name in robots.txt groups: the product token of `SELLER_USER_AGENT`. */
@@ -153,8 +155,8 @@ async function readFile402(origin: string, listLocal: boolean): Promise<unknown>
 
 /**
  * The host's robots.txt rules for our robot (0155, owner 2026-11-23), by RFC 9309: a 4xx means no
- * rules (§2.3.1.3); a 5xx, or no answer at all, means every URL is off limits (§2.3.1.4), so the
- * host is not asked. A redirect is not followed, as for every seller request: measured hosts that
+ * rules (§2.3.1.3); any other answer than 200 (a 5xx, §2.3.1.4), or no answer at all, means every
+ * URL is off limits, so the host is not asked. A redirect is not followed, as for every seller request: measured hosts that
  * redirect robots.txt redirect their `/.well-known/x402` too, so they are not seeded either way.
  */
 async function readRobots(
@@ -170,7 +172,7 @@ async function readRobots(
   const url = new URL("/robots.txt", origin).href;
   const response = await fetch(url, { headers: { "user-agent": SELLER_USER_AGENT } });
   if (response.status >= 400 && response.status < 500) return undefined;
-  if (response.status !== 200) throw new Error(`robots.txt status ${response.status}`);
+  if (response.status !== 200) throw new Error(`status ${response.status}`);
   return robotsParser(url, await response.text());
 }
 
@@ -183,16 +185,27 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
     skipped: [],
     results: [],
   };
-  let file: unknown;
   let robots: Awaited<ReturnType<typeof readRobots>>;
   try {
     robots = await readRobots(origin, deps.listLocal);
+  } catch (error) {
+    // Named as robots.txt's, so the report never blames the seller's file, which wasn't asked.
+    report.file = `robots.txt: ${failure(error)}`;
+    return report;
+  }
+  const disallowed = (url: string) => robots?.isDisallowed(url, ROBOT_NAME) === true;
+  // The seller's file is a URL like any other: a host that disallows it is not asked (decision 3).
+  const fileUrl = new URL("/.well-known/x402", origin).href;
+  if (disallowed(fileUrl)) {
+    report.file = "disallowed by robots.txt";
+    report.skipped.push({ entry: fileUrl, method: "GET", reason: "robots" });
+    return report;
+  }
+  let file: unknown;
+  try {
     file = await readFile402(origin, deps.listLocal);
   } catch (error) {
-    report.file =
-      error instanceof SellerFetchError
-        ? [error.code, error.detail].filter(Boolean).join(": ")
-        : (error as Error).message;
+    report.file = failure(error);
     return report;
   }
   const found = fileResources(origin, file);
@@ -202,7 +215,7 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
   }
   const resources = [];
   for (const resource of found.resources) {
-    if (robots?.isDisallowed(resource.url, ROBOT_NAME))
+    if (disallowed(resource.url))
       found.skipped.push({ entry: resource.url, method: resource.method, reason: "robots" });
     else resources.push(resource);
   }
@@ -210,11 +223,17 @@ async function seedHost(origin: string, cataloger: Cataloger, deps: SeedDeps): P
   report.skipped = found.skipped;
   const wait = deps.wait ?? sleep;
   for (const [i, { url, method }] of resources.entries()) {
-    const { results, requests } = await cataloger.seed(url, method);
+    const { results, requests } = await cataloger.seed(url, method, disallowed);
     report.results.push(...results);
     if (i < resources.length - 1) await wait(REQUEST_GAP_MS * requests);
   }
   return report;
+}
+
+function failure(error: unknown): string {
+  return error instanceof SellerFetchError
+    ? [error.code, error.detail].filter(Boolean).join(": ")
+    : (error as Error).message;
 }
 
 /** Seeds every host at once, each at its own pace: one host's failure never stops another's. */
@@ -250,10 +269,12 @@ export function reportLines(reports: HostReport[]): string[] {
     const count = report.results.filter(written).length;
     const skips = (reason: Skipped["reason"]) =>
       report.skipped.filter((skip) => skip.reason === reason).length;
+    // A second request robots.txt disallows is a result of the check, counted with the skips.
+    const robotsResults = report.results.filter((r) => r.reason === "robots").length;
     lines.push(
       `host ${report.origin}: file ${report.file}, ${report.listed} listed, ` +
         `${skips("off_host")} on another host, ${skips("other_method")} other methods, ` +
-        `${skips("unreadable")} unreadable, ${skips("robots")} refused by robots.txt, ` +
+        `${skips("unreadable")} unreadable, ${skips("robots") + robotsResults} refused by robots.txt, ` +
         `${count} written`,
     );
     for (const r of report.results) {

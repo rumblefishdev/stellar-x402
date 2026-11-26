@@ -33,9 +33,9 @@ settlement.
     host's own `/.well-known/x402` and sends every resource URL on that host the check a payment
     would start, for each Stellar account its 402 names, on either network. A seeded listing has no
     settlement, so no `ledger`, and its attempt rows no `payer`. Nothing is read from another
-    catalog. The seed follows each host's `robots.txt` (RFC 9309) for the resource URLs it asks: a
-    disallowed URL is skipped and reported, and a host whose `robots.txt` answers 5xx or not at
-    all is not asked.
+    catalog. The seed follows each host's `robots.txt` (RFC 9309) for every URL it asks, its file
+    included: a disallowed URL is skipped and reported, and a host whose `robots.txt` answers
+    neither 200 nor 4xx (a redirect included: none is followed), or not at all, is not asked.
   - Nothing else is indexed, and there is no registration endpoint: a seller is listed after its
     first paid call, its own included (task 0063), or by the seed.
 - **Who may change a listing (task 0063).**
@@ -46,8 +46,8 @@ settlement.
     payer filling it holds back only the hosts it pays for; `/settle`'s per-IP limit (task 0023)
     and the settled payment each check needs bound the rest. Over a budget the check is
     skipped; the next payment tries again. There is no retry queue. A seed's checks don't count
-    against these budgets: the operator picks the hosts, and the seed waits 3 s after each request
-    to a host, 20 a minute, below the 30 a minute the host's checks after payments may use. A URL
+    against these budgets: the operator picks the hosts, and the seed waits, after each URL, 1 s per request it cost
+    to a host, 60 a minute, beside the host's checks after payments, which peaked at 3 a minute. A URL
     costs one request to learn its listing, then a check per Stellar account its 402 names. A
     seed's check of a listing a settlement wrote keeps that settlement's `ledger`.
   - The request uses the listing's method and its example input, bounded by the 32 KiB

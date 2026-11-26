@@ -1,8 +1,10 @@
 # Monitoring
 
-The facilitator's metrics and alarms live in CloudWatch, in `eu-central-1` on the team's shared
-AWS account (ADR 0011, task 0027). Alarms go through SNS and Amazon Q Developer to the Slack
-channel `#stellar-x402-bot`. Every alarm's description ends with `Runbook: docs/monitoring.md,
+The facilitator's metrics are Prometheus series on the monitoring VM `monitoring-hel1-01`, and
+its rules send through Alertmanager; CloudWatch, in `eu-central-1` on the team's shared AWS
+account, keeps the logs, the alarms that must work without the VM, and the heartbeat that says
+when the VM goes quiet (ADR 0011, tasks 0027 and 0139). Both reach the Slack channel
+`#stellar-x402-bot`, CloudWatch's through SNS and Amazon Q Developer. Every alarm's description ends with `Runbook: docs/monitoring.md,
 <alarm>`, which points at a section below.
 
 - The metrics, with their names, units and dimensions: [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts),
@@ -10,6 +12,9 @@ channel `#stellar-x402-bot`. Every alarm's description ends with `Runbook: docs/
 - Every alarm, with its shape and missing-data rule:
   [the alarm list](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-alarm-list.md).
 - The stacks and the alarm groups: [infra/README.md](../infra/README.md).
+- The dashboard: https://monitoring.sorobanscan.com, folder x402, for every @rumblefish.pl
+  address (Cloudflare Access, a one-time PIN), from
+  [`deploy/metrics/dashboards/`](../deploy/metrics/dashboards/); edited there, never in Grafana.
 
 This page has every alarm: a section for each one that is on, and the [alarms that are off](#the-alarms-that-are-off)
 with the task that turns each on. [Every metric](#every-metric) lists the catalog's metrics and
@@ -17,53 +22,54 @@ the alarms that read them. The [uptime figure](#the-uptime-figure) is under Upti
 
 ## The alarms that are on
 
-| Alarm                     | Group         | On since             | Fired on purpose                                                                                                                        |
-| ------------------------- | ------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `emf-validation`          | `telemetry`   | 2026-11-06           | `make fire-test` after each Alarms deploy (delivery test, seen): 2026-11-06 08:39:50 and 11:18:30, 2026-11-09 12:22:01 and 15:13:28 UTC |
-| `emf-parsing`             | `telemetry`   | 2026-11-06           | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                   |
-| `uptime`                  | `uptime`      | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:34:24, OK 13:48:24 UTC                                                        |
-| `uptime-flapping`         | `uptime`      | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:37:34, OK 14:08:34 UTC                                                        |
-| `balance-low`             | `watch`       | 2026-11-06 11:16 UTC | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack                                       |
-| `balance-critical`        | `watch`       | 2026-11-06 11:16 UTC | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack                                                    |
-| `watch-errors`            | `watch`       | 2026-11-06 11:16 UTC | Not fired: `AWS/Lambda` takes no hand-written point ([Drills](#drills))                                                                 |
-| `watch-no-invocations`    | `watch`       | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                                        |
-| `protocol-changed`        | `protocol`    | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                          |
-| `protocol-upgrade-coming` | `protocol`    | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                        |
-| `facilitator-silent`      | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:49, OK 13:47:49 UTC                                                        |
-| `gauges-silent`           | `facilitator` | 2026-11-09 12:19 UTC | Not fired: it needs gauges missing while sweeps run ([Drills](#drills))                                                                 |
-| `http-500`                | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:00, OK 14:09:00 UTC                                                           |
-| `rpc-stalled`             | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:33:26, OK 13:47:26 UTC                                         |
-| `rpc-on-fallback`         | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:43:00, OK 13:48:00 UTC                                         |
-| `balance-stale`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:38, OK 13:47:38 UTC                                         |
-| `pending`                 | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:12, OK 13:47:12 UTC                                         |
-| `sweeps-stopped`          | `facilitator` | 2026-11-09 12:19 UTC | Not fired: it needs sweeps that run but list nothing ([Drills](#drills))                                                                |
-| `settlement-expired`      | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:29, OK 14:09:29 UTC                                                           |
-| `landed-after-expired`    | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:15, OK 14:09:15 UTC                                                           |
-| `history-gone`            | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:33, OK 14:09:33 UTC                                                           |
-| `submit-failed`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:43, OK 14:09:43 UTC                                                           |
-| `refused-after-verify`    | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:58, OK 14:09:58 UTC                                                           |
-| `failure-ours`            | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:42, OK 14:09:42 UTC                                                           |
-| `signer-failures`         | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:34, OK 14:09:34 UTC                                                           |
-| `store-outage`            | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:05, OK 14:04:05 UTC                                                           |
-| `hook-failures`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:37, OK 14:09:37 UTC                                                           |
-| `queue-waiting`           | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:42, OK 13:47:42 UTC                                         |
-| `channel-quarantined`     | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:29:22, OK 13:47:22 UTC                                         |
-| `pool-health`             | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:30, OK 14:14:30 UTC                                                           |
-| `breaker-opened`          | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point for each kind ([Drills](#drills)): ALARM 13:49:05–13:49:17, OK 14:09:05–14:09:17 UTC                           |
-| `budget-nearing`          | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:31, OK 14:19:31 UTC                                                           |
-| `commit-unmatched`        | `facilitator` | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:50, OK 14:09:50 UTC                                                           |
-| `openbao-down`            | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:24, OK 13:46:24 UTC                                         |
-| `disk`                    | `disk`        | 2026-11-09 15:11 UTC | 2026-11-09, fake points at 85% ([Drills](#drills)): ALARM 15:26:16, OK 15:36:16 UTC; `audit-disk` (90%) stayed OK                       |
-| `audit-disk`              | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                         |
-| `facilitator-failed`      | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, for real: the stop window's own stop (exit 130, fixed by #163), ALARM 13:46:53; then a fake point; OK 14:09:53 UTC          |
-| `watchdog-restart`        | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, a fake point ([Drills](#drills)): ALARM 13:49:09, OK 14:09:09 UTC                                                           |
-| `probe-silent`            | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:42:31, OK 13:46:31 UTC                                                        |
-| `telemetry-silent`        | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                        |
-| `credentials-stale`       | `host`        | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                         |
-| `certificate`             | `host`        | 2026-11-09 12:19 UTC | Not fired: every hour holds the real days left ([Drills](#drills))                                                                      |
-| `log-volume`              | `logVolume`   | 2026-11-09 12:19 UTC | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                   |
-| `memory`                  | `memory`      | 2026-11-09 15:11 UTC | Not fired: a `Minimum` alarm can't be faked while the agent writes real samples ([Drills](#drills))                                     |
-| `monitoring-heartbeat`    | `heartbeat`   | 2026-11-24 12:48 UTC | 2026-11-24, Alertmanager stopped ([Drills](#drills)): ALARM 13:11:33, OK 13:13:33 UTC; `make fire-test` at 12:49:29                     |
+Since 0139's switch (2026-11-25 13:43 UTC) most checks are Prometheus rules on the monitoring VM, and CloudWatch keeps the alarms below.
+
+### In CloudWatch
+
+| Alarm                     | Group       | On since             | Fired on purpose                                                                                                                                                                          |
+| ------------------------- | ----------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `emf-validation`          | `telemetry` | 2026-11-06           | `make fire-test` after each Alarms deploy (delivery test, seen): 2026-11-06 08:39:50 and 11:18:30, 2026-11-09 12:22:01 and 15:13:28 UTC, 2026-11-25 13:56:05 UTC (after the switch, seen) |
+| `emf-parsing`             | `telemetry` | 2026-11-06           | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                                                                     |
+| `uptime`                  | `uptime`    | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:34:24, OK 13:48:24 UTC; 2026-11-25, the stop window ([Drills](#2026-11-25-the-switchs-drill)): ALARM 14:36:48 UTC               |
+| `uptime-flapping`         | `uptime`    | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:37:34, OK 14:08:34 UTC                                                                                                          |
+| `balance-low`             | `watch`     | 2026-11-06 11:16 UTC | 2026-11-06, a fake point ([Drills](#drills)): ALARM 11:20:10, OK 11:25:10 UTC, both seen in Slack                                                                                         |
+| `balance-critical`        | `watch`     | 2026-11-06 11:16 UTC | 2026-11-06, the same fake point: ALARM 11:20:35, OK 11:25:35 UTC, both seen in Slack                                                                                                      |
+| `watch-errors`            | `watch`     | 2026-11-06 11:16 UTC | Not fired: `AWS/Lambda` takes no hand-written point ([Drills](#drills))                                                                                                                   |
+| `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                                                                                          |
+| `protocol-changed`        | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                                                                            |
+| `protocol-upgrade-coming` | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                                                                          |
+| `audit-disk`              | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                                                                           |
+| `telemetry-silent`        | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                                                                          |
+| `credentials-stale`       | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                                                                           |
+| `certificate`             | `host`      | 2026-11-09 12:19 UTC | Not fired: every hour holds the real days left ([Drills](#drills))                                                                                                                        |
+| `log-volume`              | `logVolume` | 2026-11-09 12:19 UTC | Not fired: `AWS/Logs` takes no hand-written point ([Drills](#drills))                                                                                                                     |
+| `monitoring-heartbeat`    | `heartbeat` | 2026-11-24 12:48 UTC | 2026-11-25, Alertmanager stopped ([Drills](#2026-11-25-the-heartbeat-again)): ALARM 14:20:33, OK 14:22:33 UTC, both seen in Slack. 2026-11-24 fired but never reached Slack               |
+
+### As Prometheus rules
+
+On since 2026-11-25 13:43 UTC ([The Prometheus rules](#the-prometheus-rules)). Their CloudWatch alarms, drilled on 2026-11-09, were deleted at 13:45 UTC.
+
+| Rule                              | Group               | Fired on purpose                                                                                                                         |
+| --------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `x402-event`                      | `facilitator, host` | 2026-11-25, the drill textfile ([Drills](#2026-11-25-the-switchs-drill)): all 19 checks, 14:22:00 to 14:41:15 UTC, seen in Slack         |
+| `x402-rpc-stalled`                | `facilitator`       | 2026-11-25, the drill textfile: 14:25:15 to 14:42:00 UTC                                                                                 |
+| `x402-balance-stale`              | `facilitator`       | 2026-11-25, the drill textfile: 14:21:15 to 14:42:00 UTC                                                                                 |
+| `x402-pending`                    | `facilitator`       | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
+| `x402-queue-waiting`              | `facilitator`       | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
+| `x402-channel-quarantined`        | `facilitator`       | 2026-11-25, the drill textfile: 14:21:15 to 14:42:00 UTC                                                                                 |
+| `x402-rpc-on-fallback`            | `facilitator`       | 2026-11-25, the drill textfile: 14:35:15 to 14:42:00 UTC                                                                                 |
+| `x402-sweeps-stopped`             | `facilitator`       | 2026-11-25, a flat counter in the drill textfile: 14:21:30 to 14:45:45 UTC                                                               |
+| `x402-openbao-down`               | `host`              | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
+| `x402-facilitator-silent`         | `facilitator`       | 2026-11-25, the stop window: 14:39:15 to 14:39:45 UTC (10 minutes after the stop)                                                        |
+| `x402-gauge-stale`                | `facilitator`       | 2026-11-25, a stale stamp in the drill textfile while the process ran: 14:46:45 to 14:54:30 UTC                                          |
+| `x402-target-down`                | `server`            | 2026-11-25, the stop window (`job` facilitator): 14:34:15 to 14:39:45 UTC                                                                |
+| `x402-textfile-stale`             | `server`            | 2026-11-25, the probe timer stopped: 14:33:45 to 14:39:45 UTC, each of its 3 files                                                       |
+| `x402-server-silent`              | `server`            | 2026-11-25, the agent stopped: 15:24:00 to 15:24:30 UTC                                                                                  |
+| `x402-agent-behind`               | `server`            | Not fired live: its series reach the VM through the sends they measure; `agent-behind.test.yml`                                          |
+| `x402-disk-root`                  | `disk`              | Not fired: no scenario or live fill of the root disk yet; CloudWatch's `disk` on the same node_exporter-side reading fired on 2026-11-09 |
+| `x402-memory`                     | `memory`            | Not fired live: a fake point can't hold a minimum over 5 minutes against the real ones                                                   |
+| `x402-agent-certificate`          | `server`            | Not fired: every probe run writes the real days left                                                                                     |
+| `Watchdog`, `NotificationsFailed` | the VM's own        | 2026-11-24: the heartbeat ([Drills](#2026-11-25-the-heartbeat-again)) and a broken credential (soroban-infrastructure#19)                |
 
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
 `breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). `log-volume` ends in
@@ -345,43 +351,41 @@ The upstream section published nothing for two days, so `upstream-changed` sees 
 
 ## The facilitator
 
-The facilitator writes its metrics as EMF lines (#112) in the stream `facilitator` of
-`/x402/production/metrics`, every minute for its gauges and sweeps, and at once for each event.
-A stopped process writes nothing: Level alarms then keep their last state and Event alarms read
-OK, so [facilitator-silent](#facilitator-silent) is the one that says so. The events named below
-are the `event` field of its log lines (The logs, above). The pool's own events
-(`channel-quarantined`, `sequence-resync`, `send-retry`, `fee-raised`) are counted in
-`pool_events_total`, not logged, so the log doesn't name their channel yet (task 0125). Only
-`sequence-resync` has a `type` dimension in `x402-facilitator`; the others go into the network's
-total alone. Each count is in the `type` field of its EMF line, so Logs Insights on
-`/x402/production/metrics` finds them:
+Since 0139's switch the facilitator serves its metrics as Prometheus text on `/metrics`, on its
+own port (`METRICS_PORT`, 9464 in production) on the `x402-metrics` network only, and the agent on
+the server scrapes it every 15 s and sends it to the monitoring VM. Its alarms are rules there
+([The Prometheus rules](#the-prometheus-rules)). Every counter is written from the start at 0, and a
+gauge is read at each scrape. A stopped process is scraped as down, so
+[facilitator-silent](#facilitator-silent) and `target-down` say so. The events named below are the
+`event` field of its log lines (The logs, above). The pool's own events (`channel-quarantined`,
+`sequence-resync`, `send-retry`, `fee-raised`) are counted in `pool_events_total`, not logged, so
+the log doesn't name their channel yet (task 0125); its `type` label tells them apart, in
+Prometheus on the VM (`ssh -L 9090:localhost:9090 monitoring`):
 
 ```
-filter type = "fee-raised" | stats sum(pool_events_total) by bin(5m)
+sum by (type) (increase(pool_events_total{project="x402"}[1h]))
 ```
 
 ### facilitator-silent
 
-No sweep line from the facilitator for 15 minutes, though it writes one every minute: the process
-is down, its start hangs or fails (a crash loop included), or its lines don't reach CloudWatch. It
+The rule `x402-facilitator-silent`: the facilitator's liveness series,
+`facilitator_started_timestamp_seconds`, has been missing for 10 minutes. The process writes it
+once it has started, so this is a process that is down, a start that hangs or fails (a crash loop
+included), a `/metrics` the agent can't scrape, or an agent whose samples don't reach the VM. It
 fires beside [uptime](#uptime) when the process is down.
 
 1. If `uptime` fires too, follow it: the process is down.
-2. If not, the facilitator runs but its lines don't arrive: on the server,
-   `systemctl status x402@production`, then check [telemetry-silent](#telemetry-silent) and the
-   agent.
+2. If not, the facilitator runs but its series don't arrive: `target-down` for `job="facilitator"`
+   names a scrape that fails (on the server, `systemctl status x402@production`, and the
+   facilitator on the `x402-metrics` network); `server-silent` or `agent-behind`, the agent.
 
 ### gauges-silent
 
-One of the facilitator's gauges sent no point for 15 minutes while the sweeps did: its read keeps
-throwing, and that gauge's own alarm keeps its last state. The gauges are
-`settlement_oldest_open_seconds`, `pool_queued`, `pool_quarantined`, `rpc_on_fallback`,
-`rpc_stalled_seconds` and `balance_reading_age_seconds`, and `channel_longest_hold_seconds` once
-the `channelHeld` group is on.
-
-1. In the CloudWatch metrics console, namespace `x402-facilitator`, find the gauge with no recent
-   point.
-2. Find the error in the app logs around the time it stopped; its event names the read.
+The CloudWatch alarm on a gauge with no point while the sweeps arrived, until 0139's switch. Since
+then a gauge whose read keeps throwing is [gauge-stale](#gauge-stale), which reads each gauge's
+last successful read: the gauges are `settlement_oldest_open_seconds`, `pool_queued`,
+`pool_quarantined`, `rpc_on_fallback`, `rpc_stalled_seconds` and `balance_reading_age_seconds`, and
+`channel_longest_hold_seconds` once the `channelHeld` group is on.
 
 ### http-500
 
@@ -464,10 +468,11 @@ mean submissions don't land.
 
 1. The `reconcile_finished` event and the record's `settlement_hashes` for its attempts.
 2. The `fee-raised` and `send-retry` counts around that time (counts only, task 0125), and the
-   RPC ([rpc-stalled](#rpc-stalled)). In Logs Insights on `/x402/production/metrics`:
+   RPC ([rpc-stalled](#rpc-stalled)). In Prometheus on the VM
+   (`ssh -L 9090:localhost:9090 monitoring`):
 
    ```
-   filter type in ["fee-raised", "send-retry"] | stats sum(pool_events_total) by type, bin(5m)
+   sum by (type) (increase(pool_events_total{project="x402",type=~"fee-raised|send-retry"}[5m]))
    ```
 
 ### landed-after-expired
@@ -557,15 +562,21 @@ channels.
 1. The pool takes a channel out only when the RPC still answers, at the end of the read's
    timeout, that the channel's account doesn't exist; a read that fails or times out keeps the
    channel. So the usual cause is a channel account that is gone, such as after a testnet reset,
-   or an RPC behind on a new account. `pool_quarantined` in `x402-facilitator` says how many are
-   out.
+   or an RPC behind on a new account. `pool_quarantined` in Prometheus on the VM says how many
+   are out.
 2. The `settlement_submit_failed` event names the channel: its error reads
    `Account not found: <channel>`, and [submit-failed](#submit-failed) fires beside this alarm.
    In Logs Insights on `/x402/production/app`:
    `filter event = "settlement_submit_failed" and @message like /Account not found/`.
 3. Look the channel up on Horizon (`/accounts/<channel>`). If it is gone, make new channels with
    `create-channels.ts` ([runbook, OpenBao](runbook.md#openbao), step 6) and put their addresses
-   in `CHANNELS_TESTNET` ([runbook, Before the first deploy](runbook.md#before-the-first-deploy)).
+   in `CHANNELS_TESTNET`, changing only that line of the server's `.env`, so the key's name and
+   version stay as they are:
+
+   ```sh
+   ssh SERVER 'sudo sed -i "s|^CHANNELS_TESTNET=.*|CHANNELS_TESTNET=NEW_CHANNELS|" /srv/x402/production/.env'
+   ```
+
 4. A restart puts the channels back, once the reason is fixed.
 
 ### pool-health
@@ -757,7 +768,8 @@ Prometheus rules have paged no one since then. Its own stack, `X402-production-H
    ```
 
 3. Meanwhile, the server's agent keeps a few hours of samples in its write-ahead log, so the
-   metrics come back with the VM; the CloudWatch alarms and the logs still cover the facilitator.
+   metrics come back with the VM. Until then no rule runs: the logs still reach CloudWatch, and
+   the alarms that stay there (below) still fire, but nothing reads the facilitator's metrics.
 
 ## Log volume
 
@@ -782,8 +794,9 @@ alarms compare them with two numbers per network in `watch.protocol` in
 `infra/envs/production.json`: `expected`, the protocol we have checked the facilitator against,
 and `supported`, the highest Core version we have checked the SDK and the RPC against.
 `supported` is never below `expected`. On 2026-11-09 testnet was 30/30 and mainnet 29/30: mainnet
-runs 29, its Core supports 30, and testnet has run 30 since 2026-11-03, when an older SDK stopped
-reading its ledgers, which no alarm saw (task 0111 moved the SDK to 16.4.1).
+ran 29, its Core supported 30, and testnet has run 30 since 2026-11-03, when an older SDK stopped
+reading its ledgers, which no alarm saw (task 0111 moved the SDK to 16.4.1). Mainnet moved to 30
+on 2026-11-23, `protocol-changed-pubnet` fired at 17:11 UTC, and since #242 both are 30/30.
 
 ### protocol-changed
 
@@ -818,7 +831,8 @@ VM (ADR 0011, "Monitoring stack"). The rule file is
 [`deploy/metrics/rules/x402-production.yml`](../deploy/metrics/rules/x402-production.yml),
 written by `make rules` in `infra/` from the same rows as the alarms
 (`infra/src/lib/rules.ts`), so each rule keeps its alarm's name with an `x402-` prefix, its
-threshold and this page's section. Until the switch nothing on the VM loads it.
+threshold and this page's section. CloudWatch keeps only the rows that stay (below), and the
+Alarms stack builds those alone, so no check is both a rule and an alarm (`route` in `rules.ts`).
 
 - `network` is a label, not part of the name: pubnet adds alert instances, not rules.
 - Every Event alarm is one branch of the single rule `x402-event`; its `check` label is the
@@ -839,9 +853,12 @@ threshold and this page's section. Until the switch nothing on the VM loads it.
   series goes stale, so a resolved message can mean the series stopped. The silence rules say
   which: `facilitator-silent`, `gauge-stale`, `textfile-stale` (for `probe-silent`) and
   `server-silent` (for the agent, `telemetry-silent` in CloudWatch).
-- What stays in CloudWatch: the off-server check's and the uptime probe's alarms, `audit-disk`,
-  `certificate`, `credentials-stale`, `telemetry-silent` and `log-volume-app`. The EMF alarms go
-  with EMF.
+- What stays in CloudWatch, 18 alarms in production: the off-server check's (`balance-low`,
+  `balance-critical`, `watch-errors`, `watch-no-invocations`, and `protocol-changed` and
+  `protocol-upgrade-coming`, one of each for testnet and one for mainnet) and the uptime probe's (`uptime`, `uptime-flapping`), the log path's
+  (`telemetry-silent`, `log-volume-app`, `log-volume-metrics`, `emf-validation`, `emf-parsing`, for
+  the host probe's EMF lines), and `audit-disk`, `certificate` and `credentials-stale`, which must
+  page when the VM can't. Besides them, `monitoring-heartbeat`, its own stack.
 - `facilitator-silent`, `gauges-silent` and `probe-silent` read a series' arrival, which
   Prometheus reads another way: `x402-facilitator-silent` (the liveness series),
   `x402-gauge-stale` and `x402-textfile-stale` below.
@@ -868,6 +885,20 @@ certificate.
 
 The agent has failed to scrape one of its targets (`job`) for 5 minutes.
 
+### agent-behind
+
+The metrics agent on ch-prod-01 is over 2 minutes behind in sending to the VM
+(`prometheus_remote_storage_queue_highest_timestamp_seconds` against
+`..._queue_highest_sent_timestamp_seconds`), or the VM refused samples the agent then dropped
+(`prometheus_remote_storage_samples_failed_total`), for 5 minutes. The agent still looks up, so
+`server-silent` stays quiet while the rules read old or missing data. These series reach the VM
+through the queue they measure, so a sample saying "L seconds behind" arrives L seconds late:
+past 5 minutes behind, the VM's lookback no longer reads them, and a lag that long shows as
+`server-silent` instead. One refused batch fires this about 5 minutes later, and it holds for
+about 10 more, until the batch leaves the 15-minute window. On the server,
+`/var/log/x402/metrics/agent.log` names the `remote_write` error: a 4xx refused samples, a 5xx or a
+timeout the VM or the way to it; then Caddy's log on the VM.
+
 ### agent-certificate
 
 The metrics agent's client certificate has under 30 days left. Renew it as the
@@ -878,10 +909,11 @@ The metrics agent's client certificate has under 30 days left. Renew it as the
 Every metric in [`@stellar-x402/metrics-catalog`](../packages/metrics-catalog/src/index.ts), then
 the AWS metrics the alarms read. What each one measures and where it comes from is in
 [G-metrics](../lore/1-tasks/archive/0027_FEATURE_alerts-and-metrics/notes/G-metrics.md). A dimension
-set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Logs Insights or in
-the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
-lacks. The Dimensions column is CloudWatch's. In Prometheus (0139) a series also carries each field
-the catalog closes in `fieldValues` as a label, such as `settlement_outcomes_total`'s `replay`.
+set marked "only" is written for those values alone; "none" is a series with no dimension. A metric with no alarm is read in Prometheus on the VM or in the weekly review. `infra/test/alarms.test.ts` fails when the catalog gains a metric this table
+lacks. Since 0139's switch the `x402-facilitator` metrics are Prometheus series on the VM, where the
+Dimensions column's names are labels, and each field the catalog closes in `fieldValues` is one
+too, such as `settlement_outcomes_total`'s `replay`; the `x402-host` ones also still reach
+CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are CloudWatch's alone.
 
 | Metric                                      | Namespace          | Kind, unit     | Dimensions                                               | Alarms                                                                                                        |
 | ------------------------------------------- | ------------------ | -------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -1074,11 +1106,12 @@ reset-failed x402@production`, the agent, the credentials timer and the probe ti
 - **What happened:** ALARM at 13:11:33, 20 minutes 39 seconds after the stop, not the 10 to 15
   that two empty 5-minute periods suggest: CloudWatch waits for late data before it reads a
   period as missing. Alertmanager started at 13:11:50; OK at 13:13:33.
-- **Shown once:** the ALARM went out as one publish to `x402-production-alarms` at 13:11:33,
-  delivered once to its one subscription, the Slack channel's Amazon Q endpoint
-  (`NumberOfNotificationsDelivered` 1, `NumberOfNotificationsFailed` 0), and the OK as one more
-  at 13:13:33. The alarm sends nothing while it stays in ALARM, so a longer outage is still one
-  message.
+- **Not seen in Slack.** SNS delivered the ALARM once to its one subscription, Amazon Q
+  (`NumberOfNotificationsDelivered` 1, `NumberOfNotificationsFailed` 0 at 13:11), and the OK once
+  at 13:13:33. Amazon Q's Slack token had been inactive since 2026-11-20 or before, so Slack
+  refused both (`account_inactive` in `/aws/chatbot/x402-production-alarms`, us-east-1), as it
+  did the fire-test at 12:49:29. Nothing in AWS showed it. Found on 2026-11-25 and the drill run
+  again ([2026-11-25: the heartbeat, again](#2026-11-25-the-heartbeat-again)).
 - **Why stopping Alertmanager covers the VM and Prometheus:** the alarm reads only the heartbeat
   topic's `NumberOfMessagesPublished`. Prometheus evaluates the `Watchdog` and Alertmanager
   publishes it, so a stopped Prometheus (no alert to send), a stopped Alertmanager (nobody to
@@ -1087,3 +1120,53 @@ reset-failed x402@production`, the agent, the credentials timer and the probe ti
 - **What it shows:** the topic's count, the alarm's missing-data rule and its path to Slack. A
   broken credential, the other cause, was seen for real at 11:43–11:46 before the helper's
   `HOME` fix: `NotificationsFailed` posted it to Slack (soroban-infrastructure#19).
+
+### 2026-11-25: the heartbeat, again
+
+- **Why again:** the 2026-11-24 drill never reached Slack. Amazon Q's Slack token was inactive
+  (`account_inactive` since 2026-11-20 or before, in `/aws/chatbot/<configuration>` in
+  `us-east-1`), so no CloudWatch alarm of x402, prices-api or the explorer reached Slack in that
+  time, while SNS reported every delivery. Fixed at 13:53 UTC by authorizing the Amazon Q app in
+  Slack again, then inviting its bot to each channel; the fire-test at 13:56:05 was seen.
+- **How:** `ssh monitoring 'sudo docker stop monitoring-alertmanager-1'` at 14:00:08 UTC, started
+  again at 14:20:40.
+- **What happened:** ALARM at 14:20:33, 20 minutes 25 seconds after the stop, and OK at 14:22:33,
+  each delivered once by SNS and each seen once in `#stellar-x402-bot` (the OK as a reply in the
+  ALARM's thread). No error in Amazon Q's log.
+
+### 2026-11-25: the switch's drill
+
+Every rule fired once the same day as the switch (0139, G-switch-plan), in Slack through
+Alertmanager, with its `check`, `severity` and description, and resolved. The times are the
+VM's `ALERTS{alertstate="firing"}`, UTC.
+
+- **The drill textfile,** `/var/lib/x402/textfile/drill.prom` on ch-prod-01, rewritten every
+  minute from 14:20:53 to 14:41, then removed. Every series carried `drill="1"` and, where a rule
+  aggregates by network, `network="drill"`: the gauges past their thresholds, `openbao_up 0`, a
+  flat `settlement_sweeps_total`, and each Event counter at 0, then 1 from 14:21:39
+  (`pool_events_total{type="sequence-resync"}` 5). The Event rule sent 19 messages, one per
+  check; `http-500`, `verify-rpc-unavailable`, `facilitator-failed` and `watchdog-restart` sum
+  across networks, so they carry none. `store-outage`'s next step names
+  `x402-db-drill@production`, the drill network's name.
+- **`gauge-stale`:** a stamp 1000 s old (`settlement_oldest_open_seconds_last_read_timestamp_seconds`,
+  `network="drill"`) in the drill textfile from 14:42 to 14:49, while the process ran. The rule
+  is gated on the liveness series, so a stopped process never fires it (that is
+  `facilitator-silent`'s); G-switch-plan had expected the stop window to.
+- **The stop window,** 14:28:50 to 14:39:31, announced in the team's channel: `x402@production`
+  and `x402-host-probe.timer` stopped, then started. `target-down` (`job` facilitator),
+  `textfile-stale` for each of the probe's 3 files, `facilitator-silent` 10 minutes after the
+  stop, and CloudWatch's `uptime` (14:36:48, seen) fired. `/health` read `ready` at 14:40.
+- **The agent,** `x402-metrics` stopped 15:18:44 to 15:24:08: `server-silent` fired at 15:24:00.
+  `facilitator-silent` went pending at 15:23:40 and resolved with the agent.
+- **Found:**
+  - Stopping the agent's node-exporter alone can't fire `target-down` for `job` node:
+    `x402-metrics.service` runs Compose with `--abort-on-container-exit` and `Restart=on-failure`,
+    so the whole agent came back in 5 seconds (14:49:29 to 14:49:34). `target-down` fired for the
+    facilitator's target instead.
+  - Removing a textfile fires `textfile-stale` once for it (`drill.prom`, 14:54:30): its last
+    mtime is read for 5 more minutes and grows past 300 s. One message, resolved at once.
+  - `breaker-opened-asset`'s text read "A asset spend breaker"; it reads "The … spend breaker" now.
+- **Not fired live:** `agent-behind` (`agent-behind.test.yml`), `disk-root`, `memory` and
+  `agent-certificate` (the on-table says why).
+- **In the metrics' history:** every series with `drill="1"` between 14:20 and 14:55 on
+  2026-11-25 is the drill's, and the facilitator's and the agent's gaps are the windows above.

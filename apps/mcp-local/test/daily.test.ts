@@ -12,7 +12,7 @@ import { countDaily, refundDaily } from "../src/daily.js";
 import { createServer } from "../src/server.js";
 import {
   fakeScheme,
-  NO_TRUSTLINE,
+  tooLittle,
   slowScheme,
   startFakeSeller,
   USDC,
@@ -180,7 +180,7 @@ describe("daily budget", () => {
         async createPaymentPayload() {
           // Counted at 23:59 on the 13th; signing fails once the clock has passed midnight.
           clock = new Date("2026-10-14T00:00:01Z");
-          throw new Error(NO_TRUSTLINE);
+          throw tooLittle();
         },
       },
     });
@@ -243,7 +243,7 @@ describe("daily budget", () => {
         failRefunds(
           "CREATE TRIGGER no_refund BEFORE INSERT ON spent WHEN NEW.amount < 0 BEGIN SELECT RAISE(ABORT, 'disk full'); END",
         );
-        throw new Error(NO_TRUSTLINE);
+        throw tooLittle();
       },
     };
     const call = await startProcess({ scheme: failing });

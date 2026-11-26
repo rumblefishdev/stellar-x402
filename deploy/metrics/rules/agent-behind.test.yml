@@ -1,0 +1,71 @@
+# promtool test rules for x402-agent-behind (lore 0139). It can't be fired live: the agent's
+# prometheus_remote_storage_* series reach the VM only through the sends they measure, so an
+# unreachable remote_write leaves the VM nothing to read and server-silent fires instead
+# (G-switch-plan, Oskar's review of #240). The scenario feeds every sample on time; on the VM a
+# sample saying "L seconds behind" arrives L seconds late, so the lag branch's threshold sits under
+# the 5-minute lookback (Oskar's review of #242). CI's command, from the repository's root:
+#   docker run --rm --entrypoint sh -v "$PWD/deploy/metrics/rules:/rules:ro" -w /rules \
+#     prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06 \
+#     -c 'promtool test rules *.test.yml'
+rule_files: [x402-production.yml]
+evaluation_interval: 1m
+
+tests:
+  # The queue's newest sample moves on 15 s a scrape while the newest sent one stays: the lag
+  # passes 120 s after 2m15s, the 3m evaluation sees it, and it holds for the rule's 5.
+  - name: "a send lag over 2 minutes fires"
+    interval: 15s
+    input_series:
+      - series: 'prometheus_remote_storage_queue_highest_timestamp_seconds{project="x402",job="agent"}'
+        values: '1000+15x80'
+      - series: 'prometheus_remote_storage_queue_highest_sent_timestamp_seconds{project="x402",job="agent"}'
+        values: '1000+0x80'
+      - series: 'prometheus_remote_storage_samples_failed_total{project="x402",job="agent"}'
+        values: '0+0x80'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: x402-agent-behind
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: x402-agent-behind
+        exp_alerts:
+          - exp_labels: &agent_behind
+              {check: agent-behind, severity: warning, shape: server, project: x402}
+            exp_annotations: &agent_behind_text
+              description: "The metrics agent on ch-prod-01 is over 2 minutes behind in sending to the VM, or the VM refused samples it then dropped: the rules read old or missing data while the agent still looks up. Past 5 minutes behind, its samples land outside the rules' lookback and server-silent fires instead. Next: On the server: /var/log/x402/metrics/agent.log for remote_write errors (a 4xx names refused samples, a 5xx or timeout the VM or the way to it), then Caddy's log on the VM. No data: An agent that sends nothing is server-silent. Runbook: docs/monitoring.md, agent-behind."
+
+  # Samples the VM refused and the agent dropped, with no lag at all: one batch at 5m15s fires 5
+  # minutes after the first evaluation that sees it, and clears once it leaves the 15-minute window.
+  - name: "dropped samples fire"
+    interval: 15s
+    input_series:
+      - series: 'prometheus_remote_storage_queue_highest_timestamp_seconds{project="x402",job="agent"}'
+        values: '1000+15x80'
+      - series: 'prometheus_remote_storage_queue_highest_sent_timestamp_seconds{project="x402",job="agent"}'
+        values: '989+15x80'
+      - series: 'prometheus_remote_storage_samples_failed_total{project="x402",job="agent"}'
+        values: '0x20 3x60'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: x402-agent-behind
+        exp_alerts:
+          - exp_labels: *agent_behind
+            exp_annotations: *agent_behind_text
+      - eval_time: 21m
+        alertname: x402-agent-behind
+        exp_alerts: []
+
+  # What the VM read on 2026-11-24: 11 s behind, nothing dropped in a day.
+  - name: "an agent 11 s behind with nothing dropped stays quiet"
+    interval: 15s
+    input_series:
+      - series: 'prometheus_remote_storage_queue_highest_timestamp_seconds{project="x402",job="agent"}'
+        values: '1000+15x80'
+      - series: 'prometheus_remote_storage_queue_highest_sent_timestamp_seconds{project="x402",job="agent"}'
+        values: '989+15x80'
+      - series: 'prometheus_remote_storage_samples_failed_total{project="x402",job="agent"}'
+        values: '0+0x80'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: x402-agent-behind
+        exp_alerts: []

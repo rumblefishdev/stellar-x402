@@ -410,3 +410,29 @@ describe("the snapshot job", () => {
     expect(policy).toContain('capabilities = ["read"]');
   });
 });
+
+// Compose interpolates the whole file, so a unit that runs `docker compose` without the facilitator
+// must set every variable `production/compose.yaml` requires (code review of 0048: CI's
+// production-postgres job checks only the database unit).
+describe("the units that run compose without the facilitator", () => {
+  const required = [...read("production/compose.yaml").matchAll(/\$\{([A-Z0-9_]+):\?/g)].map(
+    (m) => m[1]!,
+  );
+
+  test.each(["x402-db-testnet@.service", "x402-tunnel@.service"])(
+    "%s sets every variable compose.yaml requires",
+    (name) => {
+      const set = settings(unit(name), "Environment")
+        .flatMap((line) => line.split(/\s+/))
+        .map((pair) => pair.split("=")[0]);
+      expect(required.length).toBeGreaterThan(0);
+      expect(set).toEqual(expect.arrayContaining(required));
+    },
+  );
+
+  test("the playbook checks .env for every one compose.yaml reads from it", () => {
+    const fromEnv = required.filter((name) => name !== "FACILITATOR_IMAGE");
+    const playbook = read("ansible/playbook.yaml");
+    for (const name of fromEnv) expect(playbook).toContain(`- ${name}\n`);
+  });
+});
