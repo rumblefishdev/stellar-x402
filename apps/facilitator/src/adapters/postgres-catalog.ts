@@ -177,22 +177,22 @@ export class PostgresCatalogStore implements CatalogStore {
     const { text, type, payTo, network, limit, after, now } = query;
     const { rows } = await this.listPool.query<HitRow>(
       `WITH m AS MATERIALIZED (
-         SELECT seq, network, pay_to, method, resource_url, description, resource->'accepts' AS accepts,
-                substring(resource_url from '://([^/:]+)') AS host,
-                ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query) AS base
-           FROM catalog
-           JOIN catalog_search USING (seq),
-                (SELECT string_agg(term, ' | ' ORDER BY first)::tsquery AS words_query
-                   FROM (SELECT term, min(n) AS first
-                           FROM unnest(string_to_array(plainto_tsquery('english', $1)::text,
-                                                       ' & ')) WITH ORDINALITY AS t(term, n)
-                          GROUP BY term
-                          ORDER BY first
-                          LIMIT 32) terms) q
-          WHERE words @@ words_query
-            AND ($2::text IS NULL OR type = $2)
-            AND ($3::text IS NULL OR pay_to = $3)
-            AND ($4::text IS NULL OR network = $4)),
+               SELECT seq, network, pay_to, method, resource_url, description, resource->'accepts' AS accepts,
+                      substring(resource_url from '://([^/:]+)') AS host,
+                      ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query) AS base
+                 FROM catalog
+                 JOIN catalog_search USING (seq),
+                      (SELECT string_agg(term, ' | ' ORDER BY first)::tsquery AS words_query
+                         FROM (SELECT term, min(n) AS first
+                                 FROM unnest(string_to_array(plainto_tsquery('english', $1)::text,
+                                                             ' & ')) WITH ORDINALITY AS t(term, n)
+                                GROUP BY term
+                                ORDER BY first
+                                LIMIT 32) terms) q
+                WHERE words @@ words_query
+                  AND ($2::text IS NULL OR type = $2)
+                  AND ($3::text IS NULL OR pay_to = $3)
+                  AND ($4::text IS NULL OR network = $4)),
        paid AS (
          SELECT m.seq, count(DISTINCT s.payer) AS payers
            FROM m
@@ -275,31 +275,31 @@ export class PostgresCatalogStore implements CatalogStore {
     const { text, type, payTo, network, limit, after, now } = query;
     const { rows } = await this.listPool.query<HitRow>(
       `WITH m AS MATERIALIZED (
-         SELECT seq, network, pay_to, method, resource_url, description, accepts, host,
-                4 / (20 + row_number() OVER (ORDER BY similarity DESC, network, pay_to, method, resource_url))::float8
-                  + CASE WHEN words_rank IS NULL THEN 0
-                         ELSE 1 / (20 + row_number() OVER (ORDER BY words_rank DESC NULLS LAST, network, pay_to, method, resource_url))::float8
-                    END AS base
-           FROM (SELECT seq, network, pay_to, method, resource_url, description,
-                        resource->'accepts' AS accepts, substring(resource_url from '://([^/:]+)') AS host,
-                        1 - public.cosine_distance(embedding, $5::public.vector) AS similarity,
-                        CASE WHEN words @@ words_query
-                             THEN ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query)
-                        END AS words_rank
-                   FROM catalog
-                   JOIN catalog_search USING (seq),
-                        (SELECT string_agg(term, ' | ' ORDER BY first)::tsquery AS words_query
-                           FROM (SELECT term, min(n) AS first
-                                   FROM unnest(string_to_array(plainto_tsquery('english', $1)::text,
-                                                               ' & ')) WITH ORDINALITY AS t(term, n)
-                                  GROUP BY term
-                                  ORDER BY first
-                                  LIMIT 32) terms) q
-                  WHERE model = $6
-                    AND ($2::text IS NULL OR type = $2)
-                    AND ($3::text IS NULL OR pay_to = $3)
-                    AND ($4::text IS NULL OR network = $4)) scored
-          WHERE similarity >= 0.60),
+               SELECT seq, network, pay_to, method, resource_url, description, accepts, host,
+                      4 / (20 + row_number() OVER (ORDER BY similarity DESC, network, pay_to, method, resource_url))::float8
+                        + CASE WHEN words_rank IS NULL THEN 0
+                               ELSE 1 / (20 + row_number() OVER (ORDER BY words_rank DESC NULLS LAST, network, pay_to, method, resource_url))::float8
+                          END AS base
+                 FROM (SELECT seq, network, pay_to, method, resource_url, description,
+                              resource->'accepts' AS accepts, substring(resource_url from '://([^/:]+)') AS host,
+                              1 - public.cosine_distance(embedding, $5::public.vector) AS similarity,
+                              CASE WHEN words @@ words_query
+                                   THEN ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query)
+                              END AS words_rank
+                         FROM catalog
+                         JOIN catalog_search USING (seq),
+                              (SELECT string_agg(term, ' | ' ORDER BY first)::tsquery AS words_query
+                                 FROM (SELECT term, min(n) AS first
+                                         FROM unnest(string_to_array(plainto_tsquery('english', $1)::text,
+                                                                     ' & ')) WITH ORDINALITY AS t(term, n)
+                                        GROUP BY term
+                                        ORDER BY first
+                                        LIMIT 32) terms) q
+                        WHERE model = $6
+                          AND ($2::text IS NULL OR type = $2)
+                          AND ($3::text IS NULL OR pay_to = $3)
+                          AND ($4::text IS NULL OR network = $4)) scored
+                WHERE similarity >= 0.60),
        paid AS (
          SELECT m.seq, count(DISTINCT s.payer) AS payers
            FROM m
