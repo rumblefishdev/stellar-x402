@@ -5,8 +5,9 @@
   2026-11-26: each network's catalog holds only its own listings), 2026-11-23 (task 0154: the
   quality score), 2026-11-24 (task 0120: each listing's search card in a table of its own; the
   vector on the card, the model's own server in the facilitator's image, when vectors are written,
-  the timeout, and no words-only window for a model change) and 2026-11-25 (task 0154: a payment's
-  listing on its settlement's row)
+  the timeout, and no words-only window for a model change), 2026-11-25 (task 0154: a payment's
+  listing on its settlement's row) and 2026-11-26 (task 0154: a payment counts only on the
+  listing's own terms; q is counted inside the search query)
 
 ## Context
 
@@ -177,10 +178,12 @@ The measurements are in
   payment's `extensions.bazaar` copy, with the same validation and key the catalog uses, and the
   claim stores them with the record, so no later write can miss them; a payment without a valid
   copy names no listing. A failure there leaves the record without one, logged and counted, and
-  never changes the settlement (AD-8). The asset counts because a payment's terms come from its
-  caller, not from the listing: a seller can pay itself in a token its listing never offers.
-  Every claim names its listing, so the count reads only `success` settlements, of the last 30
-  days; settlements are kept. Settlements from before the release name no listing, so the count
+  never changes the settlement (AD-8). A payment counts only when its scheme, network, `payTo`,
+  asset and amount equal one of the offers the catalog stored for the listing, which come from the
+  seller's own 402. A payment's terms come from its caller, not from the seller: anyone can call
+  `/settle` with terms of their own, so without this check one stroop to the seller would count
+  a payer. Every claim names its listing, so the count reads only `success` settlements, of the
+  last 30 days; settlements are kept. Settlements from before the release name no listing, so the count
   starts empty.
 - **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
   0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
@@ -271,6 +274,12 @@ The measurements are in
   2,539 and 15 ms at 25,000 without an index, and 0.7 and 1.6 ms with one (local PostgreSQL 18,
   synthetic payments of 4.3 KB, whose `payment_requirements` of about 260 bytes stays inline). It
   ships without an index; one comes when a measurement of the shipped search query needs it.
+- **q is counted inside the search query.** With 39,578 listings, a 4-word query by words took
+  143–170 ms without q, 324 ms with q at 2,539 successful payments in 30 days and 392 ms at
+  25,000. A table of payers per listing, written at each payment, took 263–294 ms: close to the
+  noise of a loaded machine, for a second write path and a copy to prune. A 32-word query takes
+  2.4–4.8 s in every variant, over the 2 s timeout even without q (local PostgreSQL 18.6,
+  synthetic data, load 7–13).
 - **The numbers above** are in
   [R-quality-measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md).
 - **Curation needs a proof, not a judgement.** A list kept by hand would have the operator vouch

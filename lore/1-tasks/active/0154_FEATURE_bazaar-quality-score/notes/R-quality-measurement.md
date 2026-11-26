@@ -96,3 +96,22 @@ two listing columns, with network, `payTo` and asset from the row's `payment_req
 - The count matched the derived one for every listing at every size.
 - Writing the two columns took 0.3–0.4 ms; adding them took 0.4–16.5 ms under the table's lock up
   to 600,000 rows, a change to the table's metadata only.
+
+## The search query with q in it (2026-11-26)
+
+The whole search query by words, with a payment counted only on one of the listing's offers
+(scheme, network, `payTo`, asset and amount). Local PostgreSQL 18.6, 39,578 synthetic listings, a
+machine at load 7–13, median in ms. Differences under about 30% are within the noise of that load.
+
+| Query | Today, no q | q counted in the query | q from a table of payers per listing |
+| --- | --- | --- | --- |
+| 4 words, 2,539 payments in 30 days | 143–170 | 324 | 294 |
+| 4 words, 25,000 payments in 30 days | 143–170 | 392 | 263 |
+
+- Counted in the query: the matches are found first, then joined to the settlements and grouped
+  per listing. Other shapes (payers counted first, then joined) took 1.2–2.4 s, because the
+  planner guessed too few matches and chose a nested loop.
+- The table needs a second write at each payment (about 1 ms) and a job that drops pairs older
+  than 30 days; 11 MB at 25,000 payments.
+- A 32-word query took 2,400–4,800 ms in every variant: over the discovery pool's 2 s timeout
+  even today.
