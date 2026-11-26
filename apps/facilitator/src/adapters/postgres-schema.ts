@@ -380,6 +380,16 @@ CREATE VIEW account_usage AS
   WHERE s.scope LIKE 'account:%';
 `,
   },
+  {
+    // 0154: the listing a settled payment paid for, so the search's quality score counts its payer
+    // (ADR 0014). The rest of the key, the payer and the asset are already in the row. Nullable
+    // columns without a default change only the table's metadata (16.5 ms under its lock at
+    // 600,000 rows, measured locally on 18), and the release before never reads them.
+    name: "0019_settlement_listing",
+    sql: `
+ALTER TABLE settlements ADD COLUMN listing_method text, ADD COLUMN listing_url text;
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

@@ -39,6 +39,7 @@ export {
   type ReopenResult,
   type SettlementAttempt,
   type SettlementKey,
+  type SettlementListing,
   type SettlementRecord,
   type SettlementState,
   type SettlementStore,

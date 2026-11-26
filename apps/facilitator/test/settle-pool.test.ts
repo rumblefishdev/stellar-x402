@@ -220,6 +220,7 @@ function setup(
       beforeSubmit: async () => ({ allow: true }),
       onFinal: async () => {},
       onSuccess: async () => {},
+      listingOf: () => undefined,
     },
     logger: jsonLogger("warn", (line) => lines.push(line)),
     metrics: memoryMetrics(),
