@@ -175,13 +175,15 @@ The measurements are in
 - **Network.** A search reads the one catalog, which holds both networks (task 0155): without a
   `network` filter it ranks both, as `/discovery/resources` lists both.
 - **Cursor.** Opaque to the client; it carries the last result's score and listing key, and the
-  next page starts after it. Each new listing above it shifts the next page by one, so a result
-  may repeat or be skipped at a page boundary. It also carries how the page was ranked, fused or
+  next page starts after it. A listing written between two pages can shift the next one: the
+  fused rank of a listing depends on its position among the others, so a few results (up to 4 in a
+  simulation of the formula) may repeat or be skipped at a page boundary. It also carries how the page was ranked, fused or
   words alone, and the model: the two scores differ in scale, so a cursor from another ranking or
   model is refused with `400` and the client starts again.
 - **`partialResults`** keeps the spec's meaning: `true` when matches were left out that no page
   will return. Every match is ranked and the cursor reaches the last one, so it is `false`, except
-  while search answers by words alone: matches by meaning were not looked for, so it is `true`.
+  while search answers by words alone (matches by meaning were not looked for) and while a
+  listing that passes the filters waits for its vector (it may match): then it is `true`.
 
 ## Rationale
 

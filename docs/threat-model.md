@@ -860,5 +860,7 @@ search model can't be used.
   also holds the payment code.
 - **Mitigation:** The revision is pinned, the npm lockfile holds integrity hashes, the container
   is read-only, without capabilities and on a network with no way out, and onnxruntime's
-  telemetry is off (`ORT_DISABLE_TELEMETRY`).
-- **Residual risk:** No hash of our own checks the model's files.
+  telemetry is off (`ORT_DISABLE_TELEMETRY`). The build checks each model file against a SHA-256
+  value in `model.ts` before it writes the file.
+- **Residual risk:** The values were taken from the pinned revision once; a revision that was bad
+  from the start passes the check.

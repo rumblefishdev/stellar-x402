@@ -101,7 +101,7 @@ export interface CatalogStore {
    * entries that hold a word of `text`, ranked by words: a word in the name counts most, then
    * tags, description and parameters, and each repeat counts again (threat model, "Ranking by
    * repeated words"). Equal ranks go by key, so a page that starts `after` a result goes on
-   * exactly where the page before stopped.
+   * where the page before stopped, unless a write between the pages moved the ranks.
    */
   search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
   /**
