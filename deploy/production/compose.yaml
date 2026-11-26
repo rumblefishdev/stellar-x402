@@ -78,6 +78,9 @@ services:
   search-model:
     image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}
     command: [node, /search-model/dist/main.js]
+    # Node as PID 1 ignores SIGTERM until the model has loaded and set its listener; under an init
+    # a stop during the load ends it at once.
+    init: true
     # Back after an exit, an out-of-memory one included: x402@ restarts only the facilitator.
     restart: unless-stopped
     read_only: true
@@ -164,7 +167,7 @@ services:
 # daemon.json) is taken whole by another project's network. These sit outside it and outside
 # docker0's 172.17.0.0/16; each /28 leaves 13 addresses for containers after Docker's gateway
 # (.1, .17), room for mainnet's services. A network added here needs one too, or it fails the
-# same way, and only on the server: a /28 from 172.31.200.0/24, the next free 172.31.200.48/28.
+# same way, and only on the server: a /28 from 172.31.200.0/24, the next free 172.31.200.64/28.
 networks:
   edge:
     name: x402-production-edge
@@ -184,7 +187,7 @@ networks:
     internal: true
     ipam:
       config:
-        - subnet: 172.31.200.32/28
+        - subnet: 172.31.200.48/28
   # The metrics agent's (deploy/metrics/compose.yaml), which makes it; the facilitator joins it so
   # the agent scrapes /metrics with no port published. The agent's project must be up first.
   metrics:

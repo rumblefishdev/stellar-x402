@@ -282,6 +282,14 @@ describe("the units' output", () => {
     ]);
   });
 
+  test("no two networks on the server share a subnet: Docker refuses the second one", () => {
+    const subnets = ["production/compose.yaml", "metrics/compose.yaml"].flatMap((path) =>
+      [...read(path).matchAll(/subnet: (\S+)/g)].map((m) => m[1]!),
+    );
+    expect(subnets.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(subnets).size).toBe(subnets.length);
+  });
+
   test("the search model runs from the facilitator's image, capped, restarted, on its own network, never waited for (ADR 0014)", () => {
     const compose = read("production/compose.yaml");
     const model = compose.match(/^ {2}search-model:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? "";
