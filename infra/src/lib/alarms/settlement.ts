@@ -84,15 +84,15 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     },
   });
 
-  // A listing without a vector is left out of search by meaning until the next start (ADR 0014),
-  // so each failure is worth a message.
+  // A listing the model fails on while it answers stays out of search by meaning until its text
+  // changes or the facilitator restarts (ADR 0014), so each failure is worth a message.
   f.event("search-vector-failed", {
     group: "facilitator",
     signal: { catalog: "search_vector_failures_total" },
     periods: 1,
     description: {
-      what: "The search model gave no vector for a listing, or the start's pass could not read the cards: search by meaning leaves the listing out, and answers partial, until the next start's pass embeds it.",
-      next: `Read search_vector_failed and search_vectors_read_failed in /x402/${c.envName}/app with Logs Insights for the listing and the cause, then the search-model container's health (x402-compose ${c.envName} ps search-model). A restart of x402@${c.envName} embeds the listings still without a vector.`,
+      what: "The search model, while it answered its health check, gave no vector for a listing, or the vectors' loop could not read the cards: search by meaning leaves the listing out and answers partial. A model that is down fires search-model-down instead, and the loop resumes within 30 s of its return.",
+      next: `Read search_vector_failed and search_vectors_read_failed in /x402/${c.envName}/app with Logs Insights for the listing and the cause, then the search-model container's health (x402-compose ${c.envName} ps search-model). A listing that failed on its own text is tried again when its text changes or after a restart of x402@${c.envName}.`,
       noData: SILENT_EVENT,
     },
   });
