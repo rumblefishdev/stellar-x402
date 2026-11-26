@@ -197,14 +197,19 @@ describe("GET /discovery/search by meaning, vectors stored (0120 G, I)", () => {
     expect(body.partialResults).toBe(true);
   });
 
-  it("refuses a fused cursor once search answers by words alone (I)", async () => {
+  it("asks again later for a fused cursor while search answers by words alone: the server fell back, not the client", async () => {
     const first = await search("query=weather&limit=1");
     model.down = new Error("model down");
     const { response, body } = await search(
       `query=weather&limit=1&cursor=${first.body.pagination!.cursor}`,
     );
-    expect(response.status).toBe(400);
-    expect(body).toEqual({ error: "bad_request", param: "cursor" });
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("5");
+    expect(body).toEqual({ error: "search_model_unavailable", param: "cursor" });
+    // Once the model answers again, the same cursor goes on.
+    model.down = undefined;
+    const next = await search(`query=weather&limit=1&cursor=${first.body.pagination!.cursor}`);
+    expect(next.response.status).toBe(200);
   });
 
   it("refuses a fused cursor of another model (I)", async () => {

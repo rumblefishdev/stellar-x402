@@ -28,6 +28,12 @@ export const MAX_QUERY_LENGTH = 2_000;
  * its pinned revision) and the field names: under 3,400 characters in base64url.
  */
 const MAX_CURSOR_LENGTH = 4_096;
+/**
+ * Seconds a client waits before it pages on with a fused cursor while search runs on words, as
+ * `/settle` and `/verify` ask on their own 503s (app.ts): no measurement of how fast the model
+ * comes back sets it.
+ */
+const SEARCH_MODEL_RETRY_AFTER_S = 5;
 /** The parameters upstream's `search` sends: the list's filters and `limit`, a query, a cursor. */
 const QUERY = LIST_QUERY.omit({ offset: true }).extend({
   query: z
@@ -182,11 +188,18 @@ export function discoverySearch(
     }
     const ranked: Ranking =
       meaning === undefined ? { ranking: "words" } : { ranking: "fused", model: meaning.model };
+    if (parsed.cursor?.ranking === "fused" && ranked.ranking === "words") {
+      // The server fell back, not the client: the same cursor goes on once the model answers.
+      res.setHeader("Retry-After", `${SEARCH_MODEL_RETRY_AFTER_S}`);
+      res.status(503).json({ error: "search_model_unavailable", param: "cursor" });
+      return;
+    }
     if (
       parsed.cursor !== undefined &&
       (parsed.cursor.ranking !== ranked.ranking || parsed.cursor.model !== ranked.model)
     ) {
-      // Its rank has another scale than this ranking's: the client starts again.
+      // Its rank has another scale than this ranking's, for good (a words cursor from before the
+      // model, or another model's): the client starts again.
       res.status(400).json({ error: "bad_request", param: "cursor" });
       return;
     }
