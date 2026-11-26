@@ -23,6 +23,20 @@ RUN pnpm install --offline --frozen-lockfile --filter @stellar-x402/facilitator.
 # The model's files at the revision `apps/search-model/src/model.ts` pins, each checked against
 # the SHA-256 it names there, so its container downloads nothing when it starts.
 RUN node apps/search-model/scripts/fetch-model.mjs /out-search-model/model
+# onnxruntime-node ships every platform's runtime (about 308 MB); the image keeps its own Linux
+# one (about 48 MB). TARGETARCH is the image's platform, so a local arm64 build keeps arm64's.
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      amd64) keep=x64 ;; \
+      arm64) keep=arm64 ;; \
+      *) echo "no onnxruntime-node build for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+  && napi=$(find /out-search-model -type d -path '*/onnxruntime-node/bin/napi-v6') \
+  && test -d "$napi/linux/$keep" \
+  && mv "$napi/linux/$keep" /tmp/onnxruntime-keep \
+  && rm -rf "$napi"/* \
+  && mkdir "$napi/linux" \
+  && mv /tmp/onnxruntime-keep "$napi/linux/$keep"
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production
