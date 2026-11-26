@@ -23,7 +23,7 @@ describe("envs/production.json", () => {
     expect(production().networks).toEqual(["stellar:testnet"]);
   });
 
-  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, disk, memory, log volume, the balance, the protocol (26, 37, 72, 73)", () => {
+  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, disk, memory, log volume, the balance, the protocol, the heartbeat (26, 37, 72, 73; 0139)", () => {
     const on = Object.entries(production().alarmGroups)
       .filter(([, v]) => v)
       .map(([g]) => g);
@@ -37,6 +37,7 @@ describe("envs/production.json", () => {
       "logVolume",
       "watch",
       "protocol",
+      "heartbeat",
     ]);
   });
 
@@ -64,15 +65,16 @@ describe("envs/production.json", () => {
     });
   });
 
-  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-09 (decision 70)", () => {
+  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-25 (decision 70)", () => {
     expect(production().watch.protocol).toEqual({
       "stellar:testnet": {
         horizonUrl: "https://horizon-testnet.stellar.org",
         expected: 30,
         supported: 30,
       },
-      // Mainnet runs 29 and its Core supports 30, which testnet runs and 0111's SDK reads.
-      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 29, supported: 30 },
+      // Mainnet moved to 30 on 2026-11-23 (protocol-changed fired at 17:11 UTC): the version testnet
+      // runs and 0111's SDK reads.
+      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 30, supported: 30 },
     });
   });
 

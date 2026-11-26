@@ -32,7 +32,7 @@
       },
       "stellar:pubnet": {
         "horizonUrl": "https://horizon.stellar.org",
-        "expected": 29,
+        "expected": 30,
         "supported": 30
       }
     }
@@ -62,7 +62,7 @@
     "watchSecurity": false,
     "protocol": true,
     "upstream": false,
-    "heartbeat": false
+    "heartbeat": true
   },
   "thresholds": {
     "uptimeFailingMinutes": 7,

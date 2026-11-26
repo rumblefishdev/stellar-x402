@@ -42,8 +42,9 @@ diff-production: build
 # On a fresh account or a rebuild, deploy Watch first, wait for `make check-series GROUP=watch`,
 # then Alarms: no stack depends on another, so --all may create the alarms before the check runs,
 # and watch-no-invocations treats missing data as breaching (it would page until the first run).
-# Heartbeat likewise goes in with its group off until the VM's Watchdog publishes to its topic:
-# monitoring-heartbeat breaches on missing data too.
+# Heartbeat likewise: with `heartbeat` on, a rebuild makes the topic and the alarm together, and
+# monitoring-heartbeat, breaching on missing data, fires about 20 minutes later unless the VM's
+# Watchdog reaches the new topic first. Turn the group off for a rebuild, on once it publishes.
 # A deploy of all stacks ships every pending change, a parked one too (the explorer's 0312
 # "stowaway"), so the full diff is printed first, into the same output. --require-approval
 # broadening stops on IAM widening only: read the diff for removals too (the Prices API's 0157).

@@ -1,8 +1,15 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { DiscoveryResource, DiscoveryResourcesResponse } from "@x402/extensions/bazaar";
+import type {
+  DiscoveryResource,
+  DiscoveryResourcesResponse,
+  SearchDiscoveryResourcesResponse,
+} from "@x402/extensions/bazaar";
 
-/** Stands in for `GET /discovery/resources` (task 0032) until our facilitator serves it. */
+/**
+ * Stands in for `GET /discovery/resources` (task 0032) and `GET /discovery/search` (task 0120), so
+ * the tools are tested without our facilitator.
+ */
 
 const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
 
@@ -126,13 +133,50 @@ export interface FakeCatalog {
   hang?: boolean;
   /** Answer 200 with a body that is not a discovery page. */
   malformed?: boolean;
+  /** Query strings `/discovery/search` received, in order. */
+  searchQueries: URLSearchParams[];
+  /** What `/discovery/search` returns, in this order, whatever the query. */
+  searchResources: DiscoveryResource[];
+  /** The search's `partialResults`. */
+  partialResults: boolean;
+  /** The search's next-page cursor. */
+  cursor: string | null;
+  /** Answer the search 400 naming this parameter, as the facilitator's route does. */
+  badParam?: string;
   close(): Promise<void>;
 }
 
 export async function startFakeCatalog(items: DiscoveryResource[] = CATALOG): Promise<FakeCatalog> {
   const queries: URLSearchParams[] = [];
+  const searchQueries: URLSearchParams[] = [];
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname === "/discovery/search") {
+      searchQueries.push(url.searchParams);
+      if (fake.hang) return;
+      if (fake.badParam !== undefined) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "bad_request", param: fake.badParam }));
+        return;
+      }
+      if (fake.failWith) {
+        res.writeHead(fake.failWith).end("catalog body that must not reach the agent");
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      if (fake.malformed) {
+        res.end(JSON.stringify({ resources: "not a list" }));
+        return;
+      }
+      const body: SearchDiscoveryResourcesResponse = {
+        x402Version: 2,
+        resources: fake.searchResources,
+        partialResults: fake.partialResults,
+        pagination: { limit: fake.searchResources.length, cursor: fake.cursor },
+      };
+      res.end(JSON.stringify(body));
+      return;
+    }
     if (url.pathname !== "/discovery/resources") {
       res.writeHead(404).end();
       return;
@@ -154,6 +198,10 @@ export async function startFakeCatalog(items: DiscoveryResource[] = CATALOG): Pr
   const fake: FakeCatalog = {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     queries,
+    searchQueries,
+    searchResources: items,
+    partialResults: true,
+    cursor: null,
     close: () =>
       new Promise((resolve) => {
         server.close(() => resolve());

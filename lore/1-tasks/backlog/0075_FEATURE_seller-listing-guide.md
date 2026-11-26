@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 3
 related_adr: ["0008"]
-related_tasks: ["0063", "0085"]
+related_tasks: ["0063", "0085", "0102", "0163"]
 tags: [docs, bazaar, dev-tools, priority-medium, effort-small]
 links: []
 history:
@@ -27,6 +27,12 @@ history:
     note: >
       Takes in two RFP items no task held: the role-based developer guide and the "deploy in
       under an hour" goal, which the M1 plan leaves out of Tranche 1.
+  - date: "2026-11-25"
+    status: backlog
+    who: akot
+    note: >
+      Noted under "Context" the two SDK helpers the guide can name: the catalog's answer (0102)
+      and the no-payment check (0163).
 ---
 
 # Seller guide to getting a service listed in the Bazaar
@@ -45,6 +51,9 @@ check it did, so that a new service can be found without waiting for a buyer who
   endpoint. The amount goes back to the seller's wallet; the facilitator pays the network fee.
 - RFP 07's "seller-side helpers for discovery metadata" are covered by upstream's
   `declareDiscoveryExtension`, already used in `examples/http-api`.
+- The TypeScript SDK adds two helpers a seller's guide can name. 0102 (M2): the catalog's answer
+  after a settlement, listed or refused with the reason, which nothing in TypeScript reads today.
+  0163 (M3): `validateListing`, the no-payment check this task left as a possible follow-up.
 - The RFP also asks for a "Role-based developer guide for Stellar Developer Docs" and a "UX
   enabling developers to deploy discoverable endpoints in under an hour"
   (`docs/rfp/07-x402-facilitator-bazaar.md`). This guide is the seller's part of both;

@@ -3,12 +3,13 @@
 End-to-end run of `stellar-x402-mcp` (task 0037): the built CLI started over MCP stdio, the way an
 MCP client such as Claude Desktop starts it. Unit tests in `apps/mcp-local/test` cover the logic in one
 process with fakes; this run covers what they cannot: the built binary and its settings, real
-stdio, real signing, two real payments on testnet, and the buyer's secret absent from everything
+stdio, real signing, three real payments on testnet, and the buyer's secret absent from everything
 the servers write.
 
 The scenarios (E-01…E-23) were written from the README, the tool list and the acceptance criteria
 only, by a reviewer who had not read the code; E-09h, E-14b, E-14c and E-24 came from a second,
-independent review of what the first set left out.
+independent review of what the first set left out. E-14d and E-14e came with task 0092, which also
+changed E-14's code. E-25 comes from the search tool's acceptance criteria (task 0137).
 
 ## Run
 
@@ -29,24 +30,25 @@ It also needs a PostgreSQL for its facilitator: `TEST_DATABASE_URL`, else the lo
 
 The run checks balances on Horizon, so these accounts must not be used by another run at the same
 time. Testnet USDC comes from Circle's faucet; friendbot gives only XLM. The run also creates two
-fresh accounts with friendbot for `insufficient_funds`: one without a USDC trustline, one with a
-trustline and no USDC.
+fresh accounts with friendbot: one without a USDC trustline, for `payer_trustline_missing` and, as
+a seller's `payTo`, `payto_trustline_missing`; one with a trustline and no USDC, for
+`insufficient_funds`.
 
 ## Scenarios
 
-| Group                   | Scenarios          | What they prove                                                                                                                 |
-| ----------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| start-up                | E-01 – E-03        | wrong settings stop the server (exit 1, the variable named); 2 tools without a key, 3 with                                      |
-| catalog                 | E-04 – E-06        | filters and paging passed on, one request per call; catalog failures; input failing a schema                                    |
-| `get_resource`          | E-07 – E-09        | the real seller's terms; every seller failure's code; the address guard, and a public https name passing it                     |
-| refusals before signing | E-10 – E-13a       | each refusal in the documented order, with nothing signed                                                                       |
-| after signing           | E-13b – E-20, E-24 | what was signed (from the transaction), empty wallets, every after-payment code, one deadline per call, the shared daily budget |
-| real payments           | E-21, E-22         | two payments settled on testnet, checked on Horizon; then over the budget and over the price limit                              |
-| secrets                 | E-23               | no secret in anything the servers wrote                                                                                         |
+| Group                   | Scenarios          | What they prove                                                                                                                                                                            |
+| ----------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| start-up                | E-01 – E-03        | wrong settings stop the server (exit 1, the variable named); 3 tools without a key, 4 with                                                                                                 |
+| catalog                 | E-04 – E-06        | filters and paging passed on, one request per call; catalog failures; input failing a schema                                                                                               |
+| `get_resource`          | E-07 – E-09        | the real seller's terms; every seller failure's code; the address guard, and a public https name passing it                                                                                |
+| refusals before signing | E-10 – E-13a       | each refusal in the documented order, with nothing signed                                                                                                                                  |
+| after signing           | E-13b – E-20, E-24 | what was signed (from the transaction), empty wallets, every after-payment code, one deadline per call, the shared daily budget                                                            |
+| real payments           | E-21, E-22, E-25   | two payments settled on testnet, checked on Horizon; then over the budget and over the price limit; search on our facilitator finds the seller E-21 cataloged, and a third payment pays it |
+| secrets                 | E-23               | no secret in anything the servers wrote                                                                                                                                                    |
 
 ## What it spends
 
-Two payments of 0.001 testnet USDC (E-21, E-22) to the example seller (`examples/http-api`,
+Three payments of 0.001 testnet USDC (E-21, E-22, E-25) to the example seller (`examples/http-api`,
 started locally), settled by our facilitator (`apps/facilitator`, built), which the run starts with
 a fresh friendbot account for the fees and one fresh channel. Every other paid path uses a local
 fake seller (`src/fakes.ts`) whose 402 copies the example seller's, so a real key signs it; the

@@ -7,6 +7,7 @@ import {
   encodePaymentResponseHeader,
 } from "@x402/core/http";
 import type { PaymentRequired } from "@x402/core/types";
+import { InsufficientBalanceError, TrustlineMissingError } from "@x402/stellar";
 
 /**
  * A seller that answers 402 the way `@x402/express` does, and settles every signed retry itself:
@@ -14,6 +15,9 @@ import type { PaymentRequired } from "@x402/core/types";
  */
 
 export const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+/** The buyer's and the seller's accounts: an address's shape, no key behind either. */
+export const BUYER = "GBUYERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+export const PAY_TO = "GASELLERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 export interface FakeSeller {
   url: string;
@@ -120,7 +124,7 @@ export async function startFakeSeller(): Promise<FakeSeller> {
             network: seller.network as PaymentRequired["accepts"][number]["network"],
             amount,
             asset,
-            payTo: "GSELLERA",
+            payTo: PAY_TO,
             maxTimeoutSeconds: seller.maxTimeoutSeconds,
             extra: { areFeesSponsored: true },
           }),
@@ -197,22 +201,31 @@ export async function startFakeSeller(): Promise<FakeSeller> {
   return seller;
 }
 
-/** What `ExactStellarScheme` throws for a payer without a USDC trustline, as measured on testnet. */
-export const NO_TRUSTLINE =
-  "Stellar simulation failed with error message: HostError: Error(Contract, #13) " +
-  '"trustline entry is missing for account"';
+/**
+ * What `ExactStellarScheme` 2.31 throws when the asset contract refuses the simulation, with the RPC's
+ * text as measured on testnet: `#13` for an account without a USDC trustline, the payer's or the
+ * seller's, and `#10` for a payer with a trustline and too little USDC.
+ */
+export const noTrustline = (account: string, asset = USDC) =>
+  new TrustlineMissingError(
+    account,
+    asset,
+    'HostError: Error(Contract, #13) "trustline entry is missing for account"',
+  );
+export const tooLittle = () =>
+  new InsufficientBalanceError(BUYER, USDC, "HostError: Error(Contract, #10)");
 
 /**
  * Stands in for `ExactStellarScheme`: "signs" without a key or an RPC; the first `failures` calls
  * throw `error`.
  */
-export function fakeScheme(failures = 0, error = NO_TRUSTLINE): SchemeNetworkClient {
+export function fakeScheme(failures = 0, error: Error = tooLittle()): SchemeNetworkClient {
   let calls = 0;
   return {
     scheme: "exact",
     async createPaymentPayload(x402Version, requirements) {
       calls += 1;
-      if (calls <= failures) throw new Error(error);
+      if (calls <= failures) throw error;
       return { x402Version, payload: { fake: true, amount: requirements.amount } };
     },
   };

@@ -34,7 +34,7 @@ const network = "stellar:testnet";
 const URLS = ["https://rpc-a.example", "https://rpc-b.example"];
 const channel = Keypair.random().publicKey();
 
-/** A root that records each registration, as the EMF writer would sample it. */
+/** A root that records each registration, as the Prometheus writer reads it at a scrape. */
 function recordingMetrics() {
   const gauges: { name: GaugeName; read: GaugeRead }[] = [];
   const root: MetricsWriter = {

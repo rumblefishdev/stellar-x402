@@ -5,11 +5,10 @@ import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 import { getUsdcAddress } from "@x402/stellar";
 import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { openBaoSigner } from "../src/adapters/openbao-signer.js";
-import { parseConfig, type Env } from "../src/config.js";
+import { parseConfig, type Config, type Env } from "../src/config.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { buildChecks, buildRpc, buildSettlement, compose } from "../src/main.js";
-import type { BuildIssue } from "../src/adapters/emf.js";
-import { emfMetrics } from "../src/adapters/emf-metrics.js";
+import { prometheusMetrics, type MetricIssue } from "../src/adapters/prometheus-metrics.js";
 import { memoryMetrics, type ProcessMetrics } from "../src/metrics.js";
 import type { LeaseFence, SettlementStore, SpendScope } from "../src/ports/index.js";
 import { feeSettings } from "../src/settlement/fees.js";
@@ -510,12 +509,22 @@ describe("main()'s /settle wiring, with the real pool", () => {
 });
 
 describe("main()'s composition (compose)", () => {
-  /** The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. */
+  /**
+   * The graph `main()` serves; it takes the lease as `start()` does, unless `lease: false`. With
+   * `network`, the config is parsed as testnet's and given that network after, past
+   * `parseConfig`'s refusal of pubnet (0048), as `api-key-route.test.ts` does.
+   */
   async function composed(
     env: Record<string, string> = {},
-    opts: { lease?: boolean; metrics?: ProcessMetrics } = {},
+    opts: {
+      lease?: boolean;
+      metrics?: ProcessMetrics;
+      network?: Config["network"];
+      /** Upstream's verify; accepts every payment by default. */
+      upstreamVerify?: () => Promise<{ isValid: boolean; invalidReason?: string; payer?: string }>;
+    } = {},
   ) {
-    const config = parseConfig({
+    const parsed = parseConfig({
       ...signerEnv(facilitator.publicKey(), openbao.socketPath),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
@@ -523,6 +532,7 @@ describe("main()'s composition (compose)", () => {
       MAX_FEE_STROOPS: String(MAX_FEE),
       ...env,
     });
+    const config = opts.network ? { ...parsed, network: opts.network } : parsed;
     // The fee account holds the float (ADR 0013), well above the floor.
     const fake = new PaymentRpc({ [channel]: 1_000n, [facilitator.publicKey()]: 1n });
     fake.balances.set(facilitator.publicKey(), FLOAT);
@@ -533,7 +543,11 @@ describe("main()'s composition (compose)", () => {
       logger: jsonLogger("error", () => {}),
       stores: db.stores(),
       rpc: fake,
-      seams: { makeScheme: () => ({ verify: async () => ({ isValid: true, payer }) }) },
+      seams: {
+        makeScheme: () => ({
+          verify: opts.upstreamVerify ?? (async () => ({ isValid: true, payer })),
+        }),
+      },
       sleep: async () => {},
       ...(opts.metrics && { metrics: opts.metrics }),
     });
@@ -544,22 +558,27 @@ describe("main()'s composition (compose)", () => {
     return { deps, cataloger, metrics: metrics as MemoryMetrics, fake };
   }
 
-  /** An EMF writer on a captured sink and a scheduler that never fires: only `flush()` writes. */
-  function capturedEmf() {
-    const lines: string[] = [];
-    const issues: BuildIssue[] = [];
-    const metrics = emfMetrics({
-      write: (line) => void lines.push(line),
+  /** The Prometheus writer `main()` builds, its issues captured, and its samples parsed. */
+  function capturedPrometheus() {
+    const issues: MetricIssue[] = [];
+    const metrics = prometheusMetrics({
+      networks: ["stellar:testnet"],
       onIssue: (issue) => void issues.push(issue),
-      schedule: { setTimeout: () => undefined, clearTimeout: () => {} },
     });
-    type Line = { _aws: { CloudWatchMetrics: { Dimensions: string[][] }[] } } & Record<
-      string,
-      unknown
-    >;
-    const linesFor = (name: string) =>
-      lines.map((line) => JSON.parse(line) as Line).filter((line) => name in line);
-    return { metrics, lines, issues, linesFor };
+    /** A metric's samples above 0: each one's labels and value. */
+    const samplesOf = (name: string) =>
+      metrics
+        .render()
+        .split("\n")
+        .flatMap((line) => {
+          const m = /^(\w+)(?:\{(.*)\})? (\S+)$/.exec(line);
+          if (!m || m[1] !== name || Number(m[3]) === 0) return [];
+          const labels = Object.fromEntries(
+            [...(m[2] ?? "").matchAll(/(\w+)="([^"]*)"/g)].map(([, k, v]) => [k, v]),
+          );
+          return [{ labels, value: Number(m[3]) }];
+        });
+    return { metrics, issues, samplesOf };
   }
 
   it("writes a settle's settlement_outcomes_total with network and result, and no issue (0027)", async () => {
@@ -570,10 +589,10 @@ describe("main()'s composition (compose)", () => {
       extensions: { bazaar },
     }));
     onTestFinished(() => void seller.server.close());
-    const emf = capturedEmf();
+    const prom = capturedPrometheus();
     const { deps, cataloger, fake } = await composed(
       { CATALOG_LIST_LOCAL: "true" },
-      { metrics: emf.metrics },
+      { metrics: prom.metrics },
     );
     const local = {
       ...payload(fake.ledger + 30, { bazaar }),
@@ -583,27 +602,22 @@ describe("main()'s composition (compose)", () => {
     expect(settled.response).toMatchObject({ success: true });
     settled.afterResponse!();
     await cataloger.drain();
-    await emf.metrics.close();
-    const [outcome, ...rest] = emf.linesFor("settlement_outcomes_total");
-    expect(rest).toEqual([]);
-    expect(outcome).toMatchObject({
+    expect(prom.samplesOf("settlement_outcomes_total")).toEqual([
+      {
+        labels: expect.objectContaining({ network: "stellar:testnet", result: "success" }),
+        value: 1,
+      },
+    ]);
+    // A network-scoped metric written through the root would carry `network="other"` and report
+    // `missing-label`; the catalog's series, process-scoped, carries no `network`.
+    expect(prom.issues).toEqual([]);
+    const [attempt] = prom.samplesOf("catalog_attempts_total");
+    // `reason` has open values, so it stays in the app line, not a label (0139 step 4).
+    expect(attempt?.labels).toEqual({ origin: "settle", stage: "seller", outcome: "refreshed" });
+    expect(attempt?.labels).not.toHaveProperty("network");
+    expect(prom.samplesOf("lease_changes_total")[0]?.labels).toMatchObject({
       network: "stellar:testnet",
-      result: "success",
-      settlement_outcomes_total: 1,
     });
-    expect(outcome!._aws.CloudWatchMetrics[0]!.Dimensions).toEqual([["network", "result"]]);
-    // A network-scoped metric written through the root would write no line and report
-    // `no-valid-set`; the catalog's line, process-scoped, carries no `network`.
-    expect(emf.issues).toEqual([]);
-    const [attempt] = emf.linesFor("catalog_attempts_total");
-    expect(attempt).toMatchObject({
-      origin: "settle",
-      stage: "seller",
-      outcome: "refreshed",
-      reason: "inserted",
-    });
-    expect(attempt).not.toHaveProperty("network");
-    expect(emf.linesFor("lease_changes_total")[0]).toMatchObject({ network: "stellar:testnet" });
   });
 
   it("gives the network-scoped parts one network child and discovery and HTTP the root (0027)", async () => {
@@ -859,6 +873,86 @@ describe("main()'s composition (compose)", () => {
     expect(fake.sent).toHaveLength(0);
   });
 
+  // 0157, from Oskar's review of #236: every other `compose()` test builds a testnet config, and
+  // reverting any of `plans`, `accountPlans` or `keyed` in `main.ts` passed the whole suite.
+  describe("on a network that requires an API key (0107)", () => {
+    const pubnet = "stellar:pubnet" as const;
+    const OWNER = "discord:412345678901234567";
+    const keyedRequirements = { ...requirements, network: pubnet };
+    /** `ACCOUNT_PLANS` unlike the defaults: one free payment a month, where the default is 1,000. */
+    const PLANS = "free:1:20000000,basic:10:25000000";
+    const keyed = () => composed({ ACCOUNT_PLANS: PLANS }, { network: pubnet });
+    /** A payment sent to `/settle` with a key of `owner`'s, or with no caller at all. */
+    const pay = (
+      { deps, fake }: Awaited<ReturnType<typeof composed>>,
+      owner: string | null = OWNER,
+    ) =>
+      deps.settle(
+        transferPayload(
+          { payer, payTo, requirements: keyedRequirements },
+          fake.ledger + 30,
+          undefined,
+          String(++nonces),
+        ),
+        keyedRequirements,
+        undefined,
+        owner === null ? undefined : { owner },
+      );
+
+    it("counts a keyed settlement in its account, free and global alone (criterion 1)", async () => {
+      const graph = await keyed();
+      expect((await pay(graph)).response).toMatchObject({ success: true, network: pubnet });
+      const counted = [`account:${OWNER}`, "free", "global"];
+      // The budgets of keyless traffic, which another key's payments could fill.
+      const keyless = [
+        `payer:${payer}/${asset}`,
+        `payTo:${payTo}/${asset}`,
+        `asset:${asset}`,
+        "tier:other",
+      ];
+      await vi.waitFor(async () => {
+        expect(await usedIn(graph.deps, counted)).toEqual(counted.map(() => FEE_CHARGED));
+      });
+      expect(await usedIn(graph.deps, keyless)).toEqual(keyless.map(() => 0n));
+    });
+
+    it("holds an account to the quota ACCOUNT_PLANS names, and to the plan of its registry row", async () => {
+      const graph = await keyed();
+      expect((await pay(graph)).response).toMatchObject({ success: true });
+      // The config's `free` allows one payment a month, not the default's 1,000.
+      expect((await pay(graph)).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.quotaExhausted,
+      });
+      expect(graph.fake.sent).toHaveLength(1);
+
+      // The operator's `keys plan`: the row is read from the registry with the next settlement.
+      await graph.deps.stores.accountPlans.setPlan({
+        owner: OWNER,
+        plan: "basic",
+        now: Date.now(),
+        setBy: "operator:test",
+      });
+      expect((await pay(graph)).response).toMatchObject({ success: true });
+      // Another account is still on the config's `free`, with a month of its own.
+      expect((await pay(graph, "discord:2")).response).toMatchObject({ success: true });
+      expect((await pay(graph, "discord:2")).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.quotaExhausted,
+      });
+    });
+
+    it("refuses a settlement without a caller, which would count in no account", async () => {
+      const graph = await keyed();
+      expect((await pay(graph, null)).response).toMatchObject({
+        success: false,
+        errorReason: SETTLE_REASONS.refused,
+      });
+      expect(graph.fake.sent).toHaveLength(0);
+      expect(await usedIn(graph.deps, ["global"])).toEqual([0n]);
+    });
+  });
+
   it("refuses a /settle while the fee account is below the floor (0024)", async () => {
     const { deps, fake } = await composed();
     fake.balances.set(facilitator.publicKey(), 1n);
@@ -895,6 +989,28 @@ describe("main()'s composition (compose)", () => {
     } finally {
       await app.close();
     }
+  });
+
+  // 0157, from the review of #210: dropping `verifyWithRefusals` from `main.ts` passed the suite.
+  it("records a refusal of the checks, and answers a repeat of the payment from it (0086)", async () => {
+    const invalidReason = "invalid_exact_stellar_payload_simulation_failed";
+    const upstreamVerify = vi.fn(async () => ({ isValid: false, invalidReason, payer }));
+    const { deps, fake } = await composed({}, { upstreamVerify });
+    const p = payload(fake.ledger + 30);
+
+    expect(await deps.verify(p, requirements)).toMatchObject({ isValid: false, invalidReason });
+    expect(await deps.stores.settlements.get(keyOf(p, "stellar:testnet")!)).toMatchObject({
+      state: "refused",
+      errorReason: invalidReason,
+    });
+    // The repeat gets the stored refusal without the checks, and so does `/settle`.
+    expect(await deps.verify(p, requirements)).toMatchObject({ isValid: false, invalidReason });
+    expect((await deps.settle(p, requirements)).response).toMatchObject({
+      success: false,
+      errorReason: invalidReason,
+    });
+    expect(upstreamVerify).toHaveBeenCalledTimes(1);
+    expect(fake.sent).toHaveLength(0);
   });
 
   it("reads the fee-stats bid once for /verify, /settle and the pool (AD-10)", async () => {

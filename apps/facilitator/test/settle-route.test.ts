@@ -319,6 +319,27 @@ describe("POST /settle", () => {
     expect(settled.map((line) => line.message)).toEqual(["G… has no USDC trustline", undefined]);
   });
 
+  // 0107 decision 31: `/settle`'s re-check refuses as `/verify` does, so the fee upstream measured
+  // is kept in the log alone (0157, from Oskar's review of #236).
+  it("logs the fee of a payment creating payTo's balance, which its answer doesn't name", async () => {
+    const upstreamMessage = "simulation-derived fee 128027 stroops exceeds ceiling 100000 stroops";
+    const errorReason = "invalid_exact_stellar_pay_to_balance_missing";
+    settle.mockResolvedValueOnce({
+      response: {
+        success: false,
+        transaction: "",
+        network: requirements.network,
+        errorReason,
+        errorMessage: "payTo has no balance of this token yet",
+      },
+      upstreamMessage,
+    });
+    const response = await post(request);
+    expect(JSON.stringify(await response.json())).not.toContain("128027");
+    const settled = lines.map((line) => JSON.parse(line)).find((l) => l.event === "settled");
+    expect(settled).toMatchObject({ errorReason, upstreamMessage });
+  });
+
   it("answers 500 and logs the error when settling throws", async () => {
     settle.mockRejectedValueOnce(new Error("store down"));
     const response = await post(request);

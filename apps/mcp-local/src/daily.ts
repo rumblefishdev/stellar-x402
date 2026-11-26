@@ -17,11 +17,6 @@ export interface DailyEntry {
   asset: string;
 }
 
-/** The day a payment counts against: the UTC date, the same for every process whatever its zone. */
-export function utcDay(now: Date): string {
-  return now.toISOString().slice(0, 10);
-}
-
 /**
  * Opens the database for one read or count and is closed after it. A connection kept open would
  * keep counting into a deleted file after a reset, while new servers count in a fresh one.

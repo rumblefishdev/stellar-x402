@@ -19,6 +19,12 @@ let seller: Server;
 let sellerUrl: string;
 /** The paths the seller called on the facilitator, reset before each test. */
 let facilitatorCalls: string[] = [];
+/** The `Authorization` header of each call, by path. */
+let authorizations: Record<string, string | undefined> = {};
+/** What the fake facilitator answers about the listing with each settlement. */
+let catalogAnswer: unknown;
+/** The seller's log lines. */
+let logs: string[] = [];
 
 function listen(server: Server): Promise<string> {
   return new Promise((resolve) =>
@@ -28,8 +34,8 @@ function listen(server: Server): Promise<string> {
   );
 }
 
-function json(res: ServerResponse, body: unknown): void {
-  res.writeHead(200, { "content-type": "application/json" });
+function json(res: ServerResponse, body: unknown, headers: Record<string, string> = {}): void {
+  res.writeHead(200, { "content-type": "application/json", ...headers });
   res.end(JSON.stringify(body));
 }
 
@@ -49,6 +55,7 @@ beforeAll(async () => {
   // payment at `/verify` and settles it at `/settle`.
   facilitator = createServer((req, res) => {
     facilitatorCalls.push(req.url!);
+    authorizations[req.url!] = req.headers.authorization;
     if (req.url === "/supported") {
       const kinds = [
         {
@@ -62,22 +69,35 @@ beforeAll(async () => {
     }
     if (req.url === "/verify") return json(res, { isValid: true, payer: BUYER });
     if (req.url === "/settle") {
-      return json(res, {
-        success: true,
-        payer: BUYER,
-        transaction: TRANSACTION,
-        network: "stellar:testnet",
-      });
+      // As this project's facilitator: its answer about the listing rides in a header.
+      const extensions: Record<string, string> = catalogAnswer
+        ? { "EXTENSION-RESPONSES": Buffer.from(JSON.stringify(catalogAnswer)).toString("base64") }
+        : {};
+      return json(
+        res,
+        { success: true, payer: BUYER, transaction: TRANSACTION, network: "stellar:testnet" },
+        extensions,
+      );
     }
     res.writeHead(404).end();
   });
   const facilitatorUrl = await listen(facilitator);
-  seller = createServer(createApp({ payTo: PAY_TO, facilitatorUrl }));
+  seller = createServer(
+    createApp({
+      payTo: PAY_TO,
+      facilitatorUrl,
+      apiKey: "sx4_seller_key",
+      log: (line) => logs.push(line),
+    }),
+  );
   sellerUrl = await listen(seller);
 });
 
 beforeEach(() => {
   facilitatorCalls = [];
+  authorizations = {};
+  catalogAnswer = undefined;
+  logs = [];
 });
 
 afterAll(() => {
@@ -120,6 +140,30 @@ describe("GET /weather", () => {
     const settlement = decodePaymentResponseHeader(response.headers.get("payment-response")!);
     expect(settlement).toMatchObject({ success: true, transaction: TRANSACTION });
     expect(facilitatorCalls).toContain("/settle");
+  });
+
+  it("sends the API key on /verify and /settle only", async () => {
+    await fetch(`${sellerUrl}/weather?city=Warsaw`, {
+      headers: { "payment-signature": await paymentFor("/weather?city=Warsaw") },
+    });
+    expect(authorizations["/verify"]).toBe("Bearer sx4_seller_key");
+    expect(authorizations["/settle"]).toBe("Bearer sx4_seller_key");
+  });
+
+  it.each([
+    [{ bazaar: { status: "processing" } }, ["Bazaar: the listing was taken for cataloging"]],
+    [
+      { bazaar: { status: "rejected", rejectedReason: "schema_too_complex" } },
+      ["Bazaar: the listing was refused (schema_too_complex)"],
+    ],
+    [undefined, []],
+  ])("logs the catalog's answer %j after a settlement", async (answer, lines) => {
+    catalogAnswer = answer;
+    const response = await fetch(`${sellerUrl}/weather?city=Warsaw`, {
+      headers: { "payment-signature": await paymentFor("/weather?city=Warsaw") },
+    });
+    expect(response.status).toBe(200);
+    expect(logs).toEqual(lines);
   });
 
   it("refuses a paid request without a city and does not settle it", async () => {
