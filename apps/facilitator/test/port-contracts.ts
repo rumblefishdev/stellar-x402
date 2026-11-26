@@ -2448,10 +2448,7 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
     beforeEach(async () => {
       ({ catalog, setVector } = await make());
     });
-    const MODEL = "granite-test";
-    type Search = Parameters<CatalogStore["search"]>[0] & {
-      meaning?: { model: string; vector: number[] };
-    };
+    type Search = Parameters<CatalogStore["search"]>[0];
     const key = (host: string, overrides: Partial<CatalogKey> = {}): CatalogKey => ({
       network: "stellar:testnet",
       payTo: PAY_TO,
@@ -2464,7 +2461,7 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
       k: CatalogKey,
       fields: Partial<DiscoveryResource>,
       cos: number | null,
-      model = MODEL,
+      model: string = catalog.searchModel,
       checkedAt = 1,
     ) => {
       await catalog.upsert({
@@ -2487,7 +2484,7 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
       catalog.search({
         text,
         limit: 100,
-        meaning: { model: MODEL, vector: QUERY_VECTOR },
+        meaning: QUERY_VECTOR,
         ...query,
       } as Search);
     const hosts = (hits: { resource: DiscoveryResource }[]) =>
@@ -2625,7 +2622,7 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
 
     it("says a listing that passes the filters waits for a vector of the model (ADR 0014)", async () => {
       const waiting = (network?: string) =>
-        catalog.waitingForVector({ text: "x", limit: 10, network }, MODEL);
+        catalog.waitingForVector({ text: "x", limit: 10, network });
       await listing(key("a"), { description: "Tides" }, 0.9);
       expect(await waiting()).toBe(false);
       await listing(key("b"), { description: "Waves" }, null);
@@ -2640,7 +2637,7 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
 
     it("leaves out a listing whose text changed until its new vector is written (G, ADR 0014)", async () => {
       await listing(key("a"), { description: "Tides" }, 0.9);
-      await listing(key("a"), { description: "Waves" }, null, MODEL, 2);
+      await listing(key("a"), { description: "Waves" }, null, catalog.searchModel, 2);
       expect(hosts(await fused("zebra"))).toEqual([]);
     });
 

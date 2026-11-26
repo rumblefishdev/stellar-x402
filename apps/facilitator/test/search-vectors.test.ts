@@ -52,7 +52,7 @@ function fakeEmbedder(fail: (text: string) => boolean = () => false) {
         if (state.hold) await state.hold;
         await new Promise((resolve) => setTimeout(resolve, 5));
         if (fail(text)) throw new Error(`model failed on ${text.slice(0, 20)}`);
-        return { model: MODEL, vector: vectorFor(text) };
+        return vectorFor(text);
       } finally {
         state.inFlight--;
       }

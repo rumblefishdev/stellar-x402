@@ -1,6 +1,5 @@
 import type { StellarNetwork } from "@stellar-x402/config";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
-import type { Embedding } from "./embedder.js";
 
 /** `network + payTo + method + normalized resource URL` (AD-19). */
 export interface CatalogKey {
@@ -59,8 +58,8 @@ export interface CatalogSearch {
   limit: number;
   /** The last result of the page before; this page starts after it. */
   after?: CatalogSearchPosition;
-  /** The query's vector; without it, search ranks by words alone. */
-  meaning?: Embedding;
+  /** The query's vector, of the store's model; without it, search ranks by words alone. */
+  meaning?: number[];
 }
 
 /**
@@ -81,6 +80,8 @@ export type UpsertOutcome = "inserted" | "updated" | "stale";
 
 /** Bazaar catalog (AD-7, AD-19, AD-20). */
 export interface CatalogStore {
+  /** The model the cards' vectors and the query's are of (ADR 0014); a cursor names it. */
+  readonly searchModel: string;
   /** The stored entry of `key`, as `list` returns it. */
   get(key: CatalogKey): Promise<DiscoveryResource | undefined>;
   /**
@@ -105,10 +106,10 @@ export interface CatalogStore {
    */
   search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
   /**
-   * Whether a listing that passes `query`'s filters has no vector of `model` yet, or no card at all
-   * (ADR 0014): search by meaning can't find it, so an answer by meaning is partial.
+   * Whether a listing that passes `query`'s filters has no vector of the store's model yet, or no
+   * card at all (ADR 0014): search by meaning can't find it, so an answer by meaning is partial.
    */
-  waitingForVector(query: CatalogSearch, model: string): Promise<boolean>;
+  waitingForVector(query: CatalogSearch): Promise<boolean>;
 }
 
 /** Where a listing attempt ended: the payment's copy, or the check of the seller's 402. */

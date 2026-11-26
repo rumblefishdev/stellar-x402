@@ -579,7 +579,7 @@ export async function main(
     // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
-    const stores = postgresStores(pools.main, pools);
+    const stores = postgresStores(pools.main, pools, SEARCH_MODEL_ID);
     // The metrics as Prometheus text (ADR 0011, "Metrics"; 0139), read by the agent on the server.
     // `/metrics` listens before the graph is built, so a startup that hangs still shows its
     // gauges; the liveness series waits for `start()` below.
@@ -899,7 +899,7 @@ export async function seedMain(
     const pending = await pendingMigrations(pool);
     if (pending.length > 0)
       throw new SeedError(`the schema lacks migrations: ${pending.join(", ")}`);
-    const stores = postgresStores(pool);
+    const stores = postgresStores(pool, {}, SEARCH_MODEL_ID);
     const metrics = memoryMetrics();
     const cataloger = createCataloger({
       store: stores.catalog,

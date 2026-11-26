@@ -9,7 +9,6 @@ import type {
   CatalogSearchPosition,
   CatalogStore,
   Embedder,
-  Embedding,
 } from "../ports/index.js";
 import {
   CATALOGED_EXTENSIONS,
@@ -187,7 +186,7 @@ export function discoverySearch(
       res.json(body);
       return;
     }
-    let meaning: Embedding | undefined;
+    let meaning: number[] | undefined;
     try {
       meaning = await embedder.embed(parsed.search.text, "query");
     } catch (error) {
@@ -195,7 +194,9 @@ export function discoverySearch(
       metrics.increment("search_words_only_total");
     }
     const ranked: Ranking =
-      meaning === undefined ? { ranking: "words" } : { ranking: "fused", model: meaning.model };
+      meaning === undefined
+        ? { ranking: "words" }
+        : { ranking: "fused", model: catalog.searchModel };
     if (parsed.cursor?.ranking === "fused" && ranked.ranking === "words") {
       // The server fell back, not the client: the same cursor goes on once the model answers.
       res.setHeader("Retry-After", `${SEARCH_MODEL_RETRY_AFTER_S}`);
@@ -227,8 +228,7 @@ export function discoverySearch(
       resources: page.map((hit) => hit.resource),
       // Partial too while a listing that passes the filters has no vector yet: search by meaning
       // can't find it (ADR 0014).
-      partialResults:
-        meaning === undefined || (await catalog.waitingForVector(parsed.search, meaning.model)),
+      partialResults: meaning === undefined || (await catalog.waitingForVector(parsed.search)),
       pagination: {
         limit: page.length,
         cursor: more ? writeCursor(page.at(-1)!, ranked) : null,

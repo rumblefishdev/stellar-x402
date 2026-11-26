@@ -47,7 +47,7 @@ const json = (response: ServerResponse, status: number, value: unknown) => {
 const VECTOR = unitVector(0.8);
 
 describe("search model client (0120 D)", () => {
-  it("posts the text to /embed and resolves the model and the vector", async () => {
+  it("posts the text to /embed and resolves the vector of its model", async () => {
     const model = await stub((_request, _body, response) =>
       json(response, 200, { model: "granite-test", vector: VECTOR }),
     );
@@ -56,10 +56,7 @@ describe("search model client (0120 D)", () => {
       timeoutMs: 2_000,
       model: "granite-test",
     });
-    await expect(client.embed("weather in Kraków", "query")).resolves.toEqual({
-      model: "granite-test",
-      vector: VECTOR,
-    });
+    await expect(client.embed("weather in Kraków", "query")).resolves.toEqual(VECTOR);
     expect(model.requests).toHaveLength(1);
     expect(model.requests[0]).toMatchObject({ method: "POST", url: "/embed" });
     expect(model.requests[0]!.type).toMatch(/^application\/json/);

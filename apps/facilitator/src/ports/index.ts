@@ -21,7 +21,7 @@ export type {
   CatalogStore,
   UpsertOutcome,
 } from "./catalog-store.js";
-export type { Embedder, Embedding } from "./embedder.js";
+export type { Embedder } from "./embedder.js";
 export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
 export type { CardListing, SearchCard, SearchCardStore } from "./search-card-store.js";
 export {

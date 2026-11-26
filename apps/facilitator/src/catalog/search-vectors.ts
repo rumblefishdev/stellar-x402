@@ -84,7 +84,7 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
     while (!closed) {
       let page;
       try {
-        page = await store.cards(after, PAGE, model);
+        page = await store.cards(after, PAGE);
       } catch (error) {
         // Nothing tries again before the next start, so the cards past this page wait for it.
         logger.error("search_vectors_read_failed", { written, error });

@@ -37,7 +37,7 @@ export function createSearchModelClient(opts: {
       const answer = ANSWER.parse(JSON.parse(body));
       if (answer.model !== opts.model)
         throw new Error(`the search model answered for ${answer.model}, not ${opts.model}`);
-      return answer;
+      return answer.vector;
     },
   };
 }

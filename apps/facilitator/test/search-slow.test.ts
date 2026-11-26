@@ -15,6 +15,7 @@ function slowCatalog(ms: number): CatalogStore {
   return {
     search: () => new Promise((resolve) => setTimeout(() => resolve([]), ms)),
     waitingForVector: async () => false,
+    searchModel: "m",
   } as unknown as CatalogStore;
 }
 
@@ -38,7 +39,7 @@ async function search(catalog: CatalogStore, embedder: Embedder) {
   return { status, slow, count: metrics.value("search_slow_total") };
 }
 
-const model: Embedder = { embed: async () => ({ model: "m", vector: unitVector(0.8) }) };
+const model: Embedder = { embed: async () => unitVector(0.8) };
 const down: Embedder = {
   embed: async () => {
     throw new Error("model down");

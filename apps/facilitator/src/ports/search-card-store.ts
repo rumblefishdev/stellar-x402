@@ -1,6 +1,5 @@
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type { CatalogKey } from "./catalog-store.js";
-import type { Embedding } from "./embedder.js";
 
 /** A catalog listing as the card rewrite reads it. */
 export interface CardListing {
@@ -36,15 +35,15 @@ export interface SearchCardStore {
    */
   write(listing: CardListing): Promise<boolean>;
   /**
-   * Up to `limit` cards without a vector of `model` after `after` (a `seq`; `"0"` from the start),
-   * in catalog order.
+   * Up to `limit` cards without a vector of the store's model after `after` (a `seq`; `"0"` from
+   * the start), in catalog order.
    */
-  cards(after: string, limit: number, model: string): Promise<SearchCard[]>;
+  cards(after: string, limit: number): Promise<SearchCard[]>;
   /** The card of the listing at `key`; undefined when the catalog holds no such listing. */
   card(key: CatalogKey): Promise<SearchCard | undefined>;
   /**
-   * Stores `embedding` on this card, unless its fields have changed since it was read: the vector
-   * would then be of an older text. True when written.
+   * Stores `vector`, of the store's model, on this card, unless its fields have changed since it
+   * was read: the vector would then be of an older text. True when written.
    */
-  writeVector(card: SearchCard, embedding: Embedding): Promise<boolean>;
+  writeVector(card: SearchCard, vector: number[]): Promise<boolean>;
 }

@@ -13,7 +13,6 @@ import type {
   CatalogSearch,
   CatalogSearchHit,
   CatalogStore,
-  Embedding,
   UpsertOutcome,
 } from "../ports/index.js";
 import { assertCount, extensionKeys } from "./rules.js";
@@ -28,9 +27,11 @@ const resourceColumns = (resource: DiscoveryResource) => [
 const CATALOG_KEY_WHERE = "network = $1 AND pay_to = $2 AND method = $3 AND resource_url = $4";
 
 export class PostgresCatalogStore implements CatalogStore {
+  /** `searchModel`: the model the cards' vectors are of, and the query's (`SEARCH_MODEL_ID`). */
   constructor(
     private readonly pool: pg.Pool,
-    private readonly listPool: pg.Pool = pool,
+    private readonly listPool: pg.Pool,
+    readonly searchModel: string,
   ) {}
 
   async get(key: CatalogKey): Promise<DiscoveryResource | undefined> {
@@ -183,7 +184,7 @@ export class PostgresCatalogStore implements CatalogStore {
     return rows.map(hitOf);
   }
 
-  async waitingForVector(query: CatalogSearch, model: string): Promise<boolean> {
+  async waitingForVector(query: CatalogSearch): Promise<boolean> {
     const { rows } = await this.listPool.query<{ waiting: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM catalog LEFT JOIN catalog_search USING (seq)
@@ -191,7 +192,7 @@ export class PostgresCatalogStore implements CatalogStore {
             AND ($1::text IS NULL OR type = $1)
             AND ($2::text IS NULL OR pay_to = $2)
             AND ($3::text IS NULL OR network = $3)) AS waiting`,
-      [query.type ?? null, query.payTo ?? null, query.network ?? null, model],
+      [query.type ?? null, query.payTo ?? null, query.network ?? null, this.searchModel],
     );
     return rows[0]!.waiting;
   }
@@ -208,7 +209,7 @@ export class PostgresCatalogStore implements CatalogStore {
    * back as PostgreSQL's text for the `float8` it is, which holds every digit, as the words rank's
    * does.
    */
-  private async searchFused(query: CatalogSearch, meaning: Embedding): Promise<CatalogSearchHit[]> {
+  private async searchFused(query: CatalogSearch, meaning: number[]): Promise<CatalogSearchHit[]> {
     const { text, type, payTo, network, limit, after } = query;
     const { rows } = await this.listPool.query<HitRow>(
       `SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
@@ -248,8 +249,8 @@ export class PostgresCatalogStore implements CatalogStore {
         type ?? null,
         payTo ?? null,
         network ?? null,
-        `[${meaning.vector.join(",")}]`,
-        meaning.model,
+        `[${meaning.join(",")}]`,
+        this.searchModel,
         after?.rank ?? null,
         after?.key.network ?? null,
         after?.key.payTo ?? null,

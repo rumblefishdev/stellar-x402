@@ -1,3 +1,4 @@
+import { SEARCH_MODEL_ID } from "@stellar-x402/config";
 import {
   PostgresAccountPlanStore,
   PostgresAccountUsageReader,
@@ -1239,8 +1240,8 @@ describe("PostgreSQL stores", () => {
       [null, null],
     ]);
     const key = catalogEntry().key;
-    await setVector(pool, key, "m", unitVector(0.8));
-    await setVector(pool, key, "m", unitVector(0.6));
+    await setVector(pool, key, SEARCH_MODEL_ID, unitVector(0.8));
+    await setVector(pool, key, SEARCH_MODEL_ID, unitVector(0.6));
     const cards = await readCards(pool);
     expect(cards).toHaveLength(1);
     // A vector of another size is refused.
@@ -1256,11 +1257,11 @@ describe("PostgreSQL stores", () => {
     const { catalog } = db.stores();
     const entry = catalogEntry();
     await catalog.upsert(entry);
-    await setVector(pool, entry.key, "m", unitVector(0.8));
-    expect(await catalog.waitingForVector({ text: "x", limit: 10 }, "m")).toBe(false);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
     // As after a rewrite that could not read the listings: the listing stands, its card is gone.
     await pool.query("DELETE FROM catalog_search");
-    expect(await catalog.waitingForVector({ text: "x", limit: 10 }, "m")).toBe(true);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
   });
 
   it("refuses a write of a card's model: only the database says which vector is current", async () => {
@@ -1275,23 +1276,23 @@ describe("PostgreSQL stores", () => {
     const { catalog, searchCards } = db.stores();
     const entry = catalogEntry();
     await catalog.upsert(entry);
-    await setVector(pool, entry.key, "m", unitVector(0.8));
-    expect(await catalog.waitingForVector({ text: "x", limit: 10 }, "m")).toBe(false);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
     // As the release before this one writes a card: the text only, its vector untouched.
     await pool.query("UPDATE catalog_search SET description = 'Currency rates'");
     expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
       [null, null],
     ]);
-    expect(await catalog.waitingForVector({ text: "x", limit: 10 }, "m")).toBe(true);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
     // The start's pass reads it again, and the search by meaning leaves it out meanwhile.
-    expect((await searchCards.cards("0", 10, "m")).map((card) => card.description)).toEqual([
+    expect((await searchCards.cards("0", 10)).map((card) => card.description)).toEqual([
       "Currency rates",
     ]);
     expect(
       await catalog.search({
         text: "x",
         limit: 10,
-        meaning: { model: "m", vector: unitVector(0.8) },
+        meaning: unitVector(0.8),
       }),
     ).toEqual([]);
   });
@@ -1303,7 +1304,7 @@ describe("PostgreSQL stores", () => {
     await catalog.upsert(entry);
     // A vector of a text this release never wrote: the rewrite's text does not match it.
     await pool.query("UPDATE catalog_search SET name = 'old rules'");
-    await setVector(pool, entry.key, "m", unitVector(0.8));
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
     const [listing] = await searchCards.listings("0", 10);
     expect(await searchCards.write(listing!)).toBe(true);
     expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
@@ -1311,12 +1312,12 @@ describe("PostgreSQL stores", () => {
     ]);
     // The text it was made from back on the card: the vector is of it, so it counts again.
     await pool.query("UPDATE catalog_search SET name = 'old rules'");
-    expect((await readCards(pool))[0]!.model).toBe("m");
+    expect((await readCards(pool))[0]!.model).toBe(SEARCH_MODEL_ID);
     expect(await searchCards.write(listing!)).toBe(true);
     // The same text again: nothing is written, the vector stays.
-    await setVector(pool, entry.key, "m", unitVector(0.6));
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.6));
     expect(await searchCards.write(listing!)).toBe(false);
-    expect((await readCards(pool))[0]!.model).toBe("m");
+    expect((await readCards(pool))[0]!.model).toBe(SEARCH_MODEL_ID);
   });
 
   it("stops counting a card's vector when a catalog write changes its text, and keeps it when the text stays", async () => {
@@ -1324,7 +1325,7 @@ describe("PostgreSQL stores", () => {
     const { catalog } = db.stores();
     const entry = catalogEntry();
     await catalog.upsert({ ...entry, resource: { ...entry.resource, description: "Tides" } });
-    await setVector(pool, entry.key, "m", unitVector(0.8));
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
     const before = (await readCards(pool))[0]!;
     await catalog.upsert({
       ...entry,
@@ -1335,7 +1336,7 @@ describe("PostgreSQL stores", () => {
     expect(after.description).not.toBe(before.description);
     // A vector counts only while it is of the card's current text (ADR 0014).
     expect([after.model, after.embedding]).toEqual([null, null]);
-    await setVector(pool, entry.key, "m", unitVector(0.6));
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.6));
     const vectored = (await readCards(pool))[0]!;
     // The same text written again, as a re-seed does: the vector stays.
     await catalog.upsert({

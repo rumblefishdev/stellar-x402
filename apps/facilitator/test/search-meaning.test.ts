@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Keypair } from "@stellar/stellar-sdk";
 import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
-import { STELLAR_NETWORKS } from "@stellar-x402/config";
+import { SEARCH_MODEL_ID, STELLAR_NETWORKS } from "@stellar-x402/config";
 import type { SearchDiscoveryResourcesResponse } from "@x402/extensions/bazaar";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
@@ -46,7 +46,8 @@ const key = (host: string): CatalogKey => ({
 
 /** The fake search model: queries get the query vector, listings their seeded one. */
 const model = {
-  name: "granite-test",
+  /** The stores' model, as `postgresStores` gets it by default. */
+  name: SEARCH_MODEL_ID,
   down: undefined as Error | undefined,
   queries: [] as string[],
 };
@@ -56,16 +57,15 @@ const embedder: Embedder = {
     const marker = MARKERS.findIndex((m) => text.includes(m));
     if (marker === -1) {
       model.queries.push(text);
-      return { model: model.name, vector: QUERY_VECTOR };
+      return QUERY_VECTOR;
     }
     const cos = LISTINGS[marker]!.cos;
     if (cos === null) throw new Error("no vector for this listing");
-    return { model: model.name, vector: unitVector(cos) };
+    return unitVector(cos);
   }),
 };
 afterEach(() => {
   model.down = undefined;
-  model.name = "granite-test";
   model.queries.length = 0;
   vi.mocked(embedder.embed).mockClear();
 });
@@ -179,7 +179,7 @@ describe("GET /discovery/search by meaning, vectors stored (0120 G, I)", () => {
       seen.push(...hostsOf(body));
       cursor = body.pagination!.cursor;
       if (cursor === null) break;
-      expect(decode(cursor)).toMatchObject({ ranking: "fused", model: "granite-test" });
+      expect(decode(cursor)).toMatchObject({ ranking: "fused", model: SEARCH_MODEL_ID });
     }
     expect(seen).toEqual(["a", "c", "b"]);
   });
@@ -214,10 +214,11 @@ describe("GET /discovery/search by meaning, vectors stored (0120 G, I)", () => {
 
   it("refuses a fused cursor of another model (I)", async () => {
     const first = await search("query=weather&limit=1");
-    model.name = "granite-next";
-    const { response, body } = await search(
-      `query=weather&limit=1&cursor=${first.body.pagination!.cursor}`,
-    );
+    // As a cursor written before a change of model: the same page, another model's name.
+    const other = Buffer.from(
+      JSON.stringify({ ...decode(first.body.pagination!.cursor!), model: "granite-next" }),
+    ).toString("base64url");
+    const { response, body } = await search(`query=weather&limit=1&cursor=${other}`);
     expect(response.status).toBe(400);
     expect(body).toEqual({ error: "bad_request", param: "cursor" });
   });
