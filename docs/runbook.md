@@ -967,7 +967,8 @@ not here yet).
      one went with the old storage, so every nightly snapshot fails until it runs.
 
 3. **A new version of the key, and new credentials.** In a root shell with a root token ([A new
-   root token](#openbao)), one line at a time, as in OpenBao's step 4. The key keeps its name, so
+   root token](#openbao)), one command per paste, each with its indented continuation lines, as
+   in OpenBao's step 4. The key keeps its name, so
    the AppRole's policy (`transit/sign/stellar-testnet`) still fits and nothing in the repo
    changes. `min_encryption_version` stops anyone signing with an older version; then every token
    the AppRole issued is revoked and every secret ID destroyed, and a new secret ID goes into the
@@ -983,14 +984,28 @@ not here yet).
    v=$(bao read -field=latest_version transit/keys/stellar-$n </dev/null) && echo "version $v"
    bao write transit/keys/stellar-$n/config min_encryption_version=$v </dev/null >/dev/null
    bao write -f sys/leases/revoke-prefix/auth/approle/login </dev/null
-   for a in $(bao list -format=json auth/approle/role/x402-$n/secret-id </dev/null | python3 -c 'import json, sys; print(" ".join(json.load(sys.stdin)))'); do bao write auth/approle/role/x402-$n/secret-id-accessor/destroy secret_id_accessor=$a </dev/null && echo "destroyed $a"; done
+   ids=$(bao list -format=json auth/approle/role/x402-$n/secret-id </dev/null |
+     python3 -c 'import json, sys; print(" ".join(json.load(sys.stdin)))') && echo "ids: $ids"
+   for a in $ids; do
+     bao write auth/approle/role/x402-$n/secret-id-accessor/destroy secret_id_accessor=$a </dev/null && echo "destroyed $a"
+   done
    s=$(bao write -f -field=secret_id auth/approle/role/x402-$n/secret-id </dev/null) && [ -n "$s" ] &&
      printf %s "$s" | systemd-creds encrypt --with-key=host --name=approle-secret-id.$n - \
        /srv/x402/production/creds/approle-secret-id.$n.cred
+   [ -n "$s" ] && [ "$(systemd-creds decrypt --name=approle-secret-id.$n \
+     /srv/x402/production/creds/approle-secret-id.$n.cred -)" = "$s" ] && echo "credential ok" || echo 'credential bad: stop here'
    unset s
    bao read -format=json transit/keys/stellar-$n </dev/null   # .data.keys["<v>"].public_key
    bao token revoke -self; unset BAO_TOKEN
    ```
+
+   Paste the `s=` line and its two continuation lines as one: they take the secret ID and write
+   the credential in one command, and `[ -n "$s" ]` stops an empty one. The check after it
+   compares the credential with `$s`, so it must print `credential ok`; a byte count alone would
+   pass on the old file, whose destroyed secret ID is 36 bytes too. Run each line once: in the
+   2026-11-26 drill an encrypt line most likely ran a second time after `unset s`, the
+   credential held nothing, and `x402@` failed at its start (step 6). A line that wraps in the
+   terminal can also reach the shell cut, which is why the loop above is on several lines.
 
    The address comes from that public key with OpenBao's step 4 `node -e` line. Note `v`: it goes
    into `.env` in step 5.
@@ -999,12 +1014,25 @@ not here yet).
    funds the fee account with 10,000 XLM; mainnet's float comes from the company's exchange account
    ([Topping up the fee account](#topping-up-the-fee-account)).
 
-5. **The four values in `.env`**, written whole, with the version from step 3:
+5. **The four values in `.env`**, written whole, with the version from step 3. They go to
+   `.env.new` first, are read back, and only then replace `.env`: a write straight to `.env` that
+   stops half way (a placeholder the shell refuses, Ctrl-C) leaves it empty, and every start of
+   `x402@` then stops at interpolation. It writes the four values only: add back by hand any
+   comment line the old file had. Each block is its own paste:
 
    ```sh
    printf 'OPENBAO_KEY_TESTNET=%s\nOPENBAO_KEY_VERSION_TESTNET=%s\nFACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' \
      stellar-testnet VERSION ADDRESS CHANNELS |
-     ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+     ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env.new'
+   ssh SERVER 'sudo cat -A /srv/x402/production/.env.new'
+   ```
+
+   `cat -A` ends every line in `$` and shows nothing else. Only then, the move, which keeps the
+   old file as `.env.old` and refuses a `.env.new` without its channels; the Compose check shows
+   the four values as Compose reads them:
+
+   ```sh
+   ssh SERVER 'cd /srv/x402/production && sudo grep -q "^CHANNELS_TESTNET=G" .env.new && sudo cp -p .env .env.old && sudo mv .env.new .env && sudo /usr/local/libexec/x402/x402-compose production config facilitator | grep -E "OPENBAO_KEY|FACILITATOR_ADDRESS|CHANNELS" | cut -c1-90'
    ```
 
 6. **Start it, and check the signer.** A well-formed version, or an address the channels accept,
@@ -1023,14 +1051,18 @@ not here yet).
 
    `ready`, `listed` and `signer: "ok"`, and one paid request settles.
 
-   Two mistakes stop the start instead, before `/health` exists, so the check above has nothing
-   to talk to: a malformed version (`VERSION`, `v2`, `0`) fails the config check, and an address
-   that isn't the channels' signer fails `checkChannels` with `facilitator-not-signer`. `x402@`
+   Three mistakes stop the start instead, before `/health` exists, so the check above has nothing
+   to talk to: a malformed version (`VERSION`, `v2`, `0`) fails the config check, an address
+   that isn't the channels' signer fails `checkChannels` with `facilitator-not-signer`, and an
+   empty secret ID credential (step 3) fails with `OPENBAO_SECRET_ID_FILE is empty`. `x402@`
    restarts until systemd gives up (5 starts in 5 minutes). The journal has only systemd's
    `status=1/FAILURE`; the reason (`startup_failed`, `facilitator-not-signer`) is in the
    facilitator's own log, as in [The watchdog](#the-watchdog):
    `sudo tail -n 20 /var/log/x402/production/facilitator.log`. Fix `.env`, then
-   `sudo systemctl reset-failed x402@production` and start it again.
+   `sudo systemctl reset-failed x402@production` and start it again. An empty credential needs
+   no change to `.env`: a new root token, step 3's `ids=` and `for` lines (they destroy the
+   secret ID that step made), its `s=` line and the check after it, then `reset-failed` and the
+   start. In the drill that took 4 minutes.
 
 7. **The alarms on the new fee account:** a pull request that changes `feeAccounts` in
    `infra/envs/production.json`, then in `infra/` both stacks that hold the address:
@@ -1042,6 +1074,10 @@ not here yet).
 
 **After it:**
 
+- An OpenBao snapshot now, so the new key version is off the server before the nightly run:
+  `sudo systemctl start x402-openbao-snapshot.service`, checked as in
+  [OpenBao snapshots](#openbao-snapshots). It replaces that day's earlier archive, since
+  `prune --keep-daily 14` keeps the last of each day.
 - The old addresses stay under the old key for good. Nothing may trust them: no contract may take a
   channel address as an authority, and `upto`'s receiver authorizer is always the current key
   (ADR 0015).

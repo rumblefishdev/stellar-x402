@@ -2,7 +2,7 @@
 id: "0048"
 title: "Before mainnet, decide again how far the hot key's power reaches"
 type: FEATURE
-status: active
+status: completed
 owner: okarcz
 milestone: 2
 related_adr: ["0003", "0005", "0011", "0013", "0015"]
@@ -38,6 +38,15 @@ history:
     status: active
     who: okarcz
     note: "Started with the re-check: a cold recovery key, another way to keep the hot key below high, or the hot key's full power accepted."
+  - date: "2026-11-26"
+    status: completed
+    who: okarcz
+    note: >
+      Full power kept (ADR 0015). The key's name and version moved to the server's .env (#235,
+      deployed in the ninth deploy, #260). The lost-access drill ran on production (testnet):
+      down 17 min 10 s, key v2, a new fee account and 20 channels, step 7 as #261 with Watch and
+      Alarms deployed. Runbook fixed from it. The cold-key criteria don't apply; no follow-up task:
+      the 500 XLM trigger is ADR 0013's weekly review, the upto one is 0133.
 ---
 
 # Before mainnet, decide again how far the hot key's power reaches
@@ -121,17 +130,19 @@ no longer apply):
       `max_amount`
 - [x] No contract gives a channel address any power: `upto-proxy` and every other contract
       checked, the result recorded (Implementation Notes, 2026-11-24)
-- [ ] `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` are read from the server's `.env`, not
+- [x] `OPENBAO_KEY` and `OPENBAO_KEY_VERSION` are read from the server's `.env`, not
       `deploy/production/compose.yaml`, so a new key needs no PR
-      Closes once the production server's `.env` holds both names, the playbook has copied this
-      `compose.yaml`, and `x402@` has started from it with `signer: ok`. `x402-deploy` never copies
-      `compose.yaml`, so a deploy before that playbook run proves nothing about `.env`.
+      (2026-11-26: the playbook from the ninth deploy, #260, copied this `compose.yaml`; after the
+      restart and the deploy, Compose read `stellar-testnet` and `"1"` from `.env`, with
+      `signer: ok`. The drill then moved it to version 2 by `.env` alone.)
 - [x] `docs/runbook.md` has a "lost access" section: new key, fee account, channels, `.env`,
       restart, alarms, and when the same server may stay
-      (2026-11-24, "Lost access to the facilitator's accounts"; step 3's OpenBao commands are
-      unproven until the drill)
-- [ ] A testnet drill moves the facilitator to a new key, fee account and channels with that
+      (2026-11-24, "Lost access to the facilitator's accounts"; proven by the drill, and fixed
+      from it on 2026-11-26)
+- [x] A testnet drill moves the facilitator to a new key, fee account and channels with that
       section, timed, and the result recorded
+      (2026-11-26 on production: down 17 min 10 s, steps 1–7;
+      [G-lost-access-drill-2026-11-26](notes/G-lost-access-drill-2026-11-26.md))
 
 ## Implementation Notes
 
@@ -179,6 +190,35 @@ local PostgreSQL and the public testnet RPCs, 2 channels instead of 20. Key v1 w
   not `address_mismatch` or `denied`.
 - **Not covered locally:** systemd, `x402@`, the server's `.env`, `systemd-creds`, a paid request,
   and step 7. The timed drill on the production server covers them after #235 is deployed.
+
+**The drill on production (testnet), 2026-11-26.** Steps 1–7 on ch-prod-01, the server staying
+and the key moving to version 2. The facilitator was down 17 min 10 s (10:41:55 to 10:59:05
+UTC), 12 min 49 s of it the runbook and 4 min 21 s an empty secret ID credential. Now on fee
+account `GDV2PC2U…SBWP` and 20 new channels; `GAVE5V5I…KKRP` (9,998.8 testnet XLM) and its 20
+channels are abandoned. Step 7 shipped as #261, then Watch and Alarms were deployed. A real
+paid request settled through the new accounts at 11:05:43 (fee bump `08c63976…`). Timeline, addresses and what went wrong:
+[G-lost-access-drill-2026-11-26](notes/G-lost-access-drill-2026-11-26.md).
+
+- **Fixed in the runbook from it:** step 3's secret-ID line pasted whole and run once, the
+  decrypted credential compared with `$s`, the `for` loop on several lines; step 5 writes
+  `.env.new`, reads it back in its own paste, then moves it, keeping `.env.old`; step 6 lists
+  `OPENBAO_SECRET_ID_FILE is empty` and how to recover; "After it" takes an OpenBao snapshot by
+  hand.
+- **ADR 0015:** its "about an hour" now cites the drill's 17 minutes, with what they leave out.
+
+## Issues Encountered
+
+- **An empty secret ID credential** cost 4 min 21 s of the drill: the guide split step 3's
+  guarded line in two pastes and gave the encrypt-and-`unset` paste twice; most likely the second
+  run encrypted an empty `$s`. The runbook's line was right; it now also checks the credential
+  against `$s`.
+- **A long pasted line was cut** at a continuation prompt; `revoke-prefix` was run again.
+- **`.env` was emptied** by a placeholder command run by accident before the drill, and
+  restored in 6 minutes; step 5 now goes through `.env.new`.
+- **#261's CI failed once:** `infra/test/watch-stack.test.ts` reads the committed
+  `production.json`, which its PR body had said no other test did. Fixed in the same commit.
+
+Details: [G-lost-access-drill-2026-11-26](notes/G-lost-access-drill-2026-11-26.md).
 
 ## Design Decisions
 
@@ -249,6 +289,20 @@ local PostgreSQL and the public testnet RPCs, 2 channels instead of 20. Key v1 w
      `put-secret-value` and sets up the snapshots' AppRole again. Step 7 redeploys the Alarms
      stack as well as Watch. Step 6 says what to do when a malformed version or a wrong address
      stops the start.
+7. **The drill on the production server, during the day, announced** (okarcz, 2026-11-26):
+   testnet's only facilitator, so its downtime is the drill's real measure; the team agreed in
+   the channel, and stkrolikiewicz asked for the snapshot after it.
+8. **No paid request run by hand after the drill** (okarcz, 2026-11-26): `signer: ok` already
+   showed OpenBao signing with version 2 for the new address. A real one settled anyway at
+   11:05:43 (found in review), so step 6's done signal is met.
+9. **Watch's deploy carried 0029's upstream section** (okarcz, 2026-11-26): the stack had not
+   been deployed since before 2026-11-09, so step 7's diff showed the new code with the account.
+   Deployed as it was: `upstream` is off in `production.json`, so it publishes a daily metric
+   and pages nobody. The Alarms diff showed only the two balance alarms' text, since
+   stkrolikiewicz's 0139 switch (#242) was already deployed; those two alarms stay in CloudWatch.
+   `make fire-test` was skipped: the path to Slack didn't change.
+10. **The drill record in a note, the runbook fixed in the same PR** (okarcz, 2026-11-26): the
+    README was past 270 lines; the runbook's lessons go where the next person reads them.
 
 ## Open Gaps
 
@@ -256,11 +310,11 @@ Found on 2026-11-24 while walking through a theft of the hot key with today's se
 ([R-hot-key-reach-without-cold-key](notes/R-hot-key-reach-without-cold-key.md), "Theft with
 today's setup"). Each one holds whichever option the re-check picks.
 
-- **OpenBao's backup doesn't run yet.** `snapshot_age_seconds` on `x402-host` reads 1e9 (no
-  snapshot ever succeeded), and steps 3–5 of the runbook's "OpenBao snapshots → Setting it up"
-  never ran. Until they do, losing OpenBao's data loses the key for good. Owned by 0026.
+- ~~**OpenBao's backup doesn't run yet.**~~ Runs nightly since 2026-11-25, with a restore drill
+  (0026, #250); the drill's own snapshot ran on 2026-11-26. Its `snapshot-age` rule is still off
+  until 0026 turns `snapshots` on.
 - ~~**No runbook for "we lost access".**~~ Written 2026-11-24 (`docs/runbook.md`, "Lost access to
-  the facilitator's accounts"); the drill is still open. ADR 0013's theft steps assume our key still works on the
+  the facilitator's accounts"); drilled on 2026-11-26. ADR 0013's theft steps assume our key still works on the
   accounts (it adds the new key and merges the old fee account). When a thief has removed our
   key, nothing covers it: a new key, fee account and channels, the config switch, the alarms, and
   the rule that the same server stays only if the leak didn't come from it. Needs its own steps
@@ -272,3 +326,9 @@ today's setup"). Each one holds whichever option the re-check picks.
   to the seller, but the payer pays more. Record it before `upto` reaches mainnet.
 - ~~**Confirm nothing trusts a channel address.**~~ Checked 2026-11-24: nothing does
   (Implementation Notes). The rule stays for any later contract.
+
+## Future Work
+
+None spawned. ADR 0015's triggers are tracked where they fire: float and reserves above 500 XLM
+in ADR 0013's weekly review, `upto` before mainnet in 0133's criteria. OpenBao's `snapshot-age`
+rule is 0026's (`"snapshots": true`, then a drill of the rule).
