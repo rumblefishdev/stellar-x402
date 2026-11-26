@@ -41,3 +41,17 @@ export function createSearchModelClient(opts: {
     },
   };
 }
+
+/** True when the search model container answers its health check: it has loaded the model. */
+export async function searchModelReady(opts: { url: string; timeoutMs: number }): Promise<boolean> {
+  try {
+    const response = await fetch(`${opts.url}/health`, {
+      signal: AbortSignal.timeout(opts.timeoutMs),
+    });
+    await response.body?.cancel();
+    return response.status === 200;
+  } catch {
+    // Not listening yet, or not answering: the caller asks again.
+    return false;
+  }
+}

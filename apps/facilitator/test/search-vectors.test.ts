@@ -86,11 +86,17 @@ const list = (host: string, fields: Partial<DiscoveryResource>, checkedAt = 1) =
     },
   });
 
-function vectors(embedder: Embedder, lines: string[] = [], metrics = memoryMetrics()) {
+function vectors(
+  embedder: Embedder,
+  lines: string[] = [],
+  metrics = memoryMetrics(),
+  ready = async () => true,
+) {
   return createSearchVectors({
     store: db.stores().searchCards,
     model: MODEL,
     embedder,
+    ready,
     logger: jsonLogger("debug", (line) => lines.push(line)),
     metrics,
   });
@@ -104,6 +110,35 @@ const current = (card: Awaited<ReturnType<typeof readCards>>[number]) =>
 
 describe("the vector pass at start (0120 F)", () => {
   beforeEach(() => db.empty());
+
+  it("waits until the model answers its health check, then embeds: the model loads after the facilitator starts", async () => {
+    await list("one", { description: "Weather one" });
+    const { embedder, state } = fakeEmbedder();
+    const lines: string[] = [];
+    let asked = 0;
+    const ready = async () => {
+      asked++;
+      // Not loaded for the first two checks, as a container that started a moment ago.
+      if (asked <= 2) expect(state.calls).toEqual([]);
+      return asked > 2;
+    };
+    await vectors(embedder, lines, memoryMetrics(), ready).start();
+    expect(asked).toBe(3);
+    expect(current((await readCards(db.pool))[0]!)).toBe(true);
+    expect(
+      parsed(lines).filter((line) => line.event === "search_vectors_waiting_for_model"),
+    ).toHaveLength(1);
+  });
+
+  it("stops waiting for the model when the process closes, and embeds nothing", async () => {
+    await list("one", { description: "Weather one" });
+    const { embedder, state } = fakeEmbedder();
+    const pass = vectors(embedder, [], memoryMetrics(), async () => false);
+    const running = pass.start();
+    await pass.close();
+    await running;
+    expect(state.calls).toEqual([]);
+  });
 
   it("embeds again a card whose vector is of another model, as after a change of model (F)", async () => {
     await list("one", { description: "Weather one" });
@@ -225,6 +260,7 @@ describe("the vector pass at start (0120 F)", () => {
       },
       model: MODEL,
       embedder,
+      ready: async () => true,
       logger: jsonLogger("debug", (line) => lines.push(line)),
       metrics,
     });
@@ -371,6 +407,12 @@ describe("main() and the vector pass (0120 C, F)", () => {
     rpc = await rpcStub({ [bootChannel]: hardened(Keypair.fromSecret(bootSecret).publicKey()) });
     // The search model container, as the facilitator sees it.
     model = createServer((request, response) => {
+      // Loaded at once: the pass waits only for this answer.
+      if (request.url === "/health") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ model: MODEL }));
+        return;
+      }
       let body = "";
       request.on("data", (chunk) => (body += chunk));
       request.on("end", async () => {

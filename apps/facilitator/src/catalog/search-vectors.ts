@@ -20,6 +20,8 @@ export interface SearchVectorsDeps {
   /** The model the search model container runs (`SEARCH_MODEL_ID`): a vector of another is redone. */
   model: string;
   embedder: Embedder;
+  /** True once the search model answers its health check, so it can embed. */
+  ready: () => Promise<boolean>;
   logger: Logger;
   metrics: ProcessMetrics;
 }
@@ -45,9 +47,11 @@ export interface SearchVectors {
  * listing the model fails on is logged and counted, and waits for the next start.
  */
 export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
-  const { store, model, embedder, logger, metrics } = deps;
+  const { store, model, embedder, ready, logger, metrics } = deps;
   let closed = false;
   let running: Promise<void> | undefined;
+  // Ends the wait for the model at once on close, timers faked or not.
+  let wake = () => {};
   // The model's queue: the pass and every catalog write wait their turn, so the model embeds one
   // listing at a time and a query's vector waits behind one listing at most.
   let turn: Promise<unknown> = Promise.resolve();
@@ -59,6 +63,18 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
   };
 
   const run = async () => {
+    // The model loads for about 12 s after its container starts, and the facilitator doesn't wait
+    // for it, so `/settle` doesn't either: the pass does, or every card would fail until the next
+    // start.
+    let waiting = false;
+    while (!closed && !(await ready())) {
+      if (!waiting) logger.info("search_vectors_waiting_for_model", {});
+      waiting = true;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+        setTimeout(resolve, 1_000);
+      });
+    }
     let written = 0;
     let after = "0";
     while (!closed) {
@@ -95,6 +111,7 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
     },
     async close() {
       closed = true;
+      wake();
       await running;
     },
     async listed(key) {

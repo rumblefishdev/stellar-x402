@@ -25,7 +25,7 @@ import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js"
 import { metricsListener, prometheusMetrics } from "./adapters/prometheus-metrics.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
-import { createSearchModelClient } from "./adapters/search-model.js";
+import { createSearchModelClient, searchModelReady } from "./adapters/search-model.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { createSearchCardRewrite } from "./catalog/search-cards.js";
 import { createSearchVectors, type SearchVectors } from "./catalog/search-vectors.js";
@@ -373,6 +373,7 @@ export function compose(
     store: stores.searchCards,
     model: SEARCH_MODEL_ID,
     embedder,
+    ready: () => searchModelReady(config.searchModel),
     logger,
     metrics: root,
   });
@@ -894,6 +895,7 @@ export async function seedMain(
         store: stores.searchCards,
         model: SEARCH_MODEL_ID,
         embedder: createSearchModelClient({ ...searchModel, model: SEARCH_MODEL_ID }),
+        ready: () => searchModelReady(searchModel),
         logger,
         metrics,
       }),

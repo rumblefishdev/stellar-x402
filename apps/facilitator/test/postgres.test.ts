@@ -839,7 +839,8 @@ describe("PostgreSQL stores", () => {
       // The startup sweep reads the settlements on the main pool, and only there; so does the
       // search card rewrite.
       await app.reconciled;
-      await app.searchVectorsWritten;
+      // The vector pass waits for a model that never answers here, so it reads no card meanwhile.
+      await app.searchCardsRewritten;
       const main = pools?.main.totalCount;
       expect(main).toBeGreaterThan(0);
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
