@@ -130,6 +130,38 @@ describe("the vector pass at start (0120 F)", () => {
     ).toHaveLength(1);
   });
 
+  it("waits for a model that went away mid-pass, then embeds the card it failed on", async () => {
+    await list("one", { description: "Weather one" });
+    await list("two", { description: "Tides two" });
+    const metrics = memoryMetrics();
+    let up = true;
+    const { embedder, state } = fakeEmbedder(() => {
+      // The model restarts as it is asked for the first card: down for one health check.
+      if (state.calls.length === 1) {
+        up = false;
+        return true;
+      }
+      return false;
+    });
+    const ready = async () => {
+      const answer = up;
+      up = true;
+      return answer;
+    };
+    await vectors(embedder, [], metrics, ready).start();
+    expect((await readCards(db.pool)).every(current)).toBe(true);
+    expect(metrics.value("search_vector_failures_total")).toBe(0);
+  });
+
+  it("logs and skips a card the model fails on while it answers its health check", async () => {
+    await list("one", { description: "Weather one" });
+    const metrics = memoryMetrics();
+    const { embedder, state } = fakeEmbedder(() => true);
+    await vectors(embedder, [], metrics).start();
+    expect(state.calls).toHaveLength(1);
+    expect(metrics.value("search_vector_failures_total")).toBe(1);
+  });
+
   it("stops waiting for the model when the process closes, and embeds nothing", async () => {
     await list("one", { description: "Weather one" });
     const { embedder, state } = fakeEmbedder();

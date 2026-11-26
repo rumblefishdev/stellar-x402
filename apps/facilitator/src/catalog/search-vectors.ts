@@ -62,10 +62,10 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
     return answer;
   };
 
-  const run = async () => {
-    // The model loads for about 12 s after its container starts, and the facilitator doesn't wait
-    // for it, so `/settle` doesn't either: the pass does, or every card would fail until the next
-    // start.
+  // The model loads for about 12 s after its container starts, and the facilitator doesn't wait
+  // for it, so `/settle` doesn't either: the pass does, or every card would fail until the next
+  // start.
+  const waitForModel = async () => {
     let waiting = false;
     while (!closed && !(await ready())) {
       if (!waiting) logger.info("search_vectors_waiting_for_model", {});
@@ -75,6 +75,10 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
         setTimeout(resolve, 1_000);
       });
     }
+  };
+
+  const run = async () => {
+    await waitForModel();
     let written = 0;
     let after = "0";
     while (!closed) {
@@ -88,15 +92,23 @@ export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
         return;
       }
       if (page.length === 0) break;
-      for (const card of page) {
-        // A shutdown waits for the pass, so it stops between cards.
-        if (closed) break;
+      // A shutdown waits for the pass, so it stops between cards.
+      let i = 0;
+      while (i < page.length && !closed) {
+        const card = page[i]!;
         try {
           if (await store.writeVector(card, await embed(meaningText(card)))) written++;
         } catch (error) {
+          // A model that went away mid-pass (a restart) fails every card alike: wait for it, then
+          // try this card again. A model that answers failed on this card's text alone.
+          if (!closed && !(await ready())) {
+            await waitForModel();
+            continue;
+          }
           logger.warn("search_vector_failed", { seq: card.seq, error });
           metrics.increment("search_vector_failures_total");
         }
+        i++;
       }
       after = page[page.length - 1]!.seq;
     }
