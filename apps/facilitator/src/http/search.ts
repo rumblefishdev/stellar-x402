@@ -34,6 +34,12 @@ const MAX_CURSOR_LENGTH = 4_096;
  * comes back sets it.
  */
 const SEARCH_MODEL_RETRY_AFTER_S = 5;
+/**
+ * A fused query this slow is logged and counted (`search-slow`): half of the discovery pool's
+ * 2 s statement timeout, so the alarm comes before searches fail with a 500. The exact scan grows
+ * with the catalog (ADR 0014); this is the sign to measure and index it.
+ */
+export const SEARCH_SLOW_MS = 1_000;
 /** The parameters upstream's `search` sends: the list's filters and `limit`, a query, a cursor. */
 const QUERY = LIST_QUERY.omit({ offset: true }).extend({
   query: z
@@ -147,8 +153,10 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
  * for the query's vector and ranks by meaning and words fused; every match is ranked, so
  * `partialResults` is `false` unless a listing that passes the filters has no vector yet. When the model fails or doesn't answer within its timeout, it ranks
  * by words alone, logged and counted, and `partialResults` is `true`:
- * matches by meaning were not looked for. A cursor from another ranking or model is refused with
- * a 400. A store failure rejects, and the shared error handler answers it with a 500.
+ * matches by meaning were not looked for. A fused cursor while it ranks by words gets a 503 to
+ * retry; a cursor of another ranking or model, a 400. A fused query slower than `SEARCH_SLOW_MS`
+ * is logged and counted. A store failure rejects, and the shared error handler answers it with a
+ * 500.
  */
 export function discoverySearch(
   catalog: CatalogStore,
@@ -203,9 +211,15 @@ export function discoverySearch(
       res.status(400).json({ error: "bad_request", param: "cursor" });
       return;
     }
+    const startedAt = performance.now();
     const hits = await catalog.search(
       meaning === undefined ? parsed.search : { ...parsed.search, meaning },
     );
+    const ms = Math.round(performance.now() - startedAt);
+    if (meaning !== undefined && ms > SEARCH_SLOW_MS) {
+      logger.warn("search_slow", { ms, hits: hits.length });
+      metrics.increment("search_slow_total");
+    }
     const page = hits.slice(0, parsed.limit);
     const more = hits.length > parsed.limit;
     const body: SearchDiscoveryResourcesResponse = {

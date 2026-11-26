@@ -352,6 +352,16 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
   },
+  // A fused search slower than 1 s (0120): the exact scan grows with the catalog, so this comes
+  // before the 2 s statement timeout turns searches into 500s.
+  {
+    namespace: FAC,
+    name: "search_slow_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+  },
   // A search answered by words alone because the model couldn't be used (0120); the route serves
   // every network.
   {

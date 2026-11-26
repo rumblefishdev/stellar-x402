@@ -458,6 +458,18 @@ search-model`, then `logs search-model`: a restart loop, out of memory, or an im
 2. Once it answers again, the next search ranks by meaning, and the start's next pass embeds the
    listings still without a vector.
 
+### search-slow
+
+A search by meaning took over 1 s in the database. The facilitator compares the query's vector
+with every listing's ([ADR 0014](adr/0014-bazaar-search.md)), so the time grows with the catalog;
+at the discovery pool's 2 s statement timeout searches fail with a 500 and `http-500` fires.
+Searches still answer while this fires.
+
+1. In Logs Insights on `/x402/production/app`, the `search_slow` lines: the time and the number
+   of matches.
+2. Measure the scan on the server, then add the index ADR 0014 keeps for this: HNSW, or a cap on
+   the nearest vectors.
+
 ### search-vector-failed
 
 The search model gave no vector for a listing the catalog wrote, or the start's pass could not
@@ -995,6 +1007,7 @@ CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are Clo
 | `search_vector_failures_total`              | `x402-facilitator` | counter, Count | none                                                     | [search-vector-failed](#search-vector-failed)                                                                 |
 | `search_model_up`                           | `x402-facilitator` | gauge, None    | none                                                     | [search-model-down](#search-model-down)                                                                       |
 | `search_words_only_total`                   | `x402-facilitator` | counter, Count | none                                                     | [search-words-only](#search-words-only)                                                                       |
+| `search_slow_total`                         | `x402-facilitator` | counter, Count | none                                                     | [search-slow](#search-slow)                                                                                   |
 | `catalog_internal_errors_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_attempts_total`                    | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_upsert_failures_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |

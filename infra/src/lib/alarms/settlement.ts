@@ -70,6 +70,20 @@ export function addSettlementAlarms(f: Alarms, c: EnvironmentConfig): void {
     },
   });
 
+  // A fused query over 1 s (ADR 0014): the exact scan grows with the catalog, and at the 2 s
+  // statement timeout searches turn into 500s. Each slow one is worth a message, as the sign to
+  // measure the scan on the server and index it.
+  f.event("search-slow", {
+    group: "facilitator",
+    signal: { catalog: "search_slow_total" },
+    periods: 1,
+    description: {
+      what: "A Bazaar search by meaning took over 1 s in the database: the exact scan of every listing's vector grows with the catalog, and at 2 s searches fail with a 500. Searches still answer.",
+      next: `Read search_slow in /x402/${c.envName}/app with Logs Insights for its time and hits, then measure the scan on the server and choose an index (ADR 0014, HNSW, or a cap on the nearest vectors).`,
+      noData: SILENT_EVENT,
+    },
+  });
+
   // A listing without a vector is left out of search by meaning until the next start (ADR 0014),
   // so each failure is worth a message.
   f.event("search-vector-failed", {
