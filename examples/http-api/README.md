@@ -6,7 +6,14 @@ side and the second example are still to be built.
 
 `GET /weather?city=Warsaw` costs 0.001 testnet USDC. The route is described for the Bazaar
 (`declareDiscoveryExtension`), so a facilitator that catalogs on settle lists it after the first
-payment. Payments are verified and settled by the public x402.org facilitator.
+payment. Payments are verified and settled by this project's facilitator, configured with
+`createFacilitatorConfig` from `@stellar-x402/sdk/seller`.
+
+Before it listens, the seller checks that `SELLER_ADDRESS` can receive testnet USDC
+(`checkTrustline`, which signs nothing): without the trustline every payment would be refused at
+settlement, after the buyer signed, so the start stops and says what to add. When the check can't
+tell (no RPC answer), it says so and starts. After each settlement it logs the catalog's answer
+(`readCatalogAnswer`): whether the facilitator took the route's listing, or refused it and why.
 
 A payment is verified before the route answers and settled only after it; a request without
 `city` gets `400` and is not charged.
@@ -16,11 +23,13 @@ SELLER_ADDRESS=G... pnpm --filter @stellar-x402/example-http-api dev
 curl -i "http://localhost:4021/weather?city=Warsaw"   # 402 with the PAYMENT-REQUIRED header
 ```
 
-| Variable          | Default                            | Meaning                                                                  |
-| ----------------- | ---------------------------------- | ------------------------------------------------------------------------ |
-| `SELLER_ADDRESS`  | required                           | Stellar testnet account that receives USDC; it needs a USDC trustline    |
-| `FACILITATOR_URL` | `https://www.x402.org/facilitator` | facilitator that verifies and settles                                    |
-| `PORT`            | `4021`                             | port to listen on; `0` lets the system pick one, named in the start line |
+| Variable          | Default                                    | Meaning                                                                        |
+| ----------------- | ------------------------------------------ | ------------------------------------------------------------------------------ |
+| `SELLER_ADDRESS`  | required                                   | Stellar testnet account that receives USDC; it needs a USDC trustline          |
+| `FACILITATOR_URL` | `https://x402-facilitator.sorobanscan.com` | facilitator that verifies and settles                                          |
+| `X402_API_KEY`    | none                                       | the facilitator's API key, sent on `/verify` and `/settle`; testnet needs none |
+| `STELLAR_RPC_URL` | `https://soroban-testnet.stellar.org`      | Stellar RPC the trustline check at start reads                                 |
+| `PORT`            | `4021`                                     | port to listen on; `0` lets the system pick one, named in the start line       |
 
 A wrong or missing setting stops the start with a message naming the variable.
 

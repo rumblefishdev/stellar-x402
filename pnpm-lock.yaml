@@ -242,6 +242,9 @@ importers:
 
   examples/http-api:
     dependencies:
+      '@stellar-x402/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@stellar/stellar-sdk':
         specifier: ^16.4.1
         version: 16.4.1
