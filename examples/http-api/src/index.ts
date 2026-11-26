@@ -6,8 +6,9 @@ import { loadConfig } from "./config.js";
 
 const { payTo, facilitatorUrl, apiKey, rpcUrl, port } = loadConfig(process.env);
 
-// A payTo without the USDC trustline would refuse every payment at settlement, after the buyer
-// signed: checked before the first one, without signing anything.
+// A payTo without the USDC trustline can't be paid, and nothing would say so: a buyer's client
+// finds it before signing and sends nothing, so the seller sees only unpaid requests. Checked before
+// the first one, without signing anything.
 const trustline = await checkTrustline({
   account: payTo,
   asset: USDC_TESTNET_ADDRESS,
