@@ -11,7 +11,11 @@ history:
     spawned_from: [notes/R-what-the-seller-sees.md, notes/R-prior-art.md]
     spawns:
       - ../../../backlog/0164_FEATURE_seller-verify-refusal-reader.md
-      - ../../../backlog/0165_FEATURE_seed-pay-to-can-receive.md
+  - date: "2026-11-26"
+    status: mature
+    who: akot
+    note: >
+      The seed check (conclusion 3) dropped by the owner: no catalog does it, and the case is rare.
 ---
 
 # Decision: check before the first payment, read refusals after it, nothing in the facilitator
@@ -34,10 +38,10 @@ Built on [R-what-the-seller-sees](R-what-the-seller-sees.md) (**A**) and
    contract `payTo` without a first balance, which upstream's client signs and our `/verify`
    refuses. **Do:** a reader for `onAfterVerify` in `/seller`, on the model of `readCatalogAnswer`,
    used by the example. **0164.**
-3. **The catalog should not seed a listing nobody can pay.** A Stellar offer whose `payTo` can't
-   receive its asset is a dead listing. The seed is the one path where we read a seller's 402
-   without a payment first. This protects buyers more than it tells the seller. **Do, at low
-   priority:** check `payTo` at seed. **0165.**
+3. **No `payTo` check at catalog seed.** The seed is the one path where we read a seller's 402
+   without a payment first, so it could list an offer nobody can pay. A check there would protect
+   buyers, not tell the seller. No catalog we found does it (B), and the case is rare. **Not now**
+   (dropped by the owner, 2026-11-26).
 4. **No facilitator route to check an offer, and no portal check, for now.** Both duplicate a check
    the seller runs locally against any public RPC, at the cost of a new public surface on our
    service.
@@ -77,7 +81,7 @@ What they miss:
 | A step in the seller onboarding docs                                                      | what CDP, Solana and PayAI do; reaches sellers who never read the SDK                                           | a paragraph in 0075's guide: `checkTrustline`, or `stellar` CLI / Horizon for non-TypeScript sellers; the contract `payTo` note from 0107 | **do**, in 0075             |
 | A refusal reader for `onAfterVerify` in `/seller`                                         | the seller's log names the account and what to do, for every refusal that reaches `/verify`                     | about a day: one function and its tests, the example logs it, README rows, the example's wrong sentence fixed                             | **do**, 0164                |
 | A facilitator route that checks an offer                                                  | language-agnostic, one `curl`                                                                                   | a public route: rate limit, pubnet key policy (0105), docs, two ledger reads per call on our shared RPC, a free ledger-read proxy to guard | **no**: a local check does the same |
-| Checking `payTo` from the 402 at seller check / cataloging                                | keeps unpayable Stellar offers out of the catalog                                                               | catalog after a payment: none needed, the payment proved `payTo` could receive. At seed: two reads per `payTo`, a refusal reason, tests, about a day | **do at seed, low**, 0165 |
+| Checking `payTo` from the 402 at seller check / cataloging                                | keeps unpayable Stellar offers out of the catalog                                                               | catalog after a payment: none needed, the payment proved `payTo` could receive. At seed: two reads per `payTo`, a refusal reason, tests, about a day | **not now**: rare, no one else does it |
 | A portal page that checks the seller's `payTo` (PayAI-like)                               | onboarding help for pubnet sellers with a key                                                                   | the portal (0106) has no notion of `payTo` today: a form, the check, its copy                                                              | not now; revisit with a seller page in the portal |
 | Logging refusals in upstream's resource server, or passing `invalidMessage` to the buyer | every seller would see it; the buyer could relay it                                                             | an upstream PR in `@x402/core` that we don't control                                                                                       | not now; the reader covers our sellers |
 
