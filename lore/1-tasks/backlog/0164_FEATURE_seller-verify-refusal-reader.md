@@ -8,8 +8,8 @@ related_adr: []
 related_tasks: ["0094", "0102", "0107", "0078"]
 tags: [sdk, seller, payments, priority-medium, effort-small]
 links:
-  - ../active/0094_RESEARCH_tell-seller-about-missing-trustline/notes/S-recommendation.md
-  - ../active/0094_RESEARCH_tell-seller-about-missing-trustline/notes/R-what-the-seller-sees.md
+  - ../archive/0094_RESEARCH_tell-seller-about-missing-trustline/notes/S-recommendation.md
+  - ../archive/0094_RESEARCH_tell-seller-about-missing-trustline/notes/R-what-the-seller-sees.md
 history:
   - date: "2026-11-26"
     status: backlog

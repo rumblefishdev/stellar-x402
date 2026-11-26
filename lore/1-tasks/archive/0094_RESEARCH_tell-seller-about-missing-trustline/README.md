@@ -2,7 +2,7 @@
 id: "0094"
 title: "Find how a seller can learn that their payTo has no trustline"
 type: RESEARCH
-status: active
+status: completed
 owner: akot
 milestone: 2
 related_adr: []
@@ -39,6 +39,13 @@ history:
       know of. Prior art: no x402 facilitator warns the seller before the first payment.
       Recommendation: the guide step in 0075, a refusal reader (0164), no seed check and no
       facilitator route. Decisions 1-9.
+  - date: "2026-11-26"
+    status: completed
+    who: akot
+    note: >
+      Closed after PR #264 merged (4 commits). Two testnet runs, 7 checks passed; three notes
+      (R-what-the-seller-sees, R-prior-art, S-recommendation). Follow-up: 0164 (refusal reader,
+      M2); the guide step went into 0075; 0165 (seed check) was proposed and dropped.
 ---
 
 # Find how a seller can learn that their payTo has no trustline
@@ -126,6 +133,21 @@ out of the comparison.
     tells the seller about 0107's `pay_to_balance_missing`, which does reach `/verify`;
   - no `payTo` check at catalog seed, no facilitator route, and no portal check for now.
   - A `payTo` that doesn't exist needs nothing of its own.
+
+## Issues Encountered
+
+- **`pnpm add` rewrote unrelated lockfile entries**: it re-resolved the siwe/viem peers (zod 3 to
+  zod 4). The lockfile was cut back by hand to the three new entries; `pnpm install
+  --frozen-lockfile` and a later `--lockfile-only` both keep it.
+- **Importing the example seller broke the facilitator's typecheck** (`rootDir`): the live script
+  sets the seller up with the same settings itself (decision 2).
+- **CI once failed on `settle.test.ts`'s settle budget block** (node 24, the first run of #264), a
+  test this PR doesn't touch; the rerun passed. 0074's timing problem.
+
+## Future Work
+
+- 0164: a refusal reader for `onAfterVerify` in `/seller`, used by the example (backlog, M2).
+- The seller guide step is in 0075's scope, not a task of its own.
 
 ## Design Decisions
 
