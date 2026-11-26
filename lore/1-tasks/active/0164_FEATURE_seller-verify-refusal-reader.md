@@ -67,13 +67,54 @@ or without a first balance, from my own log and not from buyers.
 
 ## Acceptance Criteria
 
-- [ ] Given an `onAfterVerify` result with `isValid: false` and a seller-side reason, when it is
+- [x] Given an `onAfterVerify` result with `isValid: false` and a seller-side reason, when it is
       read, then the answer has the reason, the bounded message and says the seller must act, and
-      a test covers each of the two reasons
-- [ ] Given a valid result, or a refusal of another reason, when it is read, then the answer says
-      so without marking it the seller's, and a test covers both
-- [ ] Given a message too long or with control characters, when it is read, then what comes back is
-      bounded and printable, and a test covers it
-- [ ] Given the example seller and a refused payment, when `/verify` refuses it, then the seller's
-      log names the reason and the message (unit test with a fake facilitator)
-- [ ] The example's comment and README say when a missing trustline is refused, as 0094 found
+      a test covers each of the two reasons (`seller.test.ts`, "marks a refusal the seller must act
+      on"; on testnet, `readerMarksSellerFix`)
+- [x] Given a valid result, or a refusal of another reason, when it is read, then the answer says
+      so without marking it the seller's, and a test covers both ("reads a valid payment as no
+      refusal", "reads a refusal that is not the seller's", "reads … as unknown")
+- [x] Given a message too long or with control characters, when it is read, then what comes back is
+      bounded and printable, and a test covers it ("keeps a message to one printable line", "cuts
+      a long message to 500 characters", "leaves out a message that is empty once cleaned")
+- [x] Given the example seller and a refused payment, when `/verify` refuses it, then the seller's
+      log names the reason and the message (unit test with a fake facilitator) (`app.test.ts`,
+      "logs a refused payment, …", both kinds; it fails with the hook taken out)
+- [x] The example's comment and README say when a missing trustline is refused, as 0094 found
+
+## Implementation Notes
+
+- `packages/sdk/src/seller/refusal.ts`: `readVerifyRefusal`, `VerifyRefusal`,
+  `REFUSAL_MESSAGE_CHARS` (500), exported from `/seller`. 11 tests in `test/seller.test.ts`; the
+  SDK has 80.
+- `examples/http-api/src/app.ts`: an `onAfterVerify` hook logs each refusal through `log`, the
+  seller's own with "fix this on your side". 3 tests in `test/app.test.ts`; the example has 24.
+  `src/index.ts` and the README now say a missing trustline stops the buyer before signing.
+- `packages/sdk/README.md`: the reader, the hook to use it in, and a "before your first sale"
+  paragraph with Horizon for sellers outside TypeScript.
+- `apps/facilitator/test/live/payto-trustline-missing.ts` records what the reader reads in the
+  seller's hook as `refusalsRead`, apart from the seller's log, which stays the 0094 finding.
+- Testnet, 2026-11-26: the live script at 14:23 UTC, 8 checks passed, both real refusals read as
+  `sellerMustAct` with the account named. The MCP e2e at 14:27 UTC on this branch (the example
+  seller with the hook): 28 scenarios, 132 rows, none failed; its results file was restored, not
+  committed.
+
+## Design Decisions
+
+### Emerged
+
+1. **Every refusal is read, and `sellerMustAct` tells the seller's apart**, not a reader of the two
+   seller reasons only: a buyer's refusal is still news to a seller (a client that keeps failing),
+   and the caller chooses what to log.
+2. **The message is cleaned, not refused**: control and format characters (`\p{Cc}`, `\p{Cf}`,
+   which covers bidi overrides) become spaces, spaces are collapsed, and it is cut to 500 with
+   `…`. A reason outside `^[a-z0-9_]{1,80}$` is `unknown`, as `readCatalogAnswer` does with its
+   own.
+3. **One `log` in the example, a prefix for the seller's refusals**: the plan said a warning for
+   them and a plain line for the rest, which needs a second option on `SellerConfig`. The words
+   "fix this on your side" tell them apart in one stream.
+4. **The example logs the buyer's refusals too**: each needs a signed payment the facilitator
+   checks, so a buyer can't fill the log faster than it already loads the facilitator.
+5. **The live script keeps the seller's log as upstream alone and records the reader apart**, so
+   0094's finding (an empty seller log) still holds in the same file. The results file now holds
+   the 14:23 run; the 13:49 one is in commit 977abf15.
