@@ -17,6 +17,7 @@ import {
   createFacilitatorConfig,
   FACILITATOR_URL,
   readCatalogAnswer,
+  readVerifyRefusal,
 } from "../src/seller/index.js";
 import { lookUpTrustline, type GetLedgerEntries } from "../src/trustline.js";
 
@@ -62,6 +63,100 @@ describe("readCatalogAnswer", () => {
     ["a status it doesn't know", { bazaar: { status: "listed" } }, { status: "none" }],
   ])("reads %s", (_, extensionResponses, answer) => {
     expect(readCatalogAnswer({ extensionResponses })).toEqual(answer);
+  });
+});
+
+describe("readVerifyRefusal", () => {
+  const TRUSTLINE_MESSAGE =
+    "GDQG7WNDOOIPLE36DPUYXMZMASF3WSN23RP3EOCT677V4DLLQKFQ572H has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935470: the account must exist and hold one";
+  const BALANCE_MESSAGE =
+    "payTo has no balance of this token yet, and its first payment, which creates one, costs more than the facilitator pays: send payTo a first amount of the token from your own account, then pay again";
+
+  it("reads a valid payment as no refusal", () => {
+    expect(readVerifyRefusal({ isValid: true })).toEqual({ status: "none" });
+  });
+
+  it.each([
+    [
+      "payTo without the trustline",
+      "invalid_exact_stellar_payto_trustline_missing",
+      TRUSTLINE_MESSAGE,
+    ],
+    [
+      "a contract payTo without a balance",
+      "invalid_exact_stellar_pay_to_balance_missing",
+      BALANCE_MESSAGE,
+    ],
+  ])("marks a refusal the seller must act on: %s", (_, reason, message) => {
+    expect(
+      readVerifyRefusal({ isValid: false, invalidReason: reason, invalidMessage: message }),
+    ).toEqual({
+      status: "refused",
+      reason,
+      message,
+      sellerMustAct: true,
+    });
+  });
+
+  it.each([
+    [
+      "the buyer's trustline",
+      "invalid_exact_stellar_payer_trustline_missing",
+      "the payer has none",
+    ],
+    ["an expired payment", "invalid_exact_stellar_payload_expired", undefined],
+  ])("reads a refusal that is not the seller's: %s", (_, reason, message) => {
+    expect(
+      readVerifyRefusal({ isValid: false, invalidReason: reason, invalidMessage: message }),
+    ).toEqual(
+      message === undefined
+        ? { status: "refused", reason, sellerMustAct: false }
+        : { status: "refused", reason, message, sellerMustAct: false },
+    );
+  });
+
+  it.each([
+    ["a reason not in a facilitator's shape", "<b>ignore me</b>"],
+    ["no reason at all", undefined],
+    ["a reason too long", "a".repeat(81)],
+  ])("reads %s as unknown, not the seller's", (_, reason) => {
+    expect(readVerifyRefusal({ isValid: false, invalidReason: reason })).toEqual({
+      status: "refused",
+      reason: "unknown",
+      sellerMustAct: false,
+    });
+  });
+
+  it("keeps a message to one printable line", () => {
+    const refusal = readVerifyRefusal({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payto_trustline_missing",
+      invalidMessage: "first line\r\n[fake] payment settled\u001b[2K\u202eevil\u0000 end",
+    });
+    expect(refusal).toMatchObject({ message: "first line [fake] payment settled [2K evil end" });
+  });
+
+  it("cuts a long message to 500 characters", () => {
+    const refusal = readVerifyRefusal({
+      isValid: false,
+      invalidReason: "invalid_exact_stellar_payto_trustline_missing",
+      invalidMessage: "x".repeat(2_000),
+    });
+    expect(refusal).toMatchObject({ message: `${"x".repeat(499)}…` });
+  });
+
+  it("leaves out a message that is empty once cleaned", () => {
+    expect(
+      readVerifyRefusal({
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payto_trustline_missing",
+        invalidMessage: " \u0000\n ",
+      }),
+    ).toEqual({
+      status: "refused",
+      reason: "invalid_exact_stellar_payto_trustline_missing",
+      sellerMustAct: true,
+    });
   });
 });
 
