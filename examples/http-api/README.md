@@ -10,10 +10,14 @@ payment. Payments are verified and settled by this project's facilitator, config
 `createFacilitatorConfig` from `@stellar-x402/sdk/seller`.
 
 Before it listens, the seller checks that `SELLER_ADDRESS` can receive testnet USDC
-(`checkTrustline`, which signs nothing): without the trustline every payment would be refused at
-settlement, after the buyer signed, so the start stops and says what to add. When the check can't
+(`checkTrustline`, which signs nothing). Without the trustline nobody can pay it, and nothing would
+say so: a buyer's client finds the missing trustline before it signs and sends nothing, so the
+seller would see only unpaid requests. The start stops and says what to add. When the check can't
 tell (no RPC answer), it says so and starts. After each settlement it logs the catalog's answer
 (`readCatalogAnswer`): whether the facilitator took the route's listing, or refused it and why.
+For each payment the facilitator refuses, it logs the reason and the facilitator's message
+(`readVerifyRefusal`), and says when the fix is on the seller's side; the buyer gets the reason
+alone.
 
 A payment is verified before the route answers and settled only after it; a request without
 `city` gets `400` and is not charged.

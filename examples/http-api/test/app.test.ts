@@ -23,6 +23,8 @@ let facilitatorCalls: string[] = [];
 let authorizations: Record<string, string | undefined> = {};
 /** What the fake facilitator answers about the listing with each settlement. */
 let catalogAnswer: unknown;
+/** What the fake facilitator answers at `/verify`; every payment is valid by default. */
+let verifyAnswer: unknown;
 /** The seller's log lines. */
 let logs: string[] = [];
 
@@ -67,7 +69,7 @@ beforeAll(async () => {
       ];
       return json(res, { kinds, extensions: [], signers: {} });
     }
-    if (req.url === "/verify") return json(res, { isValid: true, payer: BUYER });
+    if (req.url === "/verify") return json(res, verifyAnswer);
     if (req.url === "/settle") {
       // As this project's facilitator: its answer about the listing rides in a header.
       const extensions: Record<string, string> = catalogAnswer
@@ -97,6 +99,7 @@ beforeEach(() => {
   facilitatorCalls = [];
   authorizations = {};
   catalogAnswer = undefined;
+  verifyAnswer = { isValid: true, payer: BUYER };
   logs = [];
 });
 
@@ -164,6 +167,40 @@ describe("GET /weather", () => {
     });
     expect(response.status).toBe(200);
     expect(logs).toEqual(lines);
+  });
+
+  it.each([
+    [
+      "one the seller must fix",
+      {
+        isValid: false,
+        invalidReason: "invalid_exact_stellar_payto_trustline_missing",
+        invalidMessage: `${PAY_TO} has no USDC trustline as of ledger 5935470: the account must exist and hold one`,
+        payer: BUYER,
+      },
+      `Payment refused, fix this on your side (invalid_exact_stellar_payto_trustline_missing: ${PAY_TO} has no USDC trustline as of ledger 5935470: the account must exist and hold one)`,
+    ],
+    [
+      "one of the buyer's",
+      { isValid: false, invalidReason: "invalid_exact_stellar_payload_expired", payer: BUYER },
+      "Payment refused (invalid_exact_stellar_payload_expired)",
+    ],
+  ])("logs a refused payment, %s, and does not settle it", async (_, answer, line) => {
+    verifyAnswer = answer;
+    const response = await fetch(`${sellerUrl}/weather?city=Warsaw`, {
+      headers: { "payment-signature": await paymentFor("/weather?city=Warsaw") },
+    });
+    // The buyer still gets upstream's 402, with the reason alone.
+    expect(response.status).toBe(402);
+    expect(logs).toEqual([line]);
+    expect(facilitatorCalls).not.toContain("/settle");
+  });
+
+  it("logs nothing for a valid payment", async () => {
+    await fetch(`${sellerUrl}/weather?city=Warsaw`, {
+      headers: { "payment-signature": await paymentFor("/weather?city=Warsaw") },
+    });
+    expect(logs).toEqual([]);
   });
 
   it("refuses a paid request without a city and does not settle it", async () => {
