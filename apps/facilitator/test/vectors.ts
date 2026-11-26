@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { postgresStores } from "../src/adapters/postgres.js";
 import type { CatalogKey, Embedder } from "../src/ports/index.js";
 
 /** The model's vector size (ADR 0014: granite-embedding-30m-english, 384 dimensions). */
@@ -37,9 +38,10 @@ export function meaningText(card: CardFields): string {
 export const vectorLiteral = (vector: number[]) => `[${vector.join(",")}]`;
 
 /**
- * Stores `vector` of `model` on the card of the listing at `key`, as the vector pass would (0120
- * point A). Needs the `vector` extension, which ADR
- * 0014 creates in `public`: the tests' connections search their own schema only.
+ * Stores `vector` of `model` on the card of the listing at `key`, through the search card store as
+ * the vector pass does (0120 point A), so the tests hold no copy of its write. Needs the `vector`
+ * extension, which ADR 0014 creates in `public`: the tests' connections search their own schema
+ * only.
  */
 export async function setVector(
   pool: pg.Pool,
@@ -47,15 +49,11 @@ export async function setVector(
   model: string,
   vector: number[],
 ): Promise<void> {
-  const { rowCount } = await pool.query(
-    `UPDATE catalog_search s
-        SET embedded_model = $5, embedding = $6::public.vector, embedded_hash = s.text_hash
-       FROM catalog c
-      WHERE c.seq = s.seq AND c.network = $1 AND c.pay_to = $2 AND c.method = $3
-        AND c.resource_url = $4`,
-    [key.network, key.payTo, key.method, key.resourceUrl, model, vectorLiteral(vector)],
-  );
-  if (rowCount !== 1) throw new Error(`no search card for ${JSON.stringify(key)}`);
+  const { searchCards } = postgresStores(pool, {}, model);
+  const card = await searchCards.card(key);
+  if (card === undefined) throw new Error(`no search card for ${JSON.stringify(key)}`);
+  if (!(await searchCards.writeVector(card, vector)))
+    throw new Error(`the search card for ${JSON.stringify(key)} changed while it was written`);
 }
 
 /** Every card with its listing's URL, in catalog order, the vector as numbers. */
