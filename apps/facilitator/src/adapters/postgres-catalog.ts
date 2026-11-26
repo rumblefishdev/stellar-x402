@@ -187,7 +187,7 @@ export class PostgresCatalogStore implements CatalogStore {
     const { rows } = await this.listPool.query<{ waiting: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM catalog LEFT JOIN catalog_search USING (seq)
-          WHERE (model IS DISTINCT FROM $4 OR embedded_hash IS DISTINCT FROM text_hash)
+          WHERE model IS DISTINCT FROM $4
             AND ($1::text IS NULL OR type = $1)
             AND ($2::text IS NULL OR pay_to = $2)
             AND ($3::text IS NULL OR network = $3)) AS waiting`,
@@ -231,7 +231,7 @@ export class PostgresCatalogStore implements CatalogStore {
                                         GROUP BY term
                                         ORDER BY first
                                         LIMIT 32) terms) q
-                        WHERE model = $6 AND embedded_hash = text_hash
+                        WHERE model = $6
                           AND ($2::text IS NULL OR type = $2)
                           AND ($3::text IS NULL OR pay_to = $3)
                           AND ($4::text IS NULL OR network = $4)) m

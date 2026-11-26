@@ -82,10 +82,12 @@ The measurements are in
     the vectors normalized. The meaning part reads the fields joined,
     cut at 2,000 characters.
   - Vectors, from `pgvector`, on the listing's search card: `embedding`, one vector per listing,
-    with `model`, the model that made it, and `embedded_hash`, the hash of the text it was made
-    from. The database keeps `text_hash` of the card's current text itself, whatever writes it, so
-    a vector counts only while the two hashes are equal: no writer has to clear an old vector, the
-    release before this one included. Search reads only current vectors of the current model.
+    with `embedded_model`, the model that made it, and `embedded_hash`, the hash of the text it
+    was made from. The database keeps `text_hash` of the card's current text itself, whatever
+    writes it, and `model`, the model of a vector of that text, empty while the two hashes differ:
+    every reader reads `model` alone, no writer has to clear an old vector (the release before this
+    one included), and `model` can't be written. Search reads only vectors whose `model` is the
+    current model.
   - Search compares the query's vector with every listing's that passes the filters (an exact
     scan, no index).
   - A listing whose cosine similarity to the query is below 0.60 is not a match, so a query

@@ -50,11 +50,8 @@ export class PostgresSearchCardStore implements SearchCardStore {
 
   async cards(after: string, limit: number, model: string): Promise<SearchCard[]> {
     const { rows } = await this.pool.query<SearchCard>(
-      `SELECT seq, name, tags, description, parameters,
-              CASE WHEN embedded_hash = text_hash THEN model END AS model
-         FROM catalog_search
-        WHERE seq > $1 AND (model IS DISTINCT FROM $3 OR embedded_hash IS DISTINCT FROM text_hash)
-        ORDER BY seq LIMIT $2`,
+      `SELECT seq, name, tags, description, parameters, model
+         FROM catalog_search WHERE seq > $1 AND model IS DISTINCT FROM $3 ORDER BY seq LIMIT $2`,
       [after, limit, model],
     );
     return rows;
@@ -62,8 +59,7 @@ export class PostgresSearchCardStore implements SearchCardStore {
 
   async card(key: CatalogKey): Promise<SearchCard | undefined> {
     const { rows } = await this.pool.query<SearchCard>(
-      `SELECT s.seq, s.name, s.tags, s.description, s.parameters,
-              CASE WHEN s.embedded_hash = s.text_hash THEN s.model END AS model
+      `SELECT s.seq, s.name, s.tags, s.description, s.parameters, s.model
          FROM catalog c JOIN catalog_search s USING (seq)
         WHERE c.network = $1 AND c.pay_to = $2 AND c.method = $3 AND c.resource_url = $4`,
       [key.network, key.payTo, key.method, key.resourceUrl],
@@ -79,7 +75,8 @@ export class PostgresSearchCardStore implements SearchCardStore {
    */
   async writeVector(card: SearchCard, embedding: Embedding): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      `UPDATE catalog_search SET model = $2, embedding = $3::public.vector, embedded_hash = text_hash
+      `UPDATE catalog_search
+          SET embedded_model = $2, embedding = $3::public.vector, embedded_hash = text_hash
         WHERE seq = $1 AND (name, tags, description, parameters) = ($4, $5, $6, $7)`,
       [
         card.seq,

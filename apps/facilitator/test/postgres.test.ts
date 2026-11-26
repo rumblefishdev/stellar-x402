@@ -1263,6 +1263,13 @@ describe("PostgreSQL stores", () => {
     expect(await catalog.waitingForVector({ text: "x", limit: 10 }, "m")).toBe(true);
   });
 
+  it("refuses a write of a card's model: only the database says which vector is current", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    await catalog.upsert(catalogEntry());
+    await expect(pool.query("UPDATE catalog_search SET model = 'm'")).rejects.toThrow(/model/);
+  });
+
   it("stops counting a card's vector once any writer changes its text, one that knows nothing of vectors too", async () => {
     await db.empty();
     const { catalog, searchCards } = db.stores();

@@ -49,7 +49,7 @@ export async function setVector(
 ): Promise<void> {
   const { rowCount } = await pool.query(
     `UPDATE catalog_search s
-        SET model = $5, embedding = $6::public.vector, embedded_hash = s.text_hash
+        SET embedded_model = $5, embedding = $6::public.vector, embedded_hash = s.text_hash
        FROM catalog c
       WHERE c.seq = s.seq AND c.network = $1 AND c.pay_to = $2 AND c.method = $3
         AND c.resource_url = $4`,
@@ -67,11 +67,9 @@ export async function readCards(pool: pg.Pool) {
       embedding: string | null;
     }
   >(
-    // A vector counts only while it is of the card's current text (ADR 0014): one of an older
-    // text reads as none.
-    `SELECT c.resource_url, s.name, s.tags, s.description, s.parameters,
-            CASE WHEN s.embedded_hash = s.text_hash THEN s.model END AS model,
-            CASE WHEN s.embedded_hash = s.text_hash THEN s.embedding::text END AS embedding
+    // `model` is the database's: empty while the vector is of an older text (ADR 0014).
+    `SELECT c.resource_url, s.name, s.tags, s.description, s.parameters, s.model,
+            CASE WHEN s.model IS NOT NULL THEN s.embedding::text END AS embedding
        FROM catalog c JOIN catalog_search s USING (seq) ORDER BY c.seq`,
   );
   return rows.map((row) => ({
