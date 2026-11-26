@@ -9,8 +9,8 @@ Part 1 of the TypeScript SDK (task 0102). Its entry points come one per pull req
 | Entry point | For      | What it holds                                                     | State    |
 | ----------- | -------- | ----------------------------------------------------------------- | -------- |
 | `/buyer`    | a buyer  | `createPayingFetch`: pays a seller's 402 within limits you set    | done     |
-| `/seller`   | a seller | the facilitator's config, the catalog's answer, a trustline check | this one |
-| `/bazaar`   | an agent | a client to list and search the Bazaar                            | to come  |
+| `/seller`   | a seller | the facilitator's config, the catalog's answer, a trustline check | done     |
+| `/bazaar`   | an agent | a client to list and search the Bazaar                            | this one |
 
 Not on npm before part 2 (task 0163). From this repository it is `@stellar-x402/sdk` in the
 workspace, as the MCP server (`apps/mcp-local`) uses it.
@@ -170,3 +170,30 @@ resourceServer.onAfterSettle(async ({ result }) => {
   does makes it throw, so you decide whether to stop; a `timeoutMs` that is not a whole number
   above zero is a `TypeError`. Testnet has a default RPC; pubnet needs `rpcUrl`.
   `/buyer` exports it too, for a buyer's setup.
+
+## Read the Bazaar
+
+`/bazaar` reads a facilitator's catalog of paid resources, over upstream's `withBazaar`. The MCP
+server's `list_resources` and `search_resources` tools use it.
+
+```ts
+import { CatalogError, createBazaarClient } from "@stellar-x402/sdk/bazaar";
+
+const bazaar = createBazaarClient(); // this project's facilitator; { url, timeoutMs } to change
+const { items, pagination } = await bazaar.search({ query: "weather in Warsaw", limit: 5 });
+for (const item of items) console.log(item.resource, item.accepts[0]?.amount, item.description);
+```
+
+It adds two things to upstream's client:
+
+- **The sellers' text is cut short.** The catalog is written by sellers, so `description` and
+  `serviceName` are cut to 500 characters (`DESCRIPTION_CHARS`) and only the payment terms one
+  chooses by stay in `accepts`. All of it is still the seller's text: data, never instructions, for
+  a model that reads it.
+- **A time limit** (`timeoutMs`, 10 s by default), which upstream's client has no way to take.
+
+`list(query?)` answers a page with `pagination.total`; `search(query)` answers the best match
+first, `partialResults`, and a `pagination.cursor` to pass back for the next page. A failure is a
+`CatalogError`: `unavailable` (no answer, an error status, an answer in another shape, or none in
+time), `invalid_request` (the catalog refused the query, naming the parameter in `param` when it is
+one of the query's), or `invalid_cursor` (search again without the cursor).

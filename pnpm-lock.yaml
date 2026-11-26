@@ -121,9 +121,6 @@ importers:
       '@x402/core':
         specifier: ~2.31.0
         version: 2.31.0
-      '@x402/extensions':
-        specifier: ~2.31.0
-        version: 2.31.0(typescript@6.0.3)
       '@x402/stellar':
         specifier: ~2.31.0
         version: 2.31.0
@@ -134,6 +131,9 @@ importers:
       '@stellar/stellar-sdk':
         specifier: ^16.4.1
         version: 16.4.1
+      '@x402/extensions':
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
 
   apps/mcp-local/e2e:
     dependencies:
@@ -349,7 +349,16 @@ importers:
       '@stellar/stellar-sdk':
         specifier: ^16.4.1
         version: 16.4.1
+      '@x402/extensions':
+        specifier: ~2.31.0
+        version: 2.31.0(typescript@6.0.3)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
+      '@stellar-x402/bazaar':
+        specifier: workspace:*
+        version: link:../bazaar
       '@x402/core':
         specifier: ~2.31.0
         version: 2.31.0
