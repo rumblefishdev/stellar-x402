@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 3
 related_adr: ["0008"]
-related_tasks: ["0063", "0085", "0102", "0163"]
+related_tasks: ["0063", "0085", "0102", "0163", "0094", "0164"]
 tags: [docs, bazaar, dev-tools, priority-medium, effort-small]
 links: []
 history:
@@ -33,6 +33,12 @@ history:
     note: >
       Noted under "Context" the two SDK helpers the guide can name: the catalog's answer (0102)
       and the no-payment check (0163).
+  - date: "2026-11-26"
+    status: backlog
+    who: akot
+    note: >
+      Takes in 0094's recommendation: the guide's first step is checking that payTo can receive
+      the asset, the only signal a seller can get before its first payment.
 ---
 
 # Seller guide to getting a service listed in the Bazaar
@@ -58,6 +64,11 @@ check it did, so that a new service can be found without waiting for a buyer who
   enabling developers to deploy discoverable endpoints in under an hour"
   (`docs/rfp/07-x402-facilitator-bazaar.md`). This guide is the seller's part of both;
   `docs/planning/m1-epics.md` puts both out of Tranche 1.
+- A `payTo` that can't receive the asset (no account, no trustline, one not authorized) makes every
+  buyer's client stop before signing, so the seller sees only unpaid requests and the catalog never
+  gets a payment (0094, R-what-the-seller-sees). Nothing can tell the seller after the fact; a
+  check before the first sale can. CDP's and Solana's seller docs open with the same step (0094,
+  R-prior-art). A contract `payTo` needs a first balance of a SAC token instead (0107).
 - Not measured yet: whether a settle whose payer is its own `payTo` passes on Stellar. If not, the
   guide says to pay from a second account.
 
@@ -73,7 +84,11 @@ check it did, so that a new service can be found without waiting for a buyer who
 
 ## Implementation
 
-- A seller guide (where: see "Open before starting"): declare the route with
+- A seller guide (where: see "Open before starting"). First: make sure `payTo` exists and holds a
+  trustline to each classic asset it is paid in, checked with `checkTrustline` from
+  `@stellar-x402/sdk/seller`, or with the `stellar` CLI or Horizon for a seller outside TypeScript;
+  for a contract `payTo`, send it a first amount (0107's `pay_to_balance_missing`). Name the
+  refusal reader from 0164 for the seller's log. Then: declare the route with
   `declareDiscoveryExtension`; pay once for it with any x402 client; check
   `GET /discovery/resources?payTo=<account>`; what each listing refusal reason means and how to fix
   it (reasons from ADR 0008, and the codes in `apps/facilitator/src/catalog/seller-check.ts` and
@@ -99,3 +114,5 @@ check it did, so that a new service can be found without waiting for a buyer who
 - [ ] Given a developer new to the project, when they follow the seller part on testnet, then
       their service is listed within an hour, timed and recorded
 - [ ] The guide has a part for each role (seller, client, agent)
+- [ ] The seller part starts with checking that `payTo` exists and can receive each asset it
+      offers, for a G-account and a contract `payTo`, and a non-TypeScript way to check it
