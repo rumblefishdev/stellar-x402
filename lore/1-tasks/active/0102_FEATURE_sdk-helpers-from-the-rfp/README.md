@@ -44,6 +44,13 @@ history:
       Code started before the list's agreement (akot): 0092's MCP part is #247, and PR 1, the
       buyer's helper with MCP on it, is #248, stacked on #247. 26 of 26 testnet scenarios passed
       after the move.
+  - date: "2026-11-25"
+    status: active
+    who: akot
+    note: >
+      #246, #247 and #248 merged after one review round. PR 2 started: the SDK's paying fetch runs
+      x402HTTPClient's calls in order, 0044's first step. pay.test.ts unchanged; testnet e2e on
+      ea5ae0e4: 28 scenarios, 132 rows, none failed.
 ---
 
 # Build the TypeScript SDK helpers the RFP asks for
@@ -95,8 +102,8 @@ Started before the owner agreed to the list (akot, 2026-11-25), in this order:
 2. **PR 1** (#248, after #247): the package, and the buyer's round trip moved from `pay.ts` behind
    the SDK's new API (decisions 6 and 7), with MCP on it and `pay.test.ts` as it is. Early, since
    it is on MCP's money path and MCP is in Tranche #2; the testnet e2e runs before and after.
-3. **PR 2**: 0044's first step, done here: `x402HTTPClient`'s calls in order instead of
-   `wrapFetchWithPayment`, under the same tests.
+3. **PR 2** (`lore-0102-drop-fetch-wrapper`): 0044's first step, done here: `x402HTTPClient`'s
+   calls in order instead of `wrapFetchWithPayment`, under the same tests.
 4. **PR 3**: the seller's helpers and the trustline check; `examples/http-api` uses them.
 5. **PR 4**: the Bazaar client, on top of #245 (0137, merged 2026-11-25).
 
