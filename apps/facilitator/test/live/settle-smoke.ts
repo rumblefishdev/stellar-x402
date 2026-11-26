@@ -26,7 +26,8 @@
  *   INCLUSION_FEE_STROOPS  passed to the facilitator (default: the fee-stats bid), to run the
  *                       hung-URL check in both bid modes
  *   DATABASE_URL        required: the facilitator's PostgreSQL, migrated (`pnpm migrate`); the
- *                       local one from `compose.yaml` is postgres://postgres:postgres@127.0.0.1:15432/postgres
+ *                       local one from `compose.yaml` is `COMPOSE_DATABASE_URL` in
+ *                       `test/compose-database.ts`
  *
  *   cd apps/facilitator && npx tsx test/live/settle-smoke.ts
  *

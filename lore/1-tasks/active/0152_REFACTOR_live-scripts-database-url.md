@@ -40,8 +40,9 @@ the four scripts one reading of the variable that treats blank as unset, as the 
   `spend-matrix.ts:75`, `catalog-smoke.ts:50` and `verify-smoke.ts:50` (0081), each
   `process.env.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:15432/postgres"`.
 - **Scripts that require it** and keep doing so: `settle-smoke.ts`, `api-key-smoke.ts`,
-  `nonce-consumed-elsewhere.ts`. Two of their headers quote the URL as the local one:
-  `settle-smoke.ts:29`, `api-key-smoke.ts:21`.
+  `nonce-consumed-elsewhere.ts`, and `pay-to-balance-missing.ts` (0107, added after this task was
+  written). Two of their headers quote the URL as the local one: `settle-smoke.ts:29`,
+  `api-key-smoke.ts:21`.
 - **The URL in code**: those four scripts plus `test/database.ts:9` (`COMPOSE_DATABASE_URL`, not
   exported). The scripts can't import it from there: `test/database.ts` imports vitest.
   `deploy/testnet.env.example:25` quotes it too.
@@ -60,10 +61,71 @@ the four scripts one reading of the variable that treats blank as unset, as the 
 
 ## Acceptance Criteria
 
-- [ ] The compose URL is defined once in code; `test/database.ts` and the four scripts use it
-- [ ] Given the headers of `settle-smoke.ts` and `api-key-smoke.ts`, when they are read, then they
+- [x] The compose URL is defined once in code; `test/database.ts` and the four scripts use it
+- [x] Given the headers of `settle-smoke.ts` and `api-key-smoke.ts`, when they are read, then they
       name where the compose URL is defined
-- [ ] Given `DATABASE_URL=` (blank), when any of the four scripts starts, then it uses the
+- [x] Given `DATABASE_URL=` (blank), when any of the four scripts starts, then it uses the
       compose URL
-- [ ] The three scripts that require `DATABASE_URL` still require it
-- [ ] Typecheck, lint and format clean; `pnpm test` in `apps/facilitator` passes
+- [x] The four scripts that require `DATABASE_URL` still require it
+- [x] Typecheck, lint and format clean; `pnpm test` in `apps/facilitator` passes
+
+## Implementation Notes
+
+- `apps/facilitator/test/compose-database.ts` (new, no imports): `COMPOSE_DATABASE_URL`;
+  `urlOrCompose(name, env = process.env)`, which returns the variable `name` trimmed, or the compose
+  URL when it is unset or blank; and `databaseUrlOrCompose(env)`, the same for `DATABASE_URL`.
+  `test/compose-database.test.ts` (new, 8 tests): for each function, unset, empty and blank fall
+  back; a set value is trimmed, and `urlOrCompose` reads only the variable it is given.
+- `test/database.ts` reads `TEST_DATABASE_URL` with `urlOrCompose`, so a blank one falls back to the
+  compose database instead of throwing `TypeError: Invalid URL` from `new URL("")` in every test
+  file (and in the mcp-local e2e, which uses `testDatabase`).
+- `token-matrix.ts`, `spend-matrix.ts`, `catalog-smoke.ts` and `verify-smoke.ts` call
+  `databaseUrlOrCompose()`; their headers say the default also applies to a blank value and name
+  the module.
+- `settle-smoke.ts`, `api-key-smoke.ts`: the header names `COMPOSE_DATABASE_URL` in the module
+  instead of quoting the URL. They, `nonce-consumed-elsewhere.ts` and
+  `pay-to-balance-missing.ts` still pass `process.env.DATABASE_URL` to the config, which requires
+  it; the last two headers never quoted the URL, so they are unchanged.
+- Checks (2026-11-26): typecheck of the facilitator; eslint and prettier on the changed files;
+  `pnpm test` in `apps/facilitator` against the compose PostgreSQL, 1393 passed and 3 skipped (+4).
+  `test/compose-database.test.ts` is the 55th file in the suite (54 on `develop`).
+- After review (2026-11-26): typecheck, eslint and prettier again; `TEST_DATABASE_URL= pnpm test`
+  in `apps/facilitator` (blank), 1397 passed and 3 skipped (+4 more).
+- Runs of the scripts (2026-11-26), each against the `develop` version for contrast:
+  - `token-matrix.ts` without `CLIENT_SECRET`, so it stops after its database step: blank,
+    unset and all-spaces `DATABASE_URL` recreate `token_matrix` in the compose database, then stop
+    at `CLIENT_SECRET`; a set `DATABASE_URL` (port 1) is used as given (`ECONNREFUSED 127.0.0.1:1`).
+    On `develop` a blank one stops at `new URL("")` with `TypeError: Invalid URL`, not at the
+    config.
+  - `verify-smoke.ts` with two fresh friendbot accounts: blank and all-spaces `DATABASE_URL` give
+    `validPayment: true`, `channelRejected: true`. On `develop` a blank one stops with
+    `ConfigError: invalid configuration: DATABASE_URL is required`.
+  - `catalog-smoke.ts`, the whole run on testnet with a blank `DATABASE_URL`: exit 0, six
+    settlements `SUCCESS` (first `c43c063b…`, last `2fe7d080…`), all five steps as 0063 and 0085
+    describe them; the last attempt is `not_askable` with reason `redirect`. Its five attempt rows
+    are in `catalog_smoke` in the compose database.
+  - `settle-smoke.ts`, `api-key-smoke.ts`, `nonce-consumed-elsewhere.ts`, unset and blank: each
+    stops with `DATABASE_URL is required`, as before.
+  - `pay-to-balance-missing.ts` not run: unchanged by this task, and it funds accounts and deploys a
+    contract on testnet before it reads the config. Named in review (adamkoot on PR #262).
+  - `spend-matrix.ts` not run: it needs the contracts' wasm built with cargo, and spends a few
+    minutes of testnet setup before its database step. Its change is the same call as the others'.
+
+## Design Decisions
+
+### Emerged
+
+1. **The headers point at the module, not at a copy of the URL**: the task left it open. A URL
+   quoted in prose goes stale the way the code copies did, while `COMPOSE_DATABASE_URL` in
+   `test/compose-database.ts` is found with one search.
+2. **The four fallback scripts' headers name the module too**: not in the criteria, which name
+   only the two that require the variable. They quoted the compose port, and now say a blank value
+   falls back as well, so the reader learns the new behaviour where the variable is described.
+3. **`deploy/testnet.env.example` keeps its quoted URL**: it is an env file a person copies, not
+   code, and the server never uses the compose database.
+4. **A blank `TEST_DATABASE_URL` falls back too**: not in the task, found in review. The tests read
+   it with `??` the way the scripts read `DATABASE_URL`, so a blank one broke every database test;
+   the same helper, given the variable's name, fixes both.
+5. **`apps/portal/test/live/hand-run.sh` keeps its own copy**: a shell script can't import the TS
+   module, and it already reads a blank `DATABASE_URL` as unset (`${DATABASE_URL:-…}`). The criterion
+   "defined once in code" covers the facilitator's TypeScript.
