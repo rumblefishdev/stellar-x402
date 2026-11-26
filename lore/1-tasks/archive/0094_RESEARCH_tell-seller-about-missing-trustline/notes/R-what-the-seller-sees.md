@@ -139,7 +139,7 @@ Run again at 14:23 UTC for 0164, which added a record of what its `readVerifyRef
 seller's `onAfterVerify` hook, kept apart from the seller's log: the same answers, 8 checks passed,
 and both refusals read as `sellerMustAct` with the account in the message. Its transactions:
 trustline `0fc01c17…0b527`, removed `f92da771…32b8e`, merged `0277ebed…1d474b`, channel setup
-`3f0b6473…e3479`. The results file holds that run; the first one's is in commit 5ab69e45.
+`3f0b6473…e3479`. The results file holds that run; the first one's is in commit 977abf15.
 
 The MCP binary itself was not run here: it pays through the SDK above, and its own testnet e2e
 covers the case. E-14d (`payTo` without a trustline) and E-14e (`payTo` that doesn't exist) on
