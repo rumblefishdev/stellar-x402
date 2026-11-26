@@ -10,7 +10,7 @@ import type { SearchCardStore } from "../ports/index.js";
 const PAGE = 100;
 
 export interface SearchCardRewriteDeps {
-  store: SearchCardStore;
+  store: Pick<SearchCardStore, "listings" | "write">;
   logger: Logger;
   metrics: ProcessMetrics;
 }

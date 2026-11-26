@@ -58,6 +58,7 @@ import { migrate } from "../../src/adapters/postgres-schema.js";
 import { main } from "../../src/main.js";
 import { databaseUrlOrCompose } from "../compose-database.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
+import { startSearchModel } from "../search-model.js";
 
 const network = "stellar:testnet";
 // The script's own reads and setup go through the facilitator's first RPC.
@@ -281,9 +282,11 @@ await sendAndPoll(setup, "channel setup");
 
 // The fake OpenBao holds this run's key: a testnet account funded for the run.
 const openbao = await fakeOpenBao(facilitator);
+const searchModel = await startSearchModel();
 const facilitatorServer = await main(
   {
     ...signerEnv(facilitator.publicKey(), openbao.socketPath),
+    SEARCH_MODEL_URL: searchModel.url,
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",
     LOG_LEVEL: "warn",
@@ -448,6 +451,7 @@ try {
 } finally {
   await facilitatorServer.close();
   openbao.close();
+  await searchModel.stop();
   await db.end();
   await admin.end();
 }

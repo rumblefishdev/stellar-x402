@@ -13,6 +13,7 @@ import type { LeaseKeeper } from "../src/settlement/lease.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -57,6 +58,7 @@ async function serve(deps: { verify?: Verify; lease?: LeaseKeeper; stores?: Stor
     ...signerEnv(Keypair.random().publicKey()),
     DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
+    SEARCH_MODEL_URL: "http://127.0.0.1:9",
     CHANNELS: Keypair.random().publicKey(),
     PORT: "0",
     RATE_LIMIT_VERIFY: "10",
@@ -73,6 +75,7 @@ async function serve(deps: { verify?: Verify; lease?: LeaseKeeper; stores?: Stor
   };
   app = await start({
     config,
+    embedder: noSearchModel,
     logger: jsonLogger("debug", () => {}),
     metrics,
     stores: deps.stores ?? db.stores(),

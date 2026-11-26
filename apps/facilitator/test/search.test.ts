@@ -16,6 +16,7 @@ import type { Verify } from "../src/settlement/verify.js";
 import { start, type Started } from "../src/start.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 const SERVED = STELLAR_NETWORKS.testnet;
 const OTHER = STELLAR_NETWORKS.pubnet;
@@ -191,6 +192,7 @@ describe("GET /discovery/search", () => {
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       // Every case calls from one address; rate-limit.test.ts covers the shared limit.
       RATE_LIMIT_DISCOVERY: "1000000",
     };
@@ -200,6 +202,7 @@ describe("GET /discovery/search", () => {
     await seed(stores);
     app = await start({
       config,
+      embedder: noSearchModel,
       logger,
       metrics,
       stores,

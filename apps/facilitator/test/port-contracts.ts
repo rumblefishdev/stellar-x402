@@ -7,6 +7,7 @@ import {
   HashConflictError,
   type CatalogAttempt,
   type CatalogAttemptStore,
+  type CatalogKey,
   LEASE_SKEW_MARGIN_MS,
   LeaseFencedError,
   type LeaseFence,
@@ -21,6 +22,7 @@ import {
   type SpendLimit,
   type SpendStore,
 } from "../src/ports/index.js";
+import { QUERY_VECTOR, unitVector } from "./vectors.js";
 
 /**
  * Behaviour every adapter of the four ports must have (AD-6, AD-7, AD-11, AD-16 to AD-20), run
@@ -2423,6 +2425,225 @@ export function searchCardStoreContract(
       const [listing] = await cards.listings("0", 10);
       await list("https://a.example", 2, "Tides");
       expect(await cards.write(listing!)).toBe(false);
+    });
+  });
+}
+
+/** What the fused search contract needs: the catalog, and a way to store a card's vector. */
+export interface MeaningFixture {
+  catalog: CatalogStore;
+  /** Stores a vector of `model` on the card of `key`'s listing, as the vector pass would. */
+  setVector: (key: CatalogKey, model: string, vector: number[]) => Promise<void>;
+}
+
+/**
+ * Search by words and by meaning, fused (0120 point G, ADR 0014). Needs the `vector` extension
+ * (pgvector) in the test database. Every listing has a description on its own host and no
+ * payments, so its quality factor is 1 and its rank is the fused score alone.
+ */
+export function catalogMeaningContract(make: Make<MeaningFixture>) {
+  describe("CatalogStore search by meaning, fused with words (0120 G, ADR 0014; needs pgvector)", () => {
+    let catalog: CatalogStore;
+    let setVector: MeaningFixture["setVector"];
+    beforeEach(async () => {
+      ({ catalog, setVector } = await make());
+    });
+    type Search = Parameters<CatalogStore["search"]>[0];
+    const key = (host: string, overrides: Partial<CatalogKey> = {}): CatalogKey => ({
+      network: "stellar:testnet",
+      payTo: PAY_TO,
+      method: "GET",
+      resourceUrl: `https://${host}.example/x`,
+      ...overrides,
+    });
+    /** A listing at `k`, and its vector of cosine `cos` to the query unless `cos` is null. */
+    const listing = async (
+      k: CatalogKey,
+      fields: Partial<DiscoveryResource>,
+      cos: number | null,
+      model: string = catalog.searchModel,
+      checkedAt = 1,
+    ) => {
+      await catalog.upsert({
+        keyVersion: CATALOG_KEY_VERSION,
+        ledger: 1,
+        checkedAt,
+        key: k,
+        resource: {
+          resource: k.resourceUrl,
+          type: "http",
+          x402Version: 2,
+          accepts: [requirements({ network: k.network, payTo: k.payTo })],
+          lastUpdated: "2026-11-24T00:00:00.000Z",
+          ...fields,
+        },
+      });
+      if (cos !== null) await setVector(k, model, unitVector(cos));
+    };
+    const fused = (text: string, query: Partial<Search> = {}) =>
+      catalog.search({
+        text,
+        limit: 100,
+        meaning: QUERY_VECTOR,
+        ...query,
+      } as Search);
+    const hosts = (hits: { resource: DiscoveryResource }[]) =>
+      hits.map((hit) => new URL(hit.resource.resource).hostname.split(".")[0]);
+    /** The fused score of 0120 point G; a missing rank adds no term. */
+    const score = (byMeaning?: number, byWords?: number) =>
+      (byMeaning === undefined ? 0 : 4 / (20 + byMeaning)) +
+      (byWords === undefined ? 0 : 1 / (20 + byWords));
+    const weatherParameter = {
+      extensions: { bazaar: { info: { input: { type: "http", queryParams: { weather: "" } } } } },
+    } as Partial<DiscoveryResource>;
+
+    it("scores each match 4/(20 + rank by meaning) + 1/(20 + rank by words), ranks from 1 (G)", async () => {
+      await listing(key("a"), { tags: ["weather"], description: "Rain and sun" }, 0.95);
+      await listing(key("b"), { description: "Tides and waves" }, 0.9);
+      await listing(key("c"), { description: "weather" }, 0.7);
+      await listing(key("e"), { description: "Stock prices" }, 0.61);
+      await listing(key("h"), { description: "Bond yields" }, 0.59);
+      // Not matches: no vector, and a vector of another model, though both hold the word.
+      await listing(key("f"), { description: "Fog", ...weatherParameter }, null);
+      await listing(key("g"), { description: "Gale", ...weatherParameter }, 0.99, "old-model");
+      const hits = await fused("weather");
+      expect(hosts(hits)).toEqual(["a", "c", "b", "e"]);
+      expect(hits.map((hit) => Number(hit.rank))).toEqual([
+        expect.closeTo(score(1, 1), 6),
+        expect.closeTo(score(3, 2), 6),
+        expect.closeTo(score(2), 6),
+        expect.closeTo(score(4), 6),
+      ]);
+    });
+
+    it("ranks by the first 32 distinct words of a long query only (G)", async () => {
+      await listing(key("a"), { description: "w32" }, 0.9);
+      await listing(key("b"), { description: "w31" }, 0.8);
+      const words = Array.from({ length: 33 }, (_, i) => `w${i}`);
+      // Repeats don't count against the 32: w31 is a word looked for, w32 is not.
+      const hits = await fused(["w0", ...words].join(" "));
+      expect(hosts(hits)).toEqual(["b", "a"]);
+      expect(hits.map((hit) => Number(hit.rank))).toEqual([
+        expect.closeTo(score(2, 1), 6),
+        expect.closeTo(score(1), 6),
+      ]);
+    });
+
+    it("matches by meaning at a cosine of 0.60 or more, not below (G)", async () => {
+      await listing(key("above"), { description: "Tides" }, 0.61);
+      await listing(key("below"), { description: "Waves" }, 0.59);
+      // "zebra" is in no listing, so only meaning can match.
+      const hits = await fused("zebra");
+      expect(hosts(hits)).toEqual(["above"]);
+      expect(Number(hits[0]!.rank)).toBeCloseTo(score(1), 6);
+    });
+
+    it("finds nothing when no listing is close in meaning or holds a word (G)", async () => {
+      await listing(key("a"), { description: "Tides" }, 0.3);
+      expect(await fused("zebra")).toEqual([]);
+    });
+
+    // ADR 0014, "Matches": words never add a listing; they only order the listings that match.
+    it("returns no listing whose meaning is below 0.60, though it holds a query word (G)", async () => {
+      await listing(key("b"), { description: "Tides" }, 0.9);
+      await listing(key("d"), { serviceName: "Weather", description: "Sea level" }, 0.3);
+      const hits = await fused("weather");
+      expect(hosts(hits)).toEqual(["b"]);
+      expect(Number(hits[0]!.rank)).toBeCloseTo(score(1), 6);
+    });
+
+    it("returns no listing without a vector of the current model, whatever its words (G)", async () => {
+      await listing(key("n"), { serviceName: "Weather", description: "Now" }, null);
+      await listing(key("o"), { serviceName: "Weather", description: "Old" }, 0.99, "old-model");
+      await listing(key("m"), { description: "weather" }, 0.7);
+      expect(hosts(await fused("weather"))).toEqual(["m"]);
+    });
+
+    it("counts the ranks by words among the matches only (G)", async () => {
+      // Three listings rank above m by words, but none is a match: two have no current vector,
+      // and d's meaning is below 0.60.
+      await listing(key("n"), { serviceName: "Weather", description: "Now" }, null);
+      await listing(key("o"), { serviceName: "Weather", description: "Old" }, 0.99, "old-model");
+      await listing(key("d"), { serviceName: "Weather", description: "Sea level" }, 0.3);
+      await listing(key("m"), { description: "weather" }, 0.7);
+      const [hit] = await fused("weather");
+      expect(Number(hit!.rank)).toBeCloseTo(score(1, 1), 6);
+    });
+
+    it("orders equal scores by key: network, payTo, method, resource URL (G)", async () => {
+      const keys = [
+        key("b", { method: "GET" }),
+        key("a", { method: "POST" }),
+        key("z", { payTo: "GA" }),
+        key("a"),
+        key("a", { network: "stellar:pubnet" }),
+      ];
+      for (const k of keys) await listing(k, { description: "Tides" }, 0.8);
+      const hits = await fused("zebra");
+      expect(hits.map((hit) => hit.key)).toEqual([
+        key("a", { network: "stellar:pubnet" }),
+        key("z", { payTo: "GA" }),
+        key("a"),
+        key("b"),
+        key("a", { method: "POST" }),
+      ]);
+    });
+
+    it("pages after a result without a repeat or a gap, and reaches every match: nothing is cut (G)", async () => {
+      // 60 matches, more than the top 50 a cut would keep, five of them tied.
+      for (let i = 0; i < 60; i++) {
+        const cos = i < 5 ? 0.9 : 0.95 - i * 0.005;
+        await listing(key(`h${String(i).padStart(2, "0")}`), { description: "Tides" }, cos);
+      }
+      const all = await fused("zebra");
+      expect(all).toHaveLength(60);
+      const seen: string[] = [];
+      let after: Search["after"];
+      for (let page = 0; page < 20; page++) {
+        const hits = await fused("zebra", { limit: 7, after });
+        seen.push(...hits.map((hit) => hit.resource.resource));
+        if (hits.length < 7) break;
+        const last = hits.at(-1)!;
+        after = { rank: last.rank, key: last.key };
+      }
+      expect(seen).toEqual(all.map((hit) => hit.resource.resource));
+    });
+
+    it("filters before ranking, so ranks count among the listings that pass (G)", async () => {
+      await listing(key("a"), { description: "Tides" }, 0.95);
+      await listing(key("p", { network: "stellar:pubnet" }), { description: "Waves" }, 0.7);
+      await listing(key("t"), { description: "Swell", type: "mcp" }, 0.65);
+      const pubnet = await fused("zebra", { network: "stellar:pubnet" });
+      expect(hosts(pubnet)).toEqual(["p"]);
+      expect(Number(pubnet[0]!.rank)).toBeCloseTo(score(1), 6);
+      expect(hosts(await fused("zebra", { type: "mcp" }))).toEqual(["t"]);
+      expect(hosts(await fused("zebra", { network: "eip155:8453" }))).toEqual([]);
+    });
+
+    it("says a listing that passes the filters waits for a vector of the model (ADR 0014)", async () => {
+      const waiting = (network?: string) =>
+        catalog.waitingForVector({ text: "x", limit: 10, network });
+      await listing(key("a"), { description: "Tides" }, 0.9);
+      expect(await waiting()).toBe(false);
+      await listing(key("b"), { description: "Waves" }, null);
+      expect(await waiting()).toBe(true);
+      // The network filter leaves b out; a vector of another model waits like none.
+      const pubnet = key("c", { network: "stellar:pubnet" });
+      await listing(pubnet, { description: "Stocks" }, 0.9);
+      expect(await waiting("stellar:pubnet")).toBe(false);
+      await listing(key("d", { network: "stellar:pubnet" }), { description: "Bonds" }, 0.9, "old");
+      expect(await waiting("stellar:pubnet")).toBe(true);
+    });
+
+    it("leaves out a listing whose text changed until its new vector is written (G, ADR 0014)", async () => {
+      await listing(key("a"), { description: "Tides" }, 0.9);
+      await listing(key("a"), { description: "Waves" }, null, catalog.searchModel, 2);
+      expect(hosts(await fused("zebra"))).toEqual([]);
+    });
+
+    it("ranks by words alone without a query vector, listings without a vector included (H)", async () => {
+      await listing(key("n"), { description: "weather" }, null);
+      expect(hosts(await catalog.search({ text: "weather", limit: 10 }))).toEqual(["n"]);
     });
   });
 }

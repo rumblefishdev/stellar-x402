@@ -25,8 +25,10 @@ It needs `.env.e2e-testnet` at the repo root (git-ignored), or the file named by
 | `E2E_BUYER_SECRET`  | its secret key; only ever passed to the server in its env        |
 | `E2E_SELLER_PUBLIC` | testnet account with a USDC trustline that receives the payments |
 
-It also needs a PostgreSQL for its facilitator: `TEST_DATABASE_URL`, else the local one from
-`compose.yaml` (`docker compose up -d`). The run works in a schema of its own and drops it at the end.
+It also needs a PostgreSQL with pgvector for its facilitator: `TEST_DATABASE_URL`, else the local one
+from `compose.yaml` (`docker compose up -d`). The run works in a schema of its own and drops it at the end.
+It starts the search model beside the facilitator; the first run downloads the model's files, 121 MB,
+into `node_modules/.cache/search-model`.
 
 The run checks balances on Horizon, so these accounts must not be used by another run at the same
 time. Testnet USDC comes from Circle's faucet; friendbot gives only XLM. The run also creates two

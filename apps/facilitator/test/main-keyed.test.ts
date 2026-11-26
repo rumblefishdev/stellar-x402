@@ -34,6 +34,7 @@ const env = {
   NETWORK: STELLAR_NETWORKS.pubnet,
   PORT: "0",
   LOG_LEVEL: "error",
+  SEARCH_MODEL_URL: "http://127.0.0.1:9",
 };
 
 // `main()` checks the RPC's network and every channel at startup.

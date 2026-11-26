@@ -94,4 +94,11 @@ export async function createSchema(pool: pg.Pool, schema: string, url: string): 
       { cause: error },
     );
   }
+  // The vector extension belongs to the database, not to a schema: files that migrate at once
+  // would each create it (migration 0020), and all but one would fail on its unique name. One
+  // transaction under a lock creates it first; the migration then finds it there.
+  await pool.query(
+    `SELECT pg_advisory_xact_lock(hashtext('x402 tests: vector extension'));
+     CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;`,
+  );
 }

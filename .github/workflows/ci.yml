@@ -14,7 +14,8 @@ jobs:
     # Every facilitator test runs on PostgreSQL and fails without a reachable database.
     services:
       postgres:
-        image: postgres:18
+        # The digest production pins (deploy/production/compose.yaml): PostgreSQL 18 with pgvector.
+        image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -65,6 +66,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: deploy/scripts/check-production-postgres.sh
+
+  # The search model in the facilitator's image, built for the server's amd64 and run with
+  # production's limits (ADR 0014): a model that loads on a laptop can still fail there.
+  search-model-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: deploy/scripts/check-search-model-image.sh
 
   # The monitoring VM's rule file (0139 step 6): the tests compare it with what `make rules`
   # writes, but only promtool parses its PromQL, and Prometheus refuses a whole file it can't load.

@@ -26,6 +26,7 @@ import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
 import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
 import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 type PromModule = typeof import("../src/adapters/prometheus-metrics.js");
 /** Each `prometheusMetrics()` call's options and writer: `main()`'s issue logging and liveness. */
@@ -59,6 +60,7 @@ const env = {
   DATABASE_URL: db.urlFor(db.schema),
   ...signerEnv(facilitator),
   CLIENT_IP: "socket",
+  SEARCH_MODEL_URL: "http://127.0.0.1:9",
   CHANNELS: Keypair.random().publicKey(),
   BODY_LIMIT_BYTES: "1024",
 };
@@ -91,6 +93,7 @@ describe("facilitator boot", () => {
     });
     app = await start({
       config,
+      embedder: noSearchModel,
       logger,
       metrics: memoryMetrics(),
       stores: db.stores(),

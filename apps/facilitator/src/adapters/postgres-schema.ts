@@ -390,6 +390,32 @@ CREATE VIEW account_usage AS
 ALTER TABLE settlements ADD COLUMN listing_method text, ADD COLUMN listing_url text;
 `,
   },
+  {
+    // 0120: each card's vector (ADR 0014), the model that made it, and the hash of the text it was
+    // made from. The database keeps `text_hash` of the card's current text itself, whatever writes
+    // it (the release before included), and `model`, the model of a vector of that text, empty
+    // otherwise: readers read `model` alone, no writer clears an old vector, and `model` can't be
+    // written. A generated column can't read another, so `model` repeats the hash beside it. pgvector's extension lives in
+    // `public`, so every schema sees the type. The vector is kept in the row (`PLAIN`), as
+    // pgvector's README suggests for an exact scan: a 384-number vector fits a page. The generated
+    // column rewrites the table once: 1 listing in production (2026-11-23).
+    name: "0020_catalog_search_vector",
+    sql: `
+CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
+ALTER TABLE catalog_search
+  ADD COLUMN text_hash text GENERATED ALWAYS AS (
+    md5(name || E'\n' || tags || E'\n' || description || E'\n' || parameters)
+  ) STORED,
+  ADD COLUMN embedded_model text,
+  ADD COLUMN embedded_hash text,
+  ADD COLUMN embedding public.vector(384),
+  ADD COLUMN model text GENERATED ALWAYS AS (
+    CASE WHEN embedded_hash = md5(name || E'\n' || tags || E'\n' || description || E'\n' || parameters)
+         THEN embedded_model END
+  ) STORED;
+ALTER TABLE catalog_search ALTER COLUMN embedding SET STORAGE PLAIN;
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

@@ -44,6 +44,7 @@ import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, fetch } from "undici";
 import { main } from "../../src/main.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
+import { startSearchModel } from "../search-model.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -121,9 +122,11 @@ const created = await server.pollTransaction((await server.sendTransaction(setup
 if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.status}`);
 
 const openbao = await fakeOpenBao(facilitator);
+const searchModel = await startSearchModel();
 const facilitatorServer = await main(
   {
     ...signerEnv(facilitator.publicKey(), openbao.socketPath),
+    SEARCH_MODEL_URL: searchModel.url,
     CLIENT_IP: "socket",
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",
@@ -279,4 +282,5 @@ try {
 } finally {
   await facilitatorServer.close();
   openbao.close();
+  await searchModel.stop();
 }

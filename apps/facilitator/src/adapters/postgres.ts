@@ -1,5 +1,5 @@
 import { PostgresAccountPlanStore, PostgresApiKeyStore } from "@stellar-x402/api-keys";
-import type { StellarNetwork } from "@stellar-x402/config";
+import { SEARCH_MODEL_ID, type StellarNetwork } from "@stellar-x402/config";
 import pg from "pg";
 import {
   HashConflictError,
@@ -76,12 +76,14 @@ import { PostgresSearchCardStore } from "./postgres-search-cards.js";
 export function postgresStores(
   pool: pg.Pool,
   pools: { reserve?: pg.Pool; rateLimits?: pg.Pool; discovery?: pg.Pool; apiKeys?: pg.Pool } = {},
+  /** The model of the search cards' vectors (ADR 0014); tests that stand in another pass it. */
+  searchModel: string = SEARCH_MODEL_ID,
 ): Stores {
   return {
     settlements: new PostgresSettlementStore(pool),
-    catalog: new PostgresCatalogStore(pool, pools.discovery ?? pool),
+    catalog: new PostgresCatalogStore(pool, pools.discovery ?? pool, searchModel),
     catalogAttempts: new PostgresCatalogAttemptStore(pool),
-    searchCards: new PostgresSearchCardStore(pool),
+    searchCards: new PostgresSearchCardStore(pool, searchModel),
     rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),
     apiKeys: new PostgresApiKeyStore(pools.apiKeys ?? pool, pool),

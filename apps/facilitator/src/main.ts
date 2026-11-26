@@ -11,6 +11,7 @@ import {
   type AccountPlan,
   type AccountPlanRecord,
 } from "@stellar-x402/api-keys";
+import { SEARCH_MODEL_ID } from "@stellar-x402/config";
 import {
   FallbackRpc,
   SettlementSubmitter,
@@ -24,8 +25,10 @@ import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js"
 import { metricsListener, prometheusMetrics } from "./adapters/prometheus-metrics.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
+import { createSearchModelClient, searchModelReady } from "./adapters/search-model.js";
 import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
 import { createSearchCardRewrite } from "./catalog/search-cards.js";
+import { createSearchVectors, type SearchVectors } from "./catalog/search-vectors.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
 import { parseAccountPlansConfig, parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
@@ -349,6 +352,8 @@ export function compose(
   signer: OpenBaoSigner;
   /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
   rpcStall: RpcStallTracker;
+  /** Unstarted: `main()` starts the loop after the search card rewrite. */
+  vectors: SearchVectors;
 } {
   const { logger } = opts;
   const { stores } = opts;
@@ -356,6 +361,19 @@ export function compose(
   // One child per network; a root write of a network-scoped metric would carry no `network`, so
   // the root's type doesn't take one.
   const metrics = root.for({ network: config.network });
+  // The search model (ADR 0014): the route asks it for each query's vector, the vectors for each
+  // listing's. The cards serve every network, so they write through the root.
+  const embedder = createSearchModelClient({ ...config.searchModel, model: SEARCH_MODEL_ID });
+  const vectors = createSearchVectors({
+    store: stores.searchCards,
+    embedder,
+    ready: () => searchModelReady(config.searchModel),
+    logger,
+    metrics: root,
+  });
+  // The model's health whether anyone searches or not (ADR 0014): each run of the vectors' loop
+  // asks it, every 30 s at least. The model serves every network.
+  root.registerGauge("search_model_up", () => ({ value: vectors.up() }));
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
   // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
@@ -486,12 +504,14 @@ export function compose(
       floor,
       drain,
       signerState: signer.state,
+      embedder,
     },
     cataloger,
     metrics: root,
     rpc,
     signer,
     rpcStall,
+    vectors,
   };
 }
 
@@ -546,7 +566,7 @@ export async function main(
     // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
-    const stores = postgresStores(pools.main, pools);
+    const stores = postgresStores(pools.main, pools, SEARCH_MODEL_ID);
     // The metrics as Prometheus text (ADR 0011, "Metrics"; 0139), read by the agent on the server.
     // `/metrics` listens before the graph is built, so a startup that hangs still shows its
     // gauges; the liveness series waits for `start()` below.
@@ -559,7 +579,7 @@ export async function main(
       await once(metricsServer, "listening");
     }
     const composed = compose(config, { logger, stores, metrics });
-    const { deps, cataloger, rpc, signer } = composed;
+    const { deps, cataloger, rpc, signer, vectors } = composed;
     // With the graph, like the writer's timers: an RPC that hangs the startup checks shows as a
     // rising `rpc_stalled_seconds`.
     rpcStall = composed.rpcStall;
@@ -600,20 +620,24 @@ export async function main(
     pruner.start();
     const searchCards = createSearchCardRewrite({ store: stores.searchCards, logger, metrics });
     const searchCardsRewritten = searchCards.start();
-    // Catalog writes, a prune and the search card rewrite already under way finish before the process
-    // exits, and before the pools end, even if closing the server fails; the pools end even if
-    // draining fails. `/metrics` closes last, after every part that counts, so a scrape meanwhile
-    // still reads them.
+    // After the rewrite, so each vector is made from the card's text under this release's rules.
+    const searchVectorsWritten = searchCardsRewritten.then(() => vectors.start());
+    // Catalog writes, a prune, the search card rewrite and the vector run already under way
+    // finish before the process exits, and before the pools end, even if closing the server fails;
+    // the pools end even if draining fails. `/metrics` closes last, after every part that counts,
+    // so a scrape meanwhile still reads them.
     const closeOnce = async () => {
       signer.close();
-      // The search card rewrite stops at once, so it holds no connection through the drain.
+      // The search card rewrite and the vectors' loop stop at once, so they hold no connection
+      // through the drain. A pass that hasn't started yet then reads nothing.
       const rewriteClosed = searchCards.close();
+      const vectorsClosed = vectors.close();
       try {
         try {
           await started.close();
         } finally {
           try {
-            await Promise.all([cataloger.drain(), pruner.close(), rewriteClosed]);
+            await Promise.all([cataloger.drain(), pruner.close(), rewriteClosed, vectorsClosed]);
           } finally {
             await endPools();
           }
@@ -639,6 +663,8 @@ export async function main(
       reconciled: deps.reconciliation?.reconciled ?? Promise.resolve(),
       /** Settles once the search card rewrite at start has ended: for tests. */
       searchCardsRewritten,
+      /** Settles once the vectors' first run has ended: for tests. */
+      searchVectorsWritten,
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
       close: () => (closing ??= closeOnce()),

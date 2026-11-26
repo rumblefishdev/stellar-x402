@@ -813,7 +813,8 @@ and the two Lambdas off the server, the uptime probe and the check that watches 
 ## Bazaar search
 
 `GET /discovery/search` (task 0120, [ADR 0014](adr/0014-bazaar-search.md)) is public and ranks
-listings that sellers write. Its first part ranks by words alone; the part by meaning follows.
+listings that sellers write. It ranks by meaning and words fused, and by words alone while the
+search model can't be used.
 
 ### Threats
 
@@ -823,10 +824,8 @@ listings that sellers write. Its first part ranks by words alone; the part by me
   every occurrence: a description of "weather" 62 times, inside its 500-character limit, ranks 31
   for `weather` against 1 for a listing named "Weather"; a URL path of the word 250 times, inside
   the 2,048-character URL limit, ranks 250. A listing costs one small settlement, or a seed entry.
-- **Mitigation:** None while search ranks by words alone. Testnet production serves it so, as an
-  accepted risk, until the meaning part lands.
-  Once the meaning part lands, the words weigh a fifth of a listing's score and count only by
-  their rank among matches (ADR 0014), which bounds what repetition buys.
+- **Mitigation:** The words weigh a fifth of a listing's score and count only by their rank among
+  matches (ADR 0014), which bounds what repetition buys.
 - **Residual risk:** When the model is down, search falls back to words alone and repetition wins
   again. It stays a named risk with no limit of its own (ADR 0014).
 
@@ -843,4 +842,41 @@ listings that sellers write. Its first part ranks by words alone; the part by me
   `/discovery/resources` wait too, since it reads through the same pool. The cap bounds the words,
   not the listings they match: on 39,578 real listings (CDP's Bazaar) the 32 most common words
   matched 39,170 of them and took 1.8–2.2 s, the pool's statement timeout, so such a query may
-  answer 500 at that size.
+  answer 500 at that size. It keeps no limit of its own: once the catalog passes about 10,000
+  listings, a pool of its own for search is the next step.
+
+#### Load on the search model
+
+- **Attack:** A client sends many long queries at once, so the model, which embeds one query at a
+  time, falls behind. One query of 2,000 characters took 0.12 s on the model's 1 CPU; 40 sent at
+  once kept its health check waiting 3.25 s (both on an arm64 build of the image).
+- **Mitigation:** The model runs in its own container, capped at 1 CPU and 768 MiB, so it never
+  takes the facilitator's memory, and inside `/discovery/*`'s per-IP limit (ADR 0007). A query
+  that waits past 2 s is answered by words alone with `partialResults: true`, and
+  `search-words-only` fires. Nothing restarts an overloaded model: a restart would drop every
+  query in its queue and leave search on words alone while the model loads, about 12 s.
+- **Residual risk:** A client within its limit can keep search on words alone for every client,
+  and a hung model stays hung until an operator restarts it. A query is cut at 256 tokens, which
+  halves a long query's cost. The model computes a query its caller gave up on, so its backlog
+  outlasts a burst. A listing cataloged while the model fails gets no vector until the next start,
+  and search by meaning leaves it out until then.
+
+#### Ranking by meaning
+
+- **Attack:** A seller writes a listing whose text sits close to many queries, so it crosses the
+  0.60 floor for searches it doesn't serve. Meaning weighs four fifths of the score.
+- **Mitigation:** None beyond the floor and the fusion; the floor and the weights come from 0134's
+  40 queries.
+- **Residual risk:** Not measured. Task 0135's labelled set is where it would show.
+
+#### The model's files and runtime
+
+- **Attack:** The model's files come from Hugging Face at a pinned revision when the image is
+  built, and onnxruntime's binaries from npm. A changed file at the source reaches the image that
+  also holds the payment code.
+- **Mitigation:** The revision is pinned, the npm lockfile holds integrity hashes, the container
+  is read-only, without capabilities and on a network with no way out, and onnxruntime's
+  telemetry is off (`ORT_DISABLE_TELEMETRY`). The build checks each model file against a SHA-256
+  value in `model.ts` before it writes the file.
+- **Residual risk:** The values were taken from the pinned revision once; a revision that was bad
+  from the start passes the check.

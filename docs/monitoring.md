@@ -71,6 +71,8 @@ On since 2026-11-25 13:43 UTC ([The Prometheus rules](#the-prometheus-rules)). T
 | `x402-agent-certificate`          | `server`            | Not fired: every probe run writes the real days left                                                                                     |
 | `Watchdog`, `NotificationsFailed` | the VM's own        | 2026-11-24: the heartbeat ([Drills](#2026-11-25-the-heartbeat-again)) and a broken credential (soroban-infrastructure#19)                |
 
+`search-words-only` and `search-vector-failed` (task 0120) are two more checks of `x402-event`, on with the next rules deploy; neither has been fired on purpose yet.
+
 A network-scoped alarm has the network at the end of its name (`balance-low-testnet`), and
 `breaker-opened` its kind after the network (`breaker-opened-testnet-payer`). `log-volume` ends in
 its log group (`log-volume-app`, `log-volume-metrics`). `http-500` and the server's alarms carry
@@ -410,6 +412,78 @@ are refused. A burst sends one message.
    (`horizon.stellar.org` or `horizon-testnet.stellar.org`). Upstream's verify reads it on every
    payment, with no timeout of its own, so a hung Horizon times out every RPC URL.
 3. Otherwise fix the endpoint, or reorder `RPC_URLS` ([runbook, Credentials](runbook.md#credentials)).
+
+### search-words-only
+
+`/discovery/search` answered by words alone ([ADR 0014](adr/0014-bazaar-search.md)): the search
+model did not give the query's vector within 2 s, answered an error, or is down. Such an answer
+ranks worse, misses typos and lets a seller's repeated words rank first, and its
+`partialResults` is `true`. Every fallback fires it. One quiet minute ends it, so an outage sends
+one message and the next outage, a minute or more later, sends another.
+
+A model container that restarts answers nothing until it has loaded the model, a few seconds. A
+search in those seconds falls back and fires this once, as a deploy that restarts the container
+can. That is expected; a fallback outside a restart is not.
+
+1. On the server, the model container's state and its own log lines: `x402@`'s log file holds the
+   facilitator's lines only.
+
+   ```sh
+   sudo /usr/local/libexec/x402/x402-compose production ps search-model
+   sudo /usr/local/libexec/x402/x402-compose production logs --since 30m search-model
+   ```
+
+2. In Logs Insights on `/x402/production/app`, the `search_words_only` lines around that time:
+   their `error` is the cause, a timeout or the model's answer.
+3. A container that exits, out of memory too, comes back by itself (`restart: unless-stopped`).
+   One that runs but doesn't answer, `unhealthy` in `ps`, stays so: nothing restarts it, since
+   a restart of an overloaded model would drop its queue. Many long searches at once slow it as
+   well; fallbacks that end with the burst were load, not a hang. A hung one: restart the model
+   alone, which leaves the facilitator and `/settle` up.
+
+   ```sh
+   sudo /usr/local/libexec/x402/x402-compose production restart search-model
+   ```
+
+### search-model-down
+
+The search model has not answered the facilitator's health check for 5 minutes. The facilitator
+checks it every 30 s whether anyone searches or not ([ADR 0014](adr/0014-bazaar-search.md)), so
+this fires with no traffic, when `search-words-only` and `search-vector-failed` can't. Search runs
+on words alone meanwhile, and no listing gets a vector.
+
+1. The model container's state: `sudo /usr/local/libexec/x402/x402-compose production ps
+search-model`, then `logs search-model`: a restart loop, out of memory, or an image without the
+   model.
+2. Once it answers again, the next search ranks by meaning, and within 30 s the vectors' loop
+   embeds the listings still without a vector.
+
+### search-slow
+
+A search by meaning took over 1 s in the database. The facilitator compares the query's vector
+with every listing's ([ADR 0014](adr/0014-bazaar-search.md)), so the time grows with the catalog;
+at the discovery pool's 2 s statement timeout searches fail with a 500 and `http-500` fires.
+Searches still answer while this fires.
+
+1. In Logs Insights on `/x402/production/app`, the `search_slow` lines: the time and the number
+   of matches.
+2. Measure the scan on the server, then add the index ADR 0014 keeps for this: HNSW, or a cap on
+   the nearest vectors.
+
+### search-vector-failed
+
+The search model, while it answered its health check, gave no vector for a listing, or the
+vectors' loop could not read the cards ([ADR 0014](adr/0014-bazaar-search.md)). Search by meaning
+leaves such a listing out until it has a vector, and answers `partialResults: true` meanwhile. A
+model that is down fires `search-model-down` instead: the loop resumes within 30 s of its return.
+A listing that failed is not tried again until its text changes or the facilitator restarts. One
+quiet minute ends it.
+
+1. In Logs Insights on `/x402/production/app`, the `search_vector_failed` and
+   `search_vectors_read_failed` lines: the listing and the cause.
+2. The model container's state, as for `search-words-only`.
+3. A listing that failed on its own text: once the cause is fixed, a restart of `x402@production`
+   tries it again; it drains, so plan it like a deploy.
 
 ### rpc-stalled
 
@@ -938,6 +1012,10 @@ CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are Clo
 | `lease_changes_total`                       | `x402-facilitator` | counter, Count | `network`                                                | none                                                                                                          |
 | `store_prune_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `search_card_failures_total`                | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
+| `search_vector_failures_total`              | `x402-facilitator` | counter, Count | none                                                     | [search-vector-failed](#search-vector-failed)                                                                 |
+| `search_model_up`                           | `x402-facilitator` | gauge, None    | none                                                     | [search-model-down](#search-model-down)                                                                       |
+| `search_words_only_total`                   | `x402-facilitator` | counter, Count | none                                                     | [search-words-only](#search-words-only)                                                                       |
+| `search_slow_total`                         | `x402-facilitator` | counter, Count | none                                                     | [search-slow](#search-slow)                                                                                   |
 | `catalog_internal_errors_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_attempts_total`                    | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |
 | `catalog_upsert_failures_total`             | `x402-facilitator` | counter, Count | none                                                     | none                                                                                                          |

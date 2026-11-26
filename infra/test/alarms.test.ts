@@ -86,8 +86,8 @@ describe("every alarm reads a series the catalog declares (AD-1)", () => {
 });
 
 describe("the Alarms template", () => {
-  test("has every alarm of the list once per network, 91 with two networks", () => {
-    expect(alarms).toHaveLength(91);
+  test("has every alarm of the list once per network, 95 with two networks", () => {
+    expect(alarms).toHaveLength(95);
     expect(new Set(byName.keys()).size).toBe(alarms.length);
   });
 
@@ -426,6 +426,7 @@ const LEVEL: Record<
   "portal-uptime": ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
   "hub-uptime": ["<", 1, "Minimum", 60, t.uptimeFailingMinutes, t.uptimeFailingMinutes],
   "rpc-stalled": [">", t.rpcStalledSeconds, "Maximum", 60, 5, 5],
+  "search-model-down": ["<", 1, "Maximum", 60, 5, 5],
   "balance-stale": [">", t.balanceStaleSeconds, "Maximum", 60, 1, 1],
   "balance-low": ["<", t.balanceLowStroops, "Minimum", 300, 1, 1],
   "balance-critical": ["<", t.balanceCriticalStroops, "Minimum", 300, 1, 1],

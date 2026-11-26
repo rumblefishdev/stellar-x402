@@ -946,9 +946,10 @@ the reason `resource_not_public`. That is not an error in the request: the servi
 isn't listed. A malformed URL is `invalid_resource_url`. The rule applies to writes from this
 version on: a local catalog written before it keeps its old entries until `docker compose down -v`.
 
-| Setting              | Default | Meaning                                                                    |
-| -------------------- | ------- | -------------------------------------------------------------------------- |
-| `CATALOG_LIST_LOCAL` | `false` | `true` lists those URLs too, for a local run or the e2e gate; testnet only |
+| Setting              | Default  | Meaning                                                                             |
+| -------------------- | -------- | ----------------------------------------------------------------------------------- |
+| `CATALOG_LIST_LOCAL` | `false`  | `true` lists those URLs too, for a local run or the e2e gate; testnet only          |
+| `SEARCH_MODEL_URL`   | required | the search model container (ADR 0014); search answers by words alone while it fails |
 
 ### Seeding the catalog
 

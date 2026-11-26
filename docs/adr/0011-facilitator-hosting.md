@@ -20,9 +20,11 @@
   2026-11-18 (task 0106: an API key crosses Cloudflare in plain text, in a pubnet request and
   in the portal backend's answer to `reveal`) and 2026-11-19 (task 0134: a search-model
   container, 512 MiB, joins the totals) and 2026-11-20 (task 0106: the log files also rotate
-  daily and none is kept past 30 days, the hub's privacy policy) and 2026-11-25 (task 0139:
-  the switch went out as three deploys about 8 minutes apart, not one change; Grafana is at
-  monitoring.sorobanscan.com behind Cloudflare Access, for every @rumblefish.pl address)
+  daily and none is kept past 30 days, the hub's privacy policy) and 2026-11-24 (task 0120: the
+  search-model container runs from the facilitator's image, limited to 768 MiB, and the totals
+  rise by 256 MiB) and 2026-11-25 (task 0139: the switch went out as three deploys about 8
+  minutes apart, not one change; Grafana is at monitoring.sorobanscan.com behind Cloudflare
+  Access, for every @rumblefish.pl address)
 - Revised: 2026-10-13. ECS Fargate became the company Hetzner server (task 0039); the first
   version is in git history and task 0014. 2026-10-21: the key moved to OpenBao (ADR 0013), and
   deploys, reboots, backups, alarms and downtime were worked out in the PR #24 review.
@@ -74,8 +76,8 @@ The company already runs a Hetzner dedicated server for its production ClickHous
 - Docker Compose, and Caddy already terminates HTTPS for ClickHouse's mutual-TLS endpoint, in the
   same compose project as ClickHouse.
 
-Our containers are limited to 2.375 GiB of RAM with OpenBao and the search model while production
-serves testnet, and 3.375 GiB once mainnet's database joins; on testnet they need about 2 GB of disk, WAL included.
+Our containers are limited to 2.625 GiB of RAM with OpenBao and the search model while production
+serves testnet, and 3.625 GiB once mainnet's database joins; on testnet they need about 2 GB of disk, WAL included.
 The company bought `sorobanscan.com` for sorobanscan and the Stellar Prices API and moves it, as
 a whole zone, to Cloudflare on the Free plan.
 
@@ -113,30 +115,35 @@ a whole zone, to Cloudflare on the Free plan.
     The facilitator mounts the socket of every network it serves, as external volumes from
     OpenBao's project, so one process can sign for both networks. ADR 0013 weighs what that
     costs.
-- **A search-model container** (ADR 0014), memory limit 512 MiB: the embedding model used by
-  `/discovery/search`, measured at 371 MB peak.
-- **The limits add up to 2.125 GiB for production with testnet's database and the search model,**
-  2.375 GiB with OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less. On
+- **A search-model container** (ADR 0014), memory limit 768 MiB and one CPU: the embedding model
+  used by `/discovery/search`, run from the facilitator's image with a command of its own. Its
+  peak was measured at 456–484 MiB on macOS arm64, and at 221 MiB in its Linux arm64 container
+  under 100 long texts at once (2026-11-25); amd64 follows the first deploy. The facilitator
+  starts it but never waits for it: without the model, search ranks by words alone.
+- **The limits add up to 2.375 GiB for production with testnet's database and the search model,**
+  2.625 GiB with OpenBao; mainnet's database adds 1 GiB. They are ceilings; testnet uses less. On
   2026-11-19 the server had 125 GiB of RAM, every container's limit together came to about
   110 GiB, and ours used 181 MiB.
 - **Testnet and mainnet share the facilitator process and OpenBao,** never a database, a key or a
   channel set (AD-12).
-- **No container publishes a port on the host,** and each environment gets two Docker networks
-  of its own, both part of its compose project:
+- **No container publishes a port on the host,** and each environment gets three Docker networks
+  of its own, all part of its compose project:
   - `x402-<environment>-edge`: `cloudflared` and the facilitator only. Both reach the internet
     through it: `cloudflared` to Cloudflare, the facilitator to its RPC URLs;
-  - `x402-<environment>-db`: `internal: true`, the facilitator, the Postgres containers and the
-    migration services only, with no route out. Only the facilitator and a network's migration
+  - `x402-<environment>-db`: `internal: true`, the facilitator, Postgres and the migration
+    services only, with no route out. Only the facilitator and a network's migration
     service hold that network's database password. Once mainnet joins, every migration service
     reaches every Postgres, and only the password keeps `migrate-mainnet` out of testnet's
     database; a network per database would close that, at one more network per database
-    (0077 decision 3).
+    (0077 decision 3);
+  - `x402-<environment>-search`: `internal: true`, the facilitator and the search model only
+    (ADR 0014), so the model reaches no database and nothing outside.
   - The facilitator never joins the ClickHouse project's `app` network, so it can't reach
     ClickHouse. OpenBao is reached over unix sockets (ADR 0013), not a network.
   - Each network has a fixed /28 from `172.31.200.0/24`, set in the compose file, since the
     server's Docker address pool is taken whole by that `app` network. A second pool in
     `daemon.json` would also work, but it changes Docker for every project on the server, for the
-    sake of two networks.
+    sake of four networks.
 - **systemd restarts a facilitator that crashes, not Docker.** Its unit runs Compose in the
   foreground with `--exit-code-from <service>`, since a plain `docker compose up` exits 0
   whatever the container's code, and with `Restart=on-failure`, so the unit ends with the
@@ -331,8 +338,8 @@ One request or one stop must never outlast the layer in front of it:
     environment's credentials (below) and, unless a deploy is running (a marker in
     `/run/x402/<environment>/`, which a reboot clears), puts `digest.good` into `digest`, so a
     reboot during a deploy starts the last image that was ready. It neither pulls nor migrates:
-    `ExecStart` runs Compose in the foreground for the facilitator only (`--no-deps`), from the
-    image the deploy pulled, with `Restart=on-failure`, and `ExecStop` stops it, which gives it
+    `ExecStart` runs Compose in the foreground for the facilitator and the search model it
+    depends on (ADR 0014), from the image the deploy pulled, with `Restart=on-failure`, and `ExecStop` stops it, which gives it
     its `stop_grace_period`. It wants and runs after `x402-openbao.service`, though it starts
     without OpenBao (ADR 0013).
   - **`x402-tunnel@<environment>.service` owns `cloudflared`.** It decrypts the tunnel token
@@ -740,7 +747,7 @@ One request or one stop must never outlast the layer in front of it:
 ## Rationale
 
 - **The capacity is already paid for.** The server has a lot of free RAM and disk, and our
-  containers are limited to 2.375 GiB today and 3.375 GiB with mainnet's database. Running there
+  containers are limited to 2.625 GiB today and 3.625 GiB with mainnet's database. Running there
   costs about €0 more, against about $60–70 a month on testnet and $150 on mainnet for ECS
   Fargate.
 - **It meets both hard rules.** Compose stops the old container first, and the grace period has no

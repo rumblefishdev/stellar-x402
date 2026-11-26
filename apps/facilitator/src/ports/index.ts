@@ -21,8 +21,9 @@ export type {
   CatalogStore,
   UpsertOutcome,
 } from "./catalog-store.js";
+export type { Embedder } from "./embedder.js";
 export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
-export type { CardListing, SearchCardStore } from "./search-card-store.js";
+export type { CardListing, SearchCard, SearchCardStore } from "./search-card-store.js";
 export {
   FINAL_SETTLEMENT_STATES,
   HashConflictError,
@@ -60,6 +61,7 @@ export interface Stores {
   settlements: SettlementStore;
   catalog: CatalogStore;
   catalogAttempts: CatalogAttemptStore;
+  /** One table: the card rewrite writes its fields, the vectors its vector. */
   searchCards: SearchCardStore;
   rateLimits: RateLimitStore;
   spend: SpendStore;

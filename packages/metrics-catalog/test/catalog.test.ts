@@ -247,6 +247,9 @@ describe("CATALOG", () => {
       "http_requests_total",
       "store_prune_failures_total",
       "search_card_failures_total",
+      "search_vector_failures_total",
+      "search_words_only_total",
+      "search_slow_total",
       "catalog_internal_errors_total",
       "catalog_attempts_total",
       "catalog_upsert_failures_total",
@@ -267,6 +270,7 @@ describe("CATALOG", () => {
       rpc_stalled_seconds: [g, "Seconds", net],
       balance_reading_age_seconds: [g, "Seconds", net],
       channel_longest_hold_seconds: [g, "Seconds", net],
+      search_model_up: [g, "None", proc],
       openbao_up: [g, "None", proc],
       wal_failing: [g, "None", proc],
       wal_last_archived_age_seconds: [g, "Seconds", proc],
@@ -337,6 +341,9 @@ describe("scope-split name types", () => {
       | "http_requests_total"
       | "store_prune_failures_total"
       | "search_card_failures_total"
+      | "search_vector_failures_total"
+      | "search_words_only_total"
+      | "search_slow_total"
       | "catalog_internal_errors_total"
       | "catalog_attempts_total"
       | "catalog_upsert_failures_total"
@@ -355,7 +362,7 @@ describe("scope-split name types", () => {
       | "balance_reading_age_seconds"
       | "channel_longest_hold_seconds"
     >();
-    expectTypeOf<ProcessGaugeName>().toBeNever();
+    expectTypeOf<ProcessGaugeName>().toEqualTypeOf<"search_model_up">();
     expectTypeOf<NetworkCounterName>().toEqualTypeOf<Exclude<CounterName, ProcessCounterName>>();
     expectTypeOf<"settlement_outcomes_total">().toExtend<NetworkCounterName>();
     expectTypeOf<"http_requests_total">().not.toExtend<NetworkCounterName>();

@@ -127,6 +127,9 @@ function isPostgresUrl(value: string): boolean {
 /** Holds a password, so it is never logged and no message echoes it. */
 const databaseUrl = z.string().refine(isPostgresUrl, "must be a postgres:// URL");
 
+/** The search model container's URL (ADR 0014). */
+const searchModelUrl = z.string().refine(isHttpUrl, "must be an http(s) URL without credentials");
+
 const envSchema = z
   .object({
     NETWORK: oneOf([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]).default(
@@ -315,6 +318,11 @@ const envSchema = z
     CATALOG_LIST_LOCAL: oneOf(["true", "false"])
       .default("false")
       .transform((value) => value === "true"),
+    /**
+     * The search model container (ADR 0014), on the environment's internal network. Required, so
+     * an environment that forgot it stops at start instead of searching by words alone.
+     */
+    SEARCH_MODEL_URL: searchModelUrl,
 
     /** The breakers are fixed in code now (0024, `BREAKERS` in `spend/policy.ts`); refused, like `STORE`. */
     BREAKER_FAILURES: z.string().optional(),
@@ -439,6 +447,12 @@ export type Env = z.input<typeof envSchema>;
 /** `SETTLE_TIMEOUT_MS` when unset, unless `SETTLE_BUDGET_MS` is shorter. */
 const DEFAULT_SETTLE_TIMEOUT_MS = 20_000;
 
+/**
+ * How long a search waits for the query's vector before it ranks by words alone (ADR 0014). An
+ * interim value: a measurement of the model on the server sets it.
+ */
+const SEARCH_MODEL_TIMEOUT_MS = 2_000;
+
 /** Parsed environment, grouped for the parts that consume it. */
 export interface Config {
   network: (typeof STELLAR_NETWORKS)[keyof typeof STELLAR_NETWORKS];
@@ -494,6 +508,8 @@ export interface Config {
     balanceIntervalMs: number;
   };
   catalog: { listLocal: boolean };
+  /** The search model container (ADR 0014). */
+  searchModel: { url: string; timeoutMs: number };
 }
 
 /** Names every invalid setting; never echoes a value, so a secret can't leak into logs. */
@@ -632,6 +648,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       balanceIntervalMs: e.SPEND_BALANCE_INTERVAL_MS,
     },
     catalog: { listLocal: e.CATALOG_LIST_LOCAL },
+    searchModel: { url: e.SEARCH_MODEL_URL, timeoutMs: SEARCH_MODEL_TIMEOUT_MS },
   };
 }
 

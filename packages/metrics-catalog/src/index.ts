@@ -335,6 +335,45 @@ export const CATALOG = [
     scope: "process",
     sets: PLAIN,
   },
+  // A card's vector the search model failed to give (0120): the same shared table.
+  {
+    namespace: FAC,
+    name: "search_vector_failures_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+  },
+  // 1 while the search model answers its health check, checked every 30 s whether anyone searches
+  // (0120); the model serves every network.
+  {
+    namespace: FAC,
+    name: "search_model_up",
+    kind: "gauge",
+    unit: "None",
+    scope: "process",
+    sets: PLAIN,
+  },
+  // A fused search slower than 1 s (0120): the exact scan grows with the catalog, so this comes
+  // before the 2 s statement timeout turns searches into 500s.
+  {
+    namespace: FAC,
+    name: "search_slow_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+  },
+  // A search answered by words alone because the model couldn't be used (0120); the route serves
+  // every network.
+  {
+    namespace: FAC,
+    name: "search_words_only_total",
+    kind: "counter",
+    unit: "Count",
+    scope: "process",
+    sets: PLAIN,
+  },
   {
     namespace: FAC,
     name: "catalog_internal_errors_total",

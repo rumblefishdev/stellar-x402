@@ -37,6 +37,7 @@ import { Agent, fetch } from "undici";
 import { newApiKey } from "@stellar-x402/api-keys";
 import { keysMain, main } from "../../src/main.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
+import { startSearchModel } from "../search-model.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -87,9 +88,11 @@ if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.statu
 
 // The fake OpenBao holds this run's key: a testnet account funded for the run.
 const openbao = await fakeOpenBao(facilitator);
+const searchModel = await startSearchModel();
 const facilitatorServer = await main(
   {
     ...signerEnv(facilitator.publicKey(), openbao.socketPath),
+    SEARCH_MODEL_URL: searchModel.url,
     ...env,
     CLIENT_IP: "socket",
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
@@ -266,4 +269,5 @@ try {
   await keys("revoke", name).catch(() => {});
   await facilitatorServer.close();
   openbao.close();
+  await searchModel.stop();
 }

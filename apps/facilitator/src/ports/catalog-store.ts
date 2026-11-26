@@ -58,9 +58,14 @@ export interface CatalogSearch {
   limit: number;
   /** The last result of the page before; this page starts after it. */
   after?: CatalogSearchPosition;
+  /** The query's vector, of the store's model; without it, search ranks by words alone. */
+  meaning?: number[];
 }
 
-/** Where a result sits: its rank by words, as PostgreSQL writes it, and its key for ties. */
+/**
+ * Where a result sits: its rank (by words, or the fused score), as PostgreSQL writes it, and its
+ * key for ties.
+ */
 export interface CatalogSearchPosition {
   rank: string;
   key: CatalogKey;
@@ -75,6 +80,8 @@ export type UpsertOutcome = "inserted" | "updated" | "stale";
 
 /** Bazaar catalog (AD-7, AD-19, AD-20). */
 export interface CatalogStore {
+  /** The model the cards' vectors and the query's are of (ADR 0014); a cursor names it. */
+  readonly searchModel: string;
   /** The stored entry of `key`, as `list` returns it. */
   get(key: CatalogKey): Promise<DiscoveryResource | undefined>;
   /**
@@ -90,12 +97,19 @@ export interface CatalogStore {
    */
   list(query: CatalogQuery): Promise<CatalogPage>;
   /**
-   * Entries that hold a word of `text`, ranked by words (ADR 0014): a word in the name counts
-   * most, then tags, description and parameters, and each repeat counts again (threat model,
-   * "Ranking by repeated words"). Equal ranks go by key, so a page that starts `after` a result
-   * goes on exactly where the page before stopped.
+   * With `meaning`, entries whose vector of that model is close to it (cosine similarity 0.60 or
+   * more), ranked by meaning and by words fused (ADR 0014); words never add an entry. Without it,
+   * entries that hold a word of `text`, ranked by words: a word in the name counts most, then
+   * tags, description and parameters, and each repeat counts again (threat model, "Ranking by
+   * repeated words"). Equal ranks go by key, so a page that starts `after` a result goes on
+   * where the page before stopped, unless a write between the pages moved the ranks.
    */
   search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
+  /**
+   * Whether a listing that passes `query`'s filters has no vector of the store's model yet, or no
+   * card at all (ADR 0014): search by meaning can't find it, so an answer by meaning is partial.
+   */
+  waitingForVector(query: CatalogSearch): Promise<boolean>;
 }
 
 /** Where a listing attempt ended: the payment's copy, or the check of the seller's 402. */
