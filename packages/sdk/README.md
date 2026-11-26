@@ -8,8 +8,8 @@ Part 1 of the TypeScript SDK (task 0102). Its entry points come one per pull req
 
 | Entry point | For      | What it holds                                                     | State    |
 | ----------- | -------- | ----------------------------------------------------------------- | -------- |
-| `/buyer`    | a buyer  | `createPayingFetch`: pays a seller's 402 within limits you set    | this one |
-| `/seller`   | a seller | the facilitator's config, the catalog's answer, a trustline check | to come  |
+| `/buyer`    | a buyer  | `createPayingFetch`: pays a seller's 402 within limits you set    | done     |
+| `/seller`   | a seller | the facilitator's config, the catalog's answer, a trustline check | this one |
 | `/bazaar`   | an agent | a client to list and search the Bazaar                            | to come  |
 
 Not on npm before part 2 (task 0163). From this repository it is `@stellar-x402/sdk` in the
@@ -117,3 +117,56 @@ A failure of the underlying `fetch` before any payment was sent is thrown as it 
 
 A request's `signal` is honored before the payment leaves: a payment signed after it aborted is not
 sent, its amount goes back, and the signal's reason is thrown.
+
+## Sell a resource
+
+`/seller` holds three small things around upstream's own server (`@x402/express`,
+`x402ResourceServer`); [`examples/http-api`](../../examples/http-api) uses all three.
+
+```ts
+import {
+  checkTrustline,
+  createFacilitatorConfig,
+  readCatalogAnswer,
+} from "@stellar-x402/sdk/seller";
+import { HTTPFacilitatorClient } from "@x402/core/server";
+import { x402ResourceServer } from "@x402/express";
+import { USDC_TESTNET_ADDRESS } from "@x402/stellar";
+
+const payTo = process.env.SELLER_ADDRESS!;
+const trustline = await checkTrustline({
+  account: payTo,
+  asset: USDC_TESTNET_ADDRESS,
+  network: "stellar:testnet",
+});
+if (trustline.status === "missing")
+  throw new Error(`payTo can't receive USDC: ${trustline.reason}`);
+
+const facilitator = new HTTPFacilitatorClient(
+  createFacilitatorConfig({ apiKey: process.env.X402_API_KEY }),
+);
+const resourceServer = new x402ResourceServer(facilitator);
+resourceServer.onAfterSettle(async ({ result }) => {
+  const answer = readCatalogAnswer(result);
+  if (answer.status === "rejected") console.warn(`not listed in the Bazaar: ${answer.reason}`);
+});
+```
+
+- **`createFacilitatorConfig({ apiKey?, url?, timeoutMs? })`** returns upstream's
+  `FacilitatorConfig` for this project's facilitator (`FACILITATOR_URL`,
+  `https://x402-facilitator.sorobanscan.com`, both networks). The key, from the portal, goes as
+  `Authorization: Bearer` on `/verify` and `/settle` only; pubnet requires one, testnet none. The
+  library reads no environment variable, and doesn't know the network, so a missing key on pubnet
+  shows at the first payment, as a 401.
+- **`readCatalogAnswer(result)`** reads the facilitator's answer about the route's Bazaar listing
+  from a settlement: `processing` (taken for cataloging), `rejected` with its `reason`, or `none`.
+  Whether the route was then cataloged isn't sent back: cataloging runs after the settlement's
+  answer.
+- **`checkTrustline({ account, asset, network, rpcUrl?, timeoutMs? })`** says, without signing,
+  whether an account can receive an asset: `ok`, `missing` (no trustline, one not authorized, or
+  no account) or `unknown` (a contract account, a token that is not a Stellar Asset Contract or
+  not on the RPC's network, or no answer from the RPC within `timeoutMs`, 10 s per request by
+  default), with `reason` and the asset as `changeTrust` takes it (`classicAsset`). Nothing the RPC
+  does makes it throw, so you decide whether to stop; a `timeoutMs` that is not a whole number
+  above zero is a `TypeError`. Testnet has a default RPC; pubnet needs `rpcUrl`.
+  `/buyer` exports it too, for a buyer's setup.

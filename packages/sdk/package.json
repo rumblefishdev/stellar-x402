@@ -9,6 +9,10 @@
     "./buyer": {
       "types": "./dist/buyer/index.d.ts",
       "default": "./dist/buyer/index.js"
+    },
+    "./seller": {
+      "types": "./dist/seller/index.d.ts",
+      "default": "./dist/seller/index.js"
     }
   },
   "files": [
@@ -20,12 +24,14 @@
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist .turbo"
   },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^16.4.1"
+  },
   "peerDependencies": {
     "@x402/core": "~2.31.0",
     "@x402/stellar": "~2.31.0"
   },
   "devDependencies": {
-    "@stellar/stellar-sdk": "^16.4.1",
     "@x402/core": "~2.31.0",
     "@x402/stellar": "~2.31.0"
   }

@@ -5,27 +5,36 @@ const SELLER_ADDRESS = "GAS7JQRKLXPO5L7OFYDEILAM6AZGPHFJKQ2UJV7TAT5BNXPCXX54L5IF
 
 describe("loadConfig", () => {
   it("fills the defaults", () => {
-    expect(loadConfig({ SELLER_ADDRESS })).toEqual({
-      payTo: SELLER_ADDRESS,
-      facilitatorUrl: "https://www.x402.org/facilitator",
-      port: 4021,
-    });
+    // No facilitator URL: the SDK's default, this project's facilitator.
+    expect(loadConfig({ SELLER_ADDRESS })).toEqual({ payTo: SELLER_ADDRESS, port: 4021 });
   });
 
   it("reads every setting", () => {
-    const env = { SELLER_ADDRESS, FACILITATOR_URL: "http://localhost:4022", PORT: "8080" };
+    const env = {
+      SELLER_ADDRESS,
+      FACILITATOR_URL: "http://localhost:4022",
+      X402_API_KEY: "sx4_key",
+      STELLAR_RPC_URL: "http://localhost:8000",
+      PORT: "8080",
+    };
     expect(loadConfig(env)).toEqual({
       payTo: SELLER_ADDRESS,
       facilitatorUrl: "http://localhost:4022",
+      apiKey: "sx4_key",
+      rpcUrl: "http://localhost:8000",
       port: 8080,
     });
   });
 
   it("treats an empty value as unset", () => {
-    expect(loadConfig({ SELLER_ADDRESS, FACILITATOR_URL: "", PORT: "" })).toMatchObject({
-      facilitatorUrl: "https://www.x402.org/facilitator",
-      port: 4021,
-    });
+    const env = {
+      SELLER_ADDRESS,
+      FACILITATOR_URL: "",
+      X402_API_KEY: "",
+      STELLAR_RPC_URL: "",
+      PORT: "",
+    };
+    expect(loadConfig(env)).toEqual({ payTo: SELLER_ADDRESS, port: 4021 });
   });
 
   it("accepts PORT 0, which lets the system pick a free port", () => {
@@ -36,6 +45,7 @@ describe("loadConfig", () => {
     [{}, "SELLER_ADDRESS is required"],
     [{ SELLER_ADDRESS: "GAS7JQRK" }, "SELLER_ADDRESS must be a Stellar account address"],
     [{ SELLER_ADDRESS, FACILITATOR_URL: "x402.org" }, "FACILITATOR_URL must be a URL"],
+    [{ SELLER_ADDRESS, STELLAR_RPC_URL: "rpc" }, "STELLAR_RPC_URL must be a URL"],
     [{ SELLER_ADDRESS, PORT: "abc" }, "PORT must be a port number"],
     [{ SELLER_ADDRESS, PORT: "70000" }, "PORT must be between 0 and 65535"],
   ])("refuses %j", (env, message) => {
