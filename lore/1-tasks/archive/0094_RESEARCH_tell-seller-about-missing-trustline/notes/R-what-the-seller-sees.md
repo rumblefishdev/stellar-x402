@@ -135,6 +135,12 @@ upstream's Express middleware set up as `examples/http-api`'s `createApp`, and t
      seller, two straight; the straight ones carry no `rpc`, answered from the refused record,
      0156). Seller's log: empty.
 
+Run again at 14:23 UTC for 0164, which added a record of what its `readVerifyRefusal` reads in the
+seller's `onAfterVerify` hook, kept apart from the seller's log: the same answers, 8 checks passed,
+and both refusals read as `sellerMustAct` with the account in the message. Its transactions:
+trustline `0fc01c17…0b527`, removed `f92da771…32b8e`, merged `0277ebed…1d474b`, channel setup
+`3f0b6473…e3479`. The results file holds that run; the first one's is in commit 5ab69e45.
+
 The MCP binary itself was not run here: it pays through the SDK above, and its own testnet e2e
 covers the case. E-14d (`payTo` without a trustline) and E-14e (`payTo` that doesn't exist) on
 2026-11-26 12:47 UTC, commit 30995a04 (`apps/mcp-local/e2e/results/testnet-results.json`): code
