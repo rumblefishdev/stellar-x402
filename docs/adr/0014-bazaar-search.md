@@ -227,12 +227,13 @@ The measurements are in
   on Stellar; the testnet catalog's one listing is on `trycloudflare.com`. `workers.dev` holds 580
   of the 1,292 Stellar listings there (44.9%), so a penalty for shared hosting would lower many
   real listings.
-- **A table, because reading payments per search does not scale.** Deriving each payment's
+- **The key is stored, because deriving it per search does not scale.** Deriving each payment's
   listing key from the stored settlements at search time took 36 ms at 155 payments in 30 days,
-  219 ms at 2,539 (pubnet's 30-day volume across all facilitators) and 2.2 s at 25,000; the table
-  answers in 0.9, 6.5 and 7.8 ms (local PostgreSQL, synthetic payments of 4.3 KB). The table ran
-  with an index on all its columns; it ships with its key only, and an index comes when a
-  measurement of the shipped search query needs it.
+  219 ms at 2,539 (pubnet's 30-day volume across all facilitators) and 2.2 s at 25,000. Counting
+  from the stored listing columns on `settlements`, for a page of 20 listings, took 1.4 ms at
+  2,539 and 15 ms at 25,000 without an index, and 0.7 and 1.6 ms with one (local PostgreSQL 18,
+  synthetic payments of 4.3 KB, whose `payment_requirements` of about 260 bytes stays inline). It
+  ships without an index; one comes when a measurement of the shipped search query needs it.
 - **The numbers above** are in
   [R-quality-measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md).
 - **Curation needs a proof, not a judgement.** A list kept by hand would have the operator vouch
