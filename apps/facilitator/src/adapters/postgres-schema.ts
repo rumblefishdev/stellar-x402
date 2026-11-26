@@ -381,17 +381,22 @@ CREATE VIEW account_usage AS
 `,
   },
   {
-    // 0120: each card's vector (ADR 0014) and the model that made it. NULL until the facilitator
-    // writes it, and again whenever a write changes the card's text, so a card holds a vector only
-    // of its current text. pgvector's extension lives in `public`, so every schema sees the
-    // type. The vector is kept in the row (`PLAIN`), as pgvector's README suggests for an exact
-    // scan: a 384-number vector fits a page. Nullable columns without a default change only the
-    // catalog, and the release before never reads them.
+    // 0120: each card's vector (ADR 0014), the model that made it, and the hash of the text it was
+    // made from. The database keeps `text_hash` of the card's current text itself, whatever writes
+    // it (the release before included), so a vector counts only while `embedded_hash` equals it:
+    // no writer has to clear a vector its text change made old. pgvector's extension lives in
+    // `public`, so every schema sees the type. The vector is kept in the row (`PLAIN`), as
+    // pgvector's README suggests for an exact scan: a 384-number vector fits a page. The generated
+    // column rewrites the table once: 1 listing in production (2026-11-23).
     name: "0019_catalog_search_vector",
     sql: `
 CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
 ALTER TABLE catalog_search
+  ADD COLUMN text_hash text GENERATED ALWAYS AS (
+    md5(name || E'\n' || tags || E'\n' || description || E'\n' || parameters)
+  ) STORED,
   ADD COLUMN model text,
+  ADD COLUMN embedded_hash text,
   ADD COLUMN embedding public.vector(384);
 ALTER TABLE catalog_search ALTER COLUMN embedding SET STORAGE PLAIN;
 `,

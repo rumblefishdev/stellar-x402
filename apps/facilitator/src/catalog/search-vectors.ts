@@ -42,9 +42,9 @@ export interface SearchVectors {
  * Each search card's vector (ADR 0014), asked of the search model one listing at a time, so a
  * backlog never takes the CPU queries need. The catalog's write asks for the vector of the listing
  * it wrote; once per start, after the card rewrite, a pass embeds every card without a vector of
- * `model`. A card holds a vector only of its current text: the write that changes its text clears
- * it. A
- * listing the model fails on is logged and counted, and waits for the next start.
+ * `model` of its current text: the database keeps each card's text hash, and a vector counts only
+ * while the hash it was made from equals it. A listing the model fails on is logged and counted,
+ * and waits for the next start.
  */
 export function createSearchVectors(deps: SearchVectorsDeps): SearchVectors {
   const { store, model, embedder, ready, logger, metrics } = deps;

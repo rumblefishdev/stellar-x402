@@ -82,8 +82,10 @@ The measurements are in
     the vectors normalized. The meaning part reads the fields joined,
     cut at 2,000 characters.
   - Vectors, from `pgvector`, on the listing's search card: `embedding`, one vector per listing,
-    with `model`, the model that made it; the write that changes the card's text clears both.
-    Search reads only vectors of the current model.
+    with `model`, the model that made it, and `embedded_hash`, the hash of the text it was made
+    from. The database keeps `text_hash` of the card's current text itself, whatever writes it, so
+    a vector counts only while the two hashes are equal: no writer has to clear an old vector, the
+    release before this one included. Search reads only current vectors of the current model.
   - Search compares the query's vector with every listing's that passes the filters (an exact
     scan, no index).
   - A listing whose cosine similarity to the query is below 0.60 is not a match, so a query
@@ -108,8 +110,8 @@ The measurements are in
     (`docs/scf/milestone-1-license-audit.md`).
   - It holds no database password. The facilitator computes a listing's vector right after the
     catalog writes the listing, and once at each start for every card without one, with no retry
-    loop in between. The write that changes a card's text clears its vector, so a card holds a
-    vector only of its current text. It asks the
+    loop in between. A vector of an older text no longer counts (the hashes above), and the next
+    start's pass embeds the card again. It asks the
     container for each vector without holding a lock, and writes it only `WHERE` the card's fields
     are still the ones it embedded, so a vector never lands on a newer text.
   - The facilitator sends the container one listing at a time, so a backlog never takes the CPU

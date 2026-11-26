@@ -91,14 +91,7 @@ export class PostgresCatalogStore implements CatalogStore {
          RETURNING seq)
        INSERT INTO catalog_search (seq, name, tags, description, parameters)
        SELECT seq, $11, $12, $13, $14 FROM listing
-       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14,
-         -- A changed text clears its vector, which the vector pass or this write's own embeds anew.
-         model = CASE WHEN (catalog_search.name, catalog_search.tags, catalog_search.description,
-                            catalog_search.parameters) IS DISTINCT FROM ($11, $12, $13, $14)
-                      THEN NULL ELSE catalog_search.model END,
-         embedding = CASE WHEN (catalog_search.name, catalog_search.tags, catalog_search.description,
-                                catalog_search.parameters) IS DISTINCT FROM ($11, $12, $13, $14)
-                          THEN NULL ELSE catalog_search.embedding END`,
+       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14`,
       values,
     );
     return updated.rowCount === 1 ? "updated" : "stale";
@@ -194,7 +187,7 @@ export class PostgresCatalogStore implements CatalogStore {
     const { rows } = await this.listPool.query<{ waiting: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM catalog LEFT JOIN catalog_search USING (seq)
-          WHERE model IS DISTINCT FROM $4
+          WHERE (model IS DISTINCT FROM $4 OR embedded_hash IS DISTINCT FROM text_hash)
             AND ($1::text IS NULL OR type = $1)
             AND ($2::text IS NULL OR pay_to = $2)
             AND ($3::text IS NULL OR network = $3)) AS waiting`,
@@ -238,7 +231,7 @@ export class PostgresCatalogStore implements CatalogStore {
                                         GROUP BY term
                                         ORDER BY first
                                         LIMIT 32) terms) q
-                        WHERE model = $6
+                        WHERE model = $6 AND embedded_hash = text_hash
                           AND ($2::text IS NULL OR type = $2)
                           AND ($3::text IS NULL OR pay_to = $3)
                           AND ($4::text IS NULL OR network = $4)) m

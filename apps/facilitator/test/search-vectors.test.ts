@@ -158,7 +158,7 @@ describe("the vector pass at start (0120 F)", () => {
     await list("one", { description: "Weather one" });
     await list("two", { description: "Tides two" });
     await list("three", { description: "Stocks three" });
-    // three: its text changed after its vector was stored, so the write cleared it (ADR 0014).
+    // three: its text changed after its vector was stored, so the vector no longer counts (ADR 0014).
     await setVector(db.pool, key("two"), MODEL, unitVector(0.7));
     await setVector(db.pool, key("three"), MODEL, unitVector(0.9));
     await list("three", { description: "Stocks three, daily" }, 2);
