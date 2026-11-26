@@ -2,7 +2,7 @@
 id: "0102"
 title: "Build the TypeScript SDK helpers the RFP asks for"
 type: FEATURE
-status: active
+status: completed
 owner: akot
 milestone: 2
 related_adr: ["0001"]
@@ -62,6 +62,14 @@ history:
       three: 28 scenarios, 132 rows, none failed. The example seller on the production facilitator
       logged the catalog's answer, resource_not_public for a localhost route. The owner agreed to
       the helper list (reported by akot); both acceptance criteria met.
+  - date: "2026-11-26"
+    status: completed
+    who: akot
+    note: >
+      Closed after #247, #248, #255, #258 and #259 (records in #263). `@stellar-x402/sdk` has
+      `/buyer`, `/seller` and `/bazaar`, five helpers for the three parties the RFP names. SDK 69
+      unit tests, MCP 173, the example 21; testnet e2e 28 scenarios, 132 rows, none failed. The M3
+      half (validateListing, /sqlite, the buyer's core, upto, npm) is 0163.
 ---
 
 # Build the TypeScript SDK helpers the RFP asks for
@@ -128,3 +136,54 @@ is (0132 names none).
 
 - [x] The helper list per party is recorded here, agreed with the owner
 - [x] Every TypeScript SDK helper on that list exists, or the owner has dropped it in writing
+
+## Implementation Notes
+
+- `packages/sdk`: `/buyer` (`createPayingFetch`, `PaymentError`, `memoryBudget`, `checkTrustline`),
+  `/seller` (`createFacilitatorConfig`, `FACILITATOR_URL`, `readCatalogAnswer`, `checkTrustline`)
+  and `/bazaar` (`createBazaarClient`, `CatalogError`). Dependencies: `@stellar/stellar-sdk`,
+  `@x402/extensions` and `zod`; `@x402/core` and `@x402/stellar` are peers. `@x402/fetch` is gone.
+- MCP pays, lists and searches through it; `pay.test.ts`, `discovery.test.ts` and
+  `search.test.ts` pass unchanged.
+- `examples/http-api` defaults to this project's facilitator, takes `X402_API_KEY`, checks
+  `payTo`'s trustline at start and logs the catalog's answer after each settlement.
+
+## Issues Encountered
+
+- **A dead time limit** (#258's review): stellar-sdk 16.4.1's `rpc.Server` takes `timeout` in its
+  types and never reads it (17.3.0 does), so a silent RPC held `checkTrustline`, and the example
+  seller's start, for minutes. Fixed by setting the limit on the server's HTTP client; a race alone
+  answers in time but leaves the request, and a short script, hanging. Tests cover a silent RPC and
+  one that sends headers without a body.
+- **A test that checked another case**: "not a Stellar Asset Contract" was tested with no contract
+  instance at all. It now has a wasm instance, and a missing contract has its own reason.
+- **Stacking**: #255 and #258 both changed the SDK's dependencies, so they conflicted in
+  `packages/sdk/package.json` and `pnpm-lock.yaml`. #258 was rebased onto #255 and #259 onto #258,
+  and they merged in that order.
+
+## Design Decisions
+
+### From Plan
+
+1. The twelve decisions of [R-sdk-helper-survey](notes/R-sdk-helper-survey.md): five helpers over
+   four PRs, `private` in M2, upstream's types and middleware rather than our own, and 0044's first
+   step done in the SDK.
+
+### Emerged
+
+2. **The trustline check's time limit on the HTTP client** (akot, #258 review): as 17.3.0 does with
+   `timeout`. A `timeoutMs` that would be no limit is a `TypeError`.
+3. **No check of the RPC's network** (akot, #258 review): a Stellar Asset Contract's id comes from
+   the network's passphrase, so an asset of the other network reads as "no contract with this
+   address on the RPC's network". Checked against live testnet and pubnet RPCs.
+4. **`unknown` starts the example seller, `missing` stops it** (#258): an RPC that doesn't answer
+   isn't the seller's fault.
+5. **`CatalogError` has its own codes** (#259): MCP maps them to its tool codes, and a 400 on `list`
+   stays `upstream_error`, as before.
+6. **#259's nits left** (akot): no `timeoutMs` check in `createBazaarClient`, `offset` among the
+   refusal's parameter names for search, `list_resources` reading `invalid_request` as
+   `upstream_error`.
+
+## Future Work
+
+- The M3 half: 0163.

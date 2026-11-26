@@ -8,7 +8,7 @@ related_adr: ["0001"]
 related_tasks: ["0102", "0162", "0075", "0041", "0015", "0034", "0140"]
 tags: [sdk, typescript, priority-medium, effort-medium, dev-tools]
 links:
-  - ../active/0102_FEATURE_sdk-helpers-from-the-rfp/notes/R-sdk-helper-survey.md
+  - ../archive/0102_FEATURE_sdk-helpers-from-the-rfp/notes/R-sdk-helper-survey.md
 history:
   - date: "2026-11-25"
     status: backlog
@@ -30,7 +30,7 @@ proposal describes is complete.
 
 - 0102 is part 1, in Tranche #2: five helpers, in a package that stays `private`. This task is
   what 0102 put off, each item waiting for something M2 doesn't have. The reasons are in 0102's
-  [R-sdk-helper-survey](../active/0102_FEATURE_sdk-helpers-from-the-rfp/notes/R-sdk-helper-survey.md),
+  [R-sdk-helper-survey](../archive/0102_FEATURE_sdk-helpers-from-the-rfp/notes/R-sdk-helper-survey.md),
   decisions 3, 4, 7, 10 and 11. The split follows the Rust crate's (0136, 0140).
 - Dropped for good in 0102, not put off: `searchAndPay`, and adding a trustline (`changeTrust`).
 - The example integrations are 0041's; this task gives them what they call.
