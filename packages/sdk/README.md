@@ -164,7 +164,9 @@ resourceServer.onAfterSettle(async ({ result }) => {
   answer.
 - **`checkTrustline({ account, asset, network, rpcUrl?, timeoutMs? })`** says, without signing,
   whether an account can receive an asset: `ok`, `missing` (no trustline, one not authorized, or
-  no account) or `unknown` (a contract account, a token that is not a Stellar Asset Contract, or
-  no answer from the RPC), with `reason` and the asset as `changeTrust` takes it (`classicAsset`).
-  It never throws; you decide whether to stop. Testnet has a default RPC; pubnet needs `rpcUrl`.
+  no account) or `unknown` (a contract account, a token that is not a Stellar Asset Contract or
+  not on the RPC's network, or no answer from the RPC within `timeoutMs`, 10 s per request by
+  default), with `reason` and the asset as `changeTrust` takes it (`classicAsset`). Nothing the RPC
+  does makes it throw, so you decide whether to stop; a `timeoutMs` that is not a whole number
+  above zero is a `TypeError`. Testnet has a default RPC; pubnet needs `rpcUrl`.
   `/buyer` exports it too, for a buyer's setup.

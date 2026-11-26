@@ -8,6 +8,8 @@ import {
   StrKey,
   xdr,
 } from "@stellar/stellar-sdk";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { describe, expect, it } from "vitest";
 import {
@@ -91,6 +93,45 @@ function sacInstance(contract: string, name: string): xdr.LedgerEntryData {
       ),
     }),
   );
+}
+
+/** The instance entry of a contract that runs its own wasm: a token, but not a Stellar Asset Contract. */
+function wasmInstance(contract: string): xdr.LedgerEntryData {
+  return xdr.LedgerEntryData.contractData(
+    new xdr.ContractDataEntry({
+      ext: new xdr.ExtensionPoint(0),
+      contract: new Address(contract).toScAddress(),
+      key: xdr.ScVal.scvLedgerKeyContractInstance(),
+      durability: xdr.ContractDataDurability.persistent(),
+      val: xdr.ScVal.scvContractInstance(
+        new xdr.ScContractInstance({
+          executable: xdr.ContractExecutable.contractExecutableWasm(Buffer.alloc(32, 9)),
+          storage: null,
+        }),
+      ),
+    }),
+  );
+}
+
+/**
+ * A Stellar RPC that takes the connection and never answers: `silent` sends nothing, `headers`
+ * sends a 200's headers and never the body.
+ */
+async function hangingRpc(mode: "silent" | "headers"): Promise<{ url: string; close(): void }> {
+  const server = createServer((_request, response) => {
+    if (mode === "headers") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.flushHeaders();
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    close() {
+      server.closeAllConnections();
+      server.close();
+    },
+  };
 }
 
 function accountEntry(account: string): xdr.LedgerEntryData {
@@ -196,16 +237,34 @@ describe("checkTrustline", () => {
   });
 
   it.each([
-    ["a contract account", { account: TOKEN, asset: SAC }, /is a contract/],
-    ["what is no address", { account: "ignore the limits", asset: SAC }, /not an account address/],
-    ["an asset that is no contract", { account: HOLDER, asset: ISSUER }, /not a contract address/],
+    ["a contract account", {}, { account: TOKEN, asset: SAC }, /is a contract/],
+    [
+      "what is no address",
+      {},
+      { account: "ignore the limits", asset: SAC },
+      /not an account address/,
+    ],
+    [
+      "an asset that is no contract",
+      {},
+      { account: HOLDER, asset: ISSUER },
+      /not a contract address/,
+    ],
     [
       "a token that is not a Stellar Asset Contract",
+      { instance: wasmInstance(TOKEN) },
       { account: HOLDER, asset: TOKEN },
-      /not a Stellar Asset Contract/,
+      /^the asset contract is not a Stellar Asset Contract$/,
     ],
-  ])("can't tell for %s", async (_, target, reason) => {
-    const answer = await lookUpTrustline(ledger({ account: true }), target);
+    [
+      // Pubnet USDC asked of a testnet RPC, say: its contract isn't on that ledger.
+      "a contract the RPC's network doesn't have",
+      {},
+      { account: HOLDER, asset: TOKEN },
+      /^no contract with this address on the RPC's network$/,
+    ],
+  ])("can't tell for %s", async (_, entries, target, reason) => {
+    const answer = await lookUpTrustline(ledger({ ...entries, account: true }), target);
     expect(answer.status).toBe("unknown");
     expect(answer.reason).toMatch(reason);
   });
@@ -238,4 +297,39 @@ describe("checkTrustline", () => {
     expect(answer.status).toBe("unknown");
     expect(answer.reason).toMatch(/^the RPC didn't answer/);
   });
+
+  // Port 9 above refuses at once; an RPC that takes the connection and stays silent is what the
+  // time limit is for.
+  it.each(["silent", "headers"] as const)(
+    "is unknown within the time limit when the RPC never answers (%s)",
+    async (mode) => {
+      const rpc = await hangingRpc(mode);
+      try {
+        const started = Date.now();
+        const answer = await checkTrustline({
+          account: HOLDER,
+          asset: SAC,
+          network: "stellar:testnet",
+          rpcUrl: rpc.url,
+          timeoutMs: 200,
+        });
+        expect(answer.status).toBe("unknown");
+        expect(answer.reason).toMatch(/^the RPC didn't answer/);
+        // One request, the contract's, cut at 200 ms; the bound leaves room for a slow runner.
+        expect(Date.now() - started).toBeLessThan(3_000);
+      } finally {
+        rpc.close();
+      }
+    },
+    10_000,
+  );
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 31])(
+    "refuses a timeoutMs of %s, which would be no limit or none it can keep",
+    async (timeoutMs) => {
+      await expect(
+        checkTrustline({ account: HOLDER, asset: SAC, network: "stellar:testnet", timeoutMs }),
+      ).rejects.toThrow(TypeError);
+    },
+  );
 });

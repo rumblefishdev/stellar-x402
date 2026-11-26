@@ -18,8 +18,8 @@ import { DEFAULT_TESTNET_RPC_URL } from "@x402/stellar";
  * - `missing`: it can't until its owner acts: no trustline, one the issuer hasn't authorized, or
  *   no account at all. `reason` says which.
  * - `unknown`: the check can't tell: the account is a contract (it holds the asset in the asset
- *   contract, without a trustline), the asset contract is not a Stellar Asset Contract, or the RPC
- *   didn't answer. `reason` says which.
+ *   contract, without a trustline), the asset contract is not a Stellar Asset Contract or is not on
+ *   the RPC's network, or the RPC didn't answer in time. `reason` says which.
  */
 export interface TrustlineCheck {
   status: "ok" | "missing" | "unknown";
@@ -38,9 +38,15 @@ export interface TrustlineCheckOptions {
   network: string;
   /** A Stellar RPC for that network. Testnet has a default; pubnet has none, so it is required. */
   rpcUrl?: string;
-  /** Each RPC request's time limit, in milliseconds. */
+  /**
+   * Each RPC request's time limit, in milliseconds: a whole number above zero, 10 s by default. The
+   * check makes at most two requests.
+   */
   timeoutMs?: number;
 }
+
+/** The longest time limit a timer takes, in milliseconds. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /** The ledger reads the check makes; a stand-in for `rpc.Server`'s in tests. */
 export type GetLedgerEntries = (
@@ -52,20 +58,31 @@ const AUTHORIZED = 1;
 
 /**
  * Checks whether `account` can receive `asset`: a seller's `payTo` at start, or a buyer's account
- * before its first payment. It never throws: a failure to read is `unknown`, and the caller
- * decides whether to stop.
+ * before its first payment. Nothing the RPC does makes it throw: a failure to read, or no answer
+ * within `timeoutMs`, is `unknown`, and the caller decides whether to stop. A `timeoutMs` that is
+ * not a whole number above zero is a `TypeError`, before any request.
  */
 export async function checkTrustline(options: TrustlineCheckOptions): Promise<TrustlineCheck> {
   const { network, timeoutMs = 10_000 } = options;
+  // Upstream's HTTP client reads 0 or NaN as no limit at all.
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMEOUT_MS) {
+    throw new TypeError(
+      `timeoutMs must be a whole number of milliseconds from 1 to ${MAX_TIMEOUT_MS}, got ${String(timeoutMs)}`,
+    );
+  }
   const url =
     options.rpcUrl ?? (network === "stellar:testnet" ? DEFAULT_TESTNET_RPC_URL : undefined);
   if (!url) return { status: "unknown", reason: `no RPC URL given for ${network}` };
   let server: rpc.Server;
   try {
-    server = new rpc.Server(url, { allowHttp: url.startsWith("http:"), timeout: timeoutMs });
+    server = new rpc.Server(url, { allowHttp: url.startsWith("http:") });
   } catch (error) {
     return { status: "unknown", reason: `the RPC URL can't be used: ${String(error)}` };
   }
+  // stellar-sdk 16.4.1's constructor ignores a `timeout` option (17.3.0 reads it). The limit goes on
+  // the client the server sends through, so each request is aborted when it passes: a race alone
+  // would answer in time but leave the request, and the process, hanging.
+  server.httpClient.defaults.timeout = timeoutMs;
   return lookUpTrustline((...keys) => server.getLedgerEntries(...keys), options);
 }
 
@@ -88,7 +105,12 @@ export async function lookUpTrustline(
   let classicAsset: string | undefined;
   let entries: { key: xdr.LedgerKey; val: xdr.LedgerEntryData }[];
   try {
-    classicAsset = await stellarAssetName(getLedgerEntries, asset);
+    const contract = await readAssetContract(getLedgerEntries, asset);
+    // Most often an asset of the other network: testnet and pubnet USDC are different contracts.
+    if (!contract.found) {
+      return { status: "unknown", reason: "no contract with this address on the RPC's network" };
+    }
+    classicAsset = contract.name;
     if (classicAsset === undefined) {
       return { status: "unknown", reason: "the asset contract is not a Stellar Asset Contract" };
     }
@@ -156,13 +178,14 @@ function parseClassic(name: string): Asset | undefined {
 }
 
 /**
- * The asset's name (`CODE:ISSUER`, or `native`) when `asset` is a Stellar Asset Contract, read from
- * its instance; `undefined` for any other contract. As the facilitator's own lookup.
+ * The contract's instance as the ledger holds it: `found: false` when there is none, and `name`,
+ * the asset's (`CODE:ISSUER`, or `native`), only for a Stellar Asset Contract. As the facilitator's
+ * own lookup.
  */
-async function stellarAssetName(
+async function readAssetContract(
   getLedgerEntries: GetLedgerEntries,
   asset: string,
-): Promise<string | undefined> {
+): Promise<{ found: false } | { found: true; name: string | undefined }> {
   const { entries } = await getLedgerEntries(
     xdr.LedgerKey.contractData(
       new xdr.LedgerKeyContractData({
@@ -172,12 +195,15 @@ async function stellarAssetName(
       }),
     ),
   );
-  const instance = entries[0]?.val.contractData().val().instance();
-  if (instance?.executable().switch().name !== "contractExecutableStellarAsset") return undefined;
+  if (entries[0] === undefined) return { found: false };
+  const instance = entries[0].val.contractData().val().instance();
+  if (instance.executable().switch().name !== "contractExecutableStellarAsset") {
+    return { found: true, name: undefined };
+  }
   const metadata = (instance.storage() ?? []).find(
     (entry) =>
       entry.key().switch().name === "scvSymbol" && entry.key().sym().toString() === "METADATA",
   );
   const name = metadata ? (scValToNative(metadata.val()) as { name?: unknown }).name : undefined;
-  return typeof name === "string" ? name : undefined;
+  return { found: true, name: typeof name === "string" ? name : undefined };
 }
