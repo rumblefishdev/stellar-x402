@@ -845,8 +845,9 @@ a run the timer starts after a reboot is skipped).
    make rules   # adds x402-snapshot-age to deploy/metrics/rules/x402-production.yml
    ```
 
-   After the merge the rule file goes on the VM, where `snapshot_age_seconds{project="x402"}`
-   must return a series, and the rule is fired once on purpose and recorded in
+   After the merge the rule file goes on the VM, where
+   `snapshot_age_seconds{project="x402"} < 93600` must return a value (the series is there even
+   with no stamp, at the probe's 1e9), and the rule is fired once on purpose and recorded in
    [monitoring.md](monitoring.md#as-prometheus-rules).
 
 ### Changing Borg's passphrase

@@ -60,7 +60,7 @@ On since 2026-11-25 13:43 UTC ([The Prometheus rules](#the-prometheus-rules)). T
 | `x402-rpc-on-fallback`            | `facilitator`       | 2026-11-25, the drill textfile: 14:35:15 to 14:42:00 UTC                                                                                 |
 | `x402-sweeps-stopped`             | `facilitator`       | 2026-11-25, a flat counter in the drill textfile: 14:21:30 to 14:45:45 UTC                                                               |
 | `x402-openbao-down`               | `host`              | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
-| `x402-snapshot-age`               | `snapshots`         | Not yet: 0026 fires it once the rule is on the VM                                                                                        |
+| `x402-snapshot-age`               | `snapshots`         | Not yet: on from #268's merge, fired once after it                                                                                       |
 | `x402-facilitator-silent`         | `facilitator`       | 2026-11-25, the stop window: 14:39:15 to 14:39:45 UTC (10 minutes after the stop)                                                        |
 | `x402-gauge-stale`                | `facilitator`       | 2026-11-25, a stale stamp in the drill textfile while the process ran: 14:46:45 to 14:54:30 UTC                                          |
 | `x402-target-down`                | `server`            | 2026-11-25, the stop window (`job` facilitator): 14:34:15 to 14:39:45 UTC                                                                |

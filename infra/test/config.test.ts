@@ -23,7 +23,7 @@ describe("envs/production.json", () => {
     expect(production().networks).toEqual(["stellar:testnet"]);
   });
 
-  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, disk, memory, log volume, the balance, the protocol, the heartbeat (26, 37, 72, 73; 0139)", () => {
+  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, the snapshots, disk, memory, log volume, the balance, the protocol, the heartbeat (26, 37, 72, 73; 0139; 0026)", () => {
     const on = Object.entries(production().alarmGroups)
       .filter(([, v]) => v)
       .map(([g]) => g);
@@ -32,6 +32,7 @@ describe("envs/production.json", () => {
       "telemetry",
       "facilitator",
       "host",
+      "snapshots",
       "disk",
       "memory",
       "logVolume",
