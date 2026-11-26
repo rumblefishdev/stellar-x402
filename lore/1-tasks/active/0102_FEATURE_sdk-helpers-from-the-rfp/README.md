@@ -51,6 +51,17 @@ history:
       #246, #247 and #248 merged after one review round. PR 2 started: the SDK's paying fetch runs
       x402HTTPClient's calls in order, 0044's first step. pay.test.ts unchanged; testnet e2e on
       ea5ae0e4: 28 scenarios, 132 rows, none failed.
+  - date: "2026-11-26"
+    status: active
+    who: akot
+    note: >
+      PR 2 (#255), PR 3 (#258) and PR 4 (#259) merged, stacked in that order. One review round:
+      #258's trustline check had a time limit stellar-sdk 16.4.1 ignores, so a silent RPC held
+      the example seller's start; fixed in c19c00db, the limit set on the RPC's HTTP client.
+      #259's three nits left as they are (akot). Testnet e2e on 30995a04, #259's head with all
+      three: 28 scenarios, 132 rows, none failed. The example seller on the production facilitator
+      logged the catalog's answer, resource_not_public for a localhost route. The owner agreed to
+      the helper list (reported by akot); both acceptance criteria met.
 ---
 
 # Build the TypeScript SDK helpers the RFP asks for
@@ -77,7 +88,7 @@ the Rust seller crate is 0136 (done) and 0140. The RFP's two examples belong to 
   not in the repo and was not at hand**; the list rests on the RFP, architecture §7 and what
   tasks quote from the response.
 
-## Helper list (akot, 2026-11-25; waiting for the owner)
+## Helper list (akot, 2026-11-25; agreed by the owner, 2026-11-26)
 
 One package, `@stellar-x402/sdk`, with entry points `/seller`, `/buyer` and `/bazaar`, on the
 published `@x402/*` `~2.31.0`. `private` in M2 as every package here, and ready to publish: it
@@ -102,16 +113,18 @@ Started before the owner agreed to the list (akot, 2026-11-25), in this order:
 2. **PR 1** (#248, after #247): the package, and the buyer's round trip moved from `pay.ts` behind
    the SDK's new API (decisions 6 and 7), with MCP on it and `pay.test.ts` as it is. Early, since
    it is on MCP's money path and MCP is in Tranche #2; the testnet e2e runs before and after.
-3. **PR 2** (`lore-0102-drop-fetch-wrapper`): 0044's first step, done here: `x402HTTPClient`'s
-   calls in order instead of `wrapFetchWithPayment`, under the same tests.
-4. **PR 3**: the seller's helpers and the trustline check; `examples/http-api` uses them.
-5. **PR 4**: the Bazaar client, on top of #245 (0137, merged 2026-11-25).
+3. **PR 2** (#255, merged 2026-11-26): 0044's first step, done here: `x402HTTPClient`'s calls in
+   order instead of `wrapFetchWithPayment`, under the same tests.
+4. **PR 3** (#258, on #255, merged 2026-11-26): the seller's helpers and the trustline check;
+   `examples/http-api` uses them.
+5. **PR 4** (#259, on #258, merged 2026-11-26): the Bazaar client, on top of #245 (0137, merged
+   2026-11-25).
 
-To agree with others: bstruzyk the list; karolkow 0044's step moving here and the catalog
-tools moving onto the Bazaar client; okarcz 0092's codes and what D4's evidence is (0132 names
-none).
+To agree with others: bstruzyk the list (agreed, 2026-11-26); karolkow 0044's step moving here
+and the catalog tools moving onto the Bazaar client; okarcz 0092's codes and what D4's evidence
+is (0132 names none).
 
 ## Acceptance Criteria
 
-- [ ] The helper list per party is recorded here, agreed with the owner
-- [ ] Every TypeScript SDK helper on that list exists, or the owner has dropped it in writing
+- [x] The helper list per party is recorded here, agreed with the owner
+- [x] Every TypeScript SDK helper on that list exists, or the owner has dropped it in writing
