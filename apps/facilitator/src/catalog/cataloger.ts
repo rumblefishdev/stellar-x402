@@ -454,17 +454,13 @@ export function createCataloger({
       }
     },
     listingOf(payload, requirements) {
-      try {
-        // The same validation and key as the catalog's entry, so the search's quality score
-        // (ADR 0014) counts the payer under the listing the catalog holds.
-        const result = bazaar.validate(payload, requirements, options);
-        if (!result?.ok) return undefined;
-        const { method, resourceUrl } = bazaar.normalize(result, requirements).key;
-        return { method, resourceUrl };
-      } catch (error) {
-        internalError("listing", { network: requirements.network }, "settle", error);
-        return undefined;
-      }
+      // The same validation and key as the catalog's entry, so the search's quality score
+      // (ADR 0014) counts the payer under the listing the catalog holds. A throw reaches the
+      // settlement module, which logs and counts it as a hook failure.
+      const result = bazaar.validate(payload, requirements, options);
+      if (!result?.ok) return undefined;
+      const { method, resourceUrl } = bazaar.normalize(result, requirements).key;
+      return { method, resourceUrl };
     },
     onSuccess(record, origin) {
       // Never rejects: an unhandled rejection would fail `/settle`'s process.

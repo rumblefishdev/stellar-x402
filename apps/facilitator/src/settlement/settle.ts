@@ -946,7 +946,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
     try {
       listing = deps.hooks.listingOf(payload, requirements);
     } catch (error) {
-      records.hookFailed("listingOf", key, error);
+      hookFailed("listingOf", key, error);
     }
     const settlement = {
       key,

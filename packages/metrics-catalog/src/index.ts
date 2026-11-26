@@ -356,7 +356,6 @@ export const CATALOG = [
         "not_success",
         "no_ledger",
         "header",
-        "listing",
         "other",
       ],
       origin: ["settle", "resolved", "other"],

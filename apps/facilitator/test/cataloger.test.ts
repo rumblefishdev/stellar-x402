@@ -883,7 +883,7 @@ describe("cataloger, the listing of a payment (0154)", () => {
   });
 
   it.each(["validate", "normalize"] as const)(
-    "names no listing and logs catalog_internal_error when %s throws, never throwing itself (0154)",
+    "lets a throw of %s reach the settlement module, which counts it as a hook failure (0154)",
     (step) => {
       const boom = () => {
         throw new Error("boom");
@@ -895,8 +895,10 @@ describe("cataloger, the listing of a payment (0154)", () => {
             : { ...bazaarLib, normalize: boom },
       });
       const paid = record(valid);
-      expect(cataloger.listingOf(paid.paymentPayload, paid.paymentRequirements)).toBeUndefined();
-      expect(events(logger)).toContain("catalog_internal_error");
+      expect(() => cataloger.listingOf(paid.paymentPayload, paid.paymentRequirements)).toThrow(
+        "boom",
+      );
+      expect(events(logger)).not.toContain("catalog_internal_error");
     },
   );
 
