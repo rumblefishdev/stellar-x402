@@ -672,12 +672,14 @@ describe("call_paid_http with the listing the agent chose", () => {
   it("refuses, before signing, a live payTo other than the listing's", async () => {
     const result = await payWith(listing({ payTo: OTHER }));
     expect(result.error.code).toBe("payto_changed");
+    expect(result.error.message).toContain("do not call again without this one");
     expect(seller.payments).toHaveLength(0);
   });
 
   it("refuses an asset the listing does not offer", async () => {
     const result = await payWith(listing({ asset: "CBOTHERASSET" }));
     expect(result.error.code).toBe("terms_changed");
+    expect(result.error.message).toContain("do not call again without this one");
     expect(seller.payments).toHaveLength(0);
   });
 
@@ -740,6 +742,15 @@ describe("call_paid_http with the listing the agent chose", () => {
     ["no input", { input: undefined }],
   ])("refuses a listing for %s without calling the seller", async (_, change) => {
     const result = await payWith({ ...listing(), ...change });
+    expect(result.error.code).toBe("invalid_input");
+    expect(seller.bodies).toHaveLength(0);
+  });
+
+  it.each([
+    ["/forecast", "/forecast/premium"],
+    ["/:", "/a/b"],
+  ])("refuses a listing for %s called on the longer %s", async (listed, path) => {
+    const result = await payWith({ ...listing(), resource: `${seller.url}${listed}` }, path);
     expect(result.error.code).toBe("invalid_input");
     expect(seller.bodies).toHaveLength(0);
   });

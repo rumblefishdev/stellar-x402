@@ -251,8 +251,8 @@ settlement.
   for its network (`payto_changed`), a higher price for the same scheme, network and asset
   (`price_raised`), or terms the listing doesn't offer (`terms_changed`). A call without a listing
   is not held to the catalog, only to the buyer's limits, and says so (`listingCheck: "none"`): it
-  found no listed price to be lured by. The listing comes from the agent, so this holds the seller to
-  what the agent saw, not the agent to the catalog. Proof of the account is not required
+  the agent saw no listed price, so nothing lured it. The listing comes from the agent, so this
+  holds the seller to what the agent saw, not the agent to the catalog. Proof of the account is not required
   for a listing: none of the 10 Stellar accounts in the largest public catalog could show one through
   `stellar.toml` (SEP-1) on 2026-10-29, so it would empty the Stellar catalog.
 - A listing keeps the path values the seller's 402 carries (`info.input.pathParams`). 173 of 198

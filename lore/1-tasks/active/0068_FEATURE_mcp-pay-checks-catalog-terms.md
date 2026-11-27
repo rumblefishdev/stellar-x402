@@ -97,7 +97,11 @@ can't lure an agent into paying a price it never saw.
    wildcard; `:x` in a concrete path matches itself.
 4. **The check is in the SDK** (`BuyerConfig.quoted`), first in the offer policy, so it runs before
    the budget is counted and before signing. A seller offer is kept only with a quoted payTo for its
-   network and the same scheme, network, asset at most at the quoted amount.
+   network and the same scheme, network, asset at most at the quoted amount. Only the scheme,
+   network, asset, `payTo` and amount are compared: the SDK caps `maxTimeoutSeconds` at 300 s, and
+   the exact Stellar client refuses `extra.areFeesSponsored: false` on its own. An empty `quoted`
+   refuses every offer: documented rather than thrown, since refusing all is the safe reading and
+   MCP can't reach it (a listing has at least one offer).
 5. **A third code, `terms_changed`**, for an offer whose scheme, network or asset the listing
    doesn't have. When offers fail for different reasons the code is the first of `payto_changed`,
    `price_raised`, `terms_changed`. It is only seen for offers the buyer's schemes can pay: upstream's

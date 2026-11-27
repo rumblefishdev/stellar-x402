@@ -63,7 +63,9 @@ Checked before anything is signed, in this order; the first that leaves no offer
    `schemes` can pay, in a payment flow upstream knows, are checked: upstream drops the others
    first, so a seller that now offers only another network or scheme, or only an unknown
    `extra.paymentFlow`, is `unsupported_payment`, not `terms_changed`. A `price_raised` message
-   names the asked and the quoted amount.
+   names the asked and the quoted amount. Only the scheme, network, asset, `payTo` and amount are
+   compared: the SDK caps `maxTimeoutSeconds` at 300 s, and the exact Stellar client refuses
+   `extra.areFeesSponsored: false` on its own. An empty `quoted` refuses every offer.
 2. The asset is one of `assets` (`asset_not_allowed`).
 3. The price is a whole number of atomic units above zero, and the seller wants the payment valid
    for at most 300 s (`unsupported_payment`).

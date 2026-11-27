@@ -34,12 +34,13 @@ without a listing.
 A listing for another URL, another HTTP method or another network than testnet, not an HTTP
 resource, or without its `type` or `input.method` is refused as `invalid_input` without calling the
 seller, and so is any listing for a called URL the catalog could not list (a path over its length
-limit, a user name, an empty path segment or a host ending in a dot). The URL is compared as the catalog keys it, the query and fragment dropped first, and a
-segment that is exactly `:` (a route template's parameter) takes any one segment. A call without a
-listing pays as before, within the limits only. The result's `listingCheck` says which it was:
-`passed` (the listing was for this call, and a payment, if the seller asked for one, was held to
-it) or `none`. After one of the three refusals, the message tells the agent to choose another
-listing, not to call again without it: that call would pay the very terms it was refused.
+limit, a user name, an empty path segment or a host ending in a dot). The URL is compared as the
+catalog keys it, the query and fragment dropped first, and a segment that is exactly `:` (a route
+template's parameter) takes any one segment. A call without a listing pays as before, within the
+limits only. The result's `listingCheck` says which it was: `passed` (the listing was for this call,
+and a payment, if the seller asked for one, was held to it) or `none`. After one of the three
+refusals, the message tells the agent to choose another listing, not to call again without it: that
+call would pay the very terms it was refused.
 
 To try it locally, run the example seller in [`examples/http-api`](../../examples/http-api)
 (`http://localhost:4021/weather?city=Warsaw`, 0.001 testnet USDC) and start this server with

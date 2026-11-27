@@ -32,8 +32,8 @@ export interface BuyerConfig {
   /**
    * The terms the caller saw before calling, such as a catalog listing's `accepts`. With them, a
    * seller's offer is paid only when it names a quoted `payTo` for its network and asks at most the
-   * quoted amount for the same scheme, network and asset; a lower price passes. Without them, any
-   * offer within the limits is paid.
+   * quoted amount for the same scheme, network and asset; a lower price passes. An empty list
+   * refuses every offer. Without them, any offer within the limits is paid.
    */
   quoted?: readonly QuotedOffer[];
 }
@@ -232,9 +232,10 @@ export function startCall(config: BuyerConfig): PaymentCall {
     }
   };
 
-  // Of the seller's offers, keep those in an allowed asset, at a price above zero, with a short
-  // enough authorization and within the per-call limit; the library pays the first one left, and
-  // the daily budget is counted when it is chosen.
+  // With quoted terms, first keep only the seller's offers they allow, refusing with payto_changed,
+  // price_raised or terms_changed when none is left. Of those, keep the ones in an allowed asset,
+  // at a price above zero, with a short enough authorization and within the per-call limit; the
+  // library pays the first one left, and the daily budget is counted when it is chosen.
   client.registerPolicy((_version, sellerOffers) => {
     let offers = sellerOffers;
     if (config.quoted) {
