@@ -375,6 +375,21 @@ history:
       night succeeded (openbao-2026-11-26T03:26:05Z, 32281 bytes) and the stamp's 11:03 is a run
       by hand during 0048's drill (35353 bytes, after the new Transit key version); 3 archives so
       far. The snapshots half of the decision-71 criterion is done; backups waits on pgBackRest.
+  - date: "2026-11-27"
+    status: active
+    who: okarcz
+    note: >
+      The upstream alarm group on (0029 decision 23). check-series passed at 08:13 UTC on the
+      08:00 run's first upstream_files_changed point (0) and again at 09:05. Stan agreed in
+      Slack before the merge: 0138's idea of folding both into one watch-findings alarm was
+      never built. #273 set "upstream": true and pinned the group and both alarm names in the
+      tests; the alarms stay in CloudWatch after 0139, since their series is in x402-watch.
+      okarcz deployed the Alarms stack with the soroban-admin profile at 09:08:49 (21 alarms
+      now) and fired each with make fire-test ALARM=…: upstream-changed ALARM 09:14:57, OK
+      09:16:10; upstream-silent ALARM 09:18:02, OK 09:39:03 (evaluated less often); all
+      seen in #stellar-x402-bot. Recorded in monitoring.md, Drills "2026-11-27: the upstream
+      alarms". Left: the backups half of decision 71 (pgBackRest) and the gate rerun after
+      the 2026-12-16 testnet reset.
 ---
 
 # Public testnet deployment
@@ -690,5 +705,6 @@ CloudWatch change, as backlog task 0118.
 - [x] Given the deployed facilitator, when it settles, then it signs through OpenBao Transit over the unix socket, no secret seed is on the server outside OpenBao, the backup secret exists in AWS, and a restore drill from it has passed (2026-11-05: signing over the socket, no seed in the server's files, and the backup secret since 2026-11-02 are shown; 2026-11-25: the restore drill passed, runbook "The restore drill", see history)
 - [x] Given OpenBao's audit log on the server, when `logrotate` runs, then the file is renamed, OpenBao writes to a new `audit.log` and still signs, and old files past a year are removed (runbook, OpenBao) (2026-11-06: rotated at 00:00:15 UTC; OpenBao made the new `audit.log` on the SIGHUP (`nocreate`); after a facilitator restart at 08:16:02 its first entry is 08:16:16, the signer check's AppRole login and `transit/sign`, logged `signer_checked` at 08:16:16.279, and `/health` `signer: ok`; removal past a year rests on `rotate 365` and `maxage 365`)
 - [ ] Given pgBackRest archiving WAL with a first backup made, and OpenBao's daily snapshot run once, when each is true, then `make check-series` passes for its alarm group (`backups`: `wal-failing`, `wal-stale`, `backup-age`; `snapshots`: `snapshot-age`), the group is turned on and deployed, each alarm has fired once on purpose, and `docs/monitoring.md` says how and when (moved from 0027, its decision 71)
-- [ ] Given the next production deploy, when it deploys the Watch stack with the upstream and library sections (#149, #191) and a 08:00 UTC run has published, then `make check-series GROUP=upstream` passes in the 3 hours after it, `"upstream": true` goes in `infra/envs/production.json`, the Alarms stack is deployed, `make fire-test` runs, and `docs/monitoring.md` moves `upstream-changed` and `upstream-library-behind` out of the alarms that are off (moved from 0029, its decision 23)
+- [x] Given the next production deploy, when it deploys the Watch stack with the upstream section (#149) and a 08:00 UTC run has published, then `make check-series GROUP=upstream` passes in the 3 hours after it, `"upstream": true` goes in `infra/envs/production.json`, the Alarms stack is deployed, `make fire-test` runs, and `docs/monitoring.md` moves `upstream-changed` and `upstream-silent` out of the alarms that are off (moved from 0029, its decision 23) (2026-11-27: check-series passed at 08:13 and 09:05 UTC on the 08:00 run's first point, value 0; "upstream": true by #273; the Alarms stack deployed both alarms at 09:08:49; `make fire-test` on each: `upstream-changed` ALARM 09:14:57, OK 09:16:10, `upstream-silent` ALARM 09:18:02, OK 09:39:03, all seen in Slack; monitoring.md moved both to the on-table, Drills "2026-11-27: the upstream alarms")
+- [ ] Given #191 merged, when the Watch and Alarms stacks are deployed with the library section, then `make check-series GROUP=upstream` passes for `upstream_library_behind` after a 08:00 UTC run, `make fire-test` fires `upstream-library-behind` once, `upstream-silent` is gone from the account, and `docs/monitoring.md` records both (0147)
 - [ ] Given the testnet reset of 2026-12-16 (developers.stellar.org, Networks), when the facilitator settles again on the new network, then the conformance gate reruns against it, its results are committed, and `conformance/REPORT.md`'s settlements are refreshed: the reset removes the run's transactions from the network (moved from 0029)

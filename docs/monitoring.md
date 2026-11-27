@@ -38,7 +38,7 @@ Since 0139's switch (2026-11-25 13:43 UTC) most checks are Prometheus rules on t
 | `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                                                                                          |
 | `protocol-changed`        | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                                                                            |
 | `protocol-upgrade-coming` | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                                                                          |
-| `upstream-changed`        | `upstream`  | Not yet: 0026        | Not yet: 0026 fires it after the Alarms deploy                                                                                                                                            |
+| `upstream-changed`        | `upstream`  | 2026-11-27 09:08 UTC | 2026-11-27, `make fire-test` ([Drills](#2026-11-27-the-upstream-alarms)): ALARM 09:14:57, OK 09:16:10 UTC, both seen in Slack                                                             |
 | `upstream-library-behind` | `upstream`  | Not yet: 0026        | Not yet: 0026 fires it after the Alarms deploy                                                                                                                                            |
 | `audit-disk`              | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                                                                           |
 | `telemetry-silent`        | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                                                                          |
@@ -1291,3 +1291,22 @@ VM's `ALERTS{alertstate="firing"}`, UTC.
   `agent-certificate` (the on-table says why).
 - **In the metrics' history:** every series with `drill="1"` between 14:20 and 14:55 on
   2026-11-25 is the drill's, and the facilitator's and the agent's gaps are the windows above.
+
+### 2026-11-27: the upstream alarms
+
+- **Before:** `make check-series GROUP=upstream` passed at 08:13 and again at 09:05, after the
+  08:00 run's first point (`upstream_files_changed` 0, one sample). With 0, `upstream-changed`
+  can't fire on its first evaluation, and with a point today `upstream-silent` can't either.
+  The Alarms stack deployed both at 09:08:49 (`soroban-admin` SSO profile); `upstream-changed`
+  read OK at 09:09:18 and `upstream-silent` at 09:15:52.
+- **How:** `make fire-test ALARM=x402-production-upstream-changed`, then
+  `ALARM=x402-production-upstream-silent`: set-alarm-state, not a fake point. A fake point can't
+  fire `upstream-silent`, since a point is what keeps it OK, and a fake 1 for `upstream-changed`
+  would stay in its one-day window and keep it in ALARM until the window passes.
+- **What happened:** `upstream-changed` ALARM at 09:14:57 and OK at 09:16:10; `upstream-silent`
+  ALARM at 09:18:02 and OK at 09:39:03, 21 minutes later: CloudWatch evaluates the two-day alarm
+  less often, so wait for it. Each change was delivered by SNS and seen in `#stellar-x402-bot`.
+- **What it shows:** both alarms' path to Slack and their return to OK on the real point. The
+  OK message names the period as 09:00 to 09:00 UTC, not midnight, so the 08:00 run's point
+  falls in the period that ends at 09:00 the same day.
+- **In the metric's history:** nothing: no point was written by hand.
