@@ -14,3 +14,5 @@ injectWorkspacePackages: true
 
 allowBuilds:
   esbuild: true
+  # Its install script only fetches the CUDA providers; the CPU runtime ships in the package.
+  onnxruntime-node: false

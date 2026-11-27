@@ -21,7 +21,7 @@ describe("the Watch stack", () => {
     expect(JSON.parse(env["WATCH_TARGETS"]!)).toEqual([
       {
         network: "stellar:testnet",
-        feeAccount: "GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP",
+        feeAccount: "GDV2PC2U7QGHWHOFNA34XRGIINFTZDPMJSJOTVNQ72UIBL6IY2KESBWP",
         rpcUrl: "https://soroban-testnet.stellar.org",
       },
     ]);

@@ -23,7 +23,7 @@ describe("envs/production.json", () => {
     expect(production().networks).toEqual(["stellar:testnet"]);
   });
 
-  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, disk, memory, log volume, the balance, the protocol (26, 37, 72, 73)", () => {
+  test("has on only the groups whose series have data: EMF errors, uptime, the facilitator, the host, the snapshots, disk, memory, log volume, the balance, the protocol, upstream, the heartbeat (26, 37, 72, 73; 0139; 0029, 23; 0026)", () => {
     const on = Object.entries(production().alarmGroups)
       .filter(([, v]) => v)
       .map(([g]) => g);
@@ -32,11 +32,14 @@ describe("envs/production.json", () => {
       "telemetry",
       "facilitator",
       "host",
+      "snapshots",
       "disk",
       "memory",
       "logVolume",
       "watch",
       "protocol",
+      "upstream",
+      "heartbeat",
     ]);
   });
 
@@ -54,7 +57,7 @@ describe("envs/production.json", () => {
 
   test("names the fee account /supported shows as the signer", () => {
     expect(production().feeAccounts).toEqual({
-      "stellar:testnet": "GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP",
+      "stellar:testnet": "GDV2PC2U7QGHWHOFNA34XRGIINFTZDPMJSJOTVNQ72UIBL6IY2KESBWP",
     });
   });
 
@@ -64,15 +67,16 @@ describe("envs/production.json", () => {
     });
   });
 
-  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-09 (decision 70)", () => {
+  test("reads the protocol of testnet and mainnet, at the versions of 2026-11-25 (decision 70)", () => {
     expect(production().watch.protocol).toEqual({
       "stellar:testnet": {
         horizonUrl: "https://horizon-testnet.stellar.org",
         expected: 30,
         supported: 30,
       },
-      // Mainnet runs 29 and its Core supports 30, which testnet runs and 0111's SDK reads.
-      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 29, supported: 30 },
+      // Mainnet moved to 30 on 2026-11-23 (protocol-changed fired at 17:11 UTC): the version testnet
+      // runs and 0111's SDK reads.
+      "stellar:pubnet": { horizonUrl: "https://horizon.stellar.org", expected: 30, supported: 30 },
     });
   });
 
@@ -97,6 +101,16 @@ describe("validateConfig", () => {
       "a session past Roles Anywhere's 12 h",
       (c) => (m(c).logging.sessionHours = 13),
       /sessionHours/,
+    ],
+    [
+      "a bad monitoring VM CN",
+      (c) => (m(c).monitoringVm.certificateCn = "X402 VM"),
+      /monitoringVm\.certificateCn/,
+    ],
+    [
+      "a relative monitoring VM SSM name",
+      (c) => (m(c).monitoringVm.ipSsmParam = "x402/vm-ip"),
+      /monitoringVm\.ipSsmParam/,
     ],
     ["an http uptime URL", (c) => (m(c).uptime.url = "http://example.com/health"), /uptime.url/],
     [

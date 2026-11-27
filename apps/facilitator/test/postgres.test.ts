@@ -1,13 +1,25 @@
-import { PostgresSealedKeyStore } from "@stellar-x402/api-keys";
-import { apiKeyStoreContract, sealedKeyStoreContract } from "@stellar-x402/api-keys/testing";
-import { CATALOG_KEY_VERSION } from "@stellar-x402/bazaar";
+import { SEARCH_MODEL_ID } from "@stellar-x402/config";
+import {
+  PostgresAccountPlanStore,
+  PostgresAccountUsageReader,
+  PostgresSealedKeyStore,
+} from "@stellar-x402/api-keys";
+import {
+  accountPlanStoreContract,
+  accountUsageReaderContract,
+  apiKeyStoreContract,
+  sealedKeyStoreContract,
+} from "@stellar-x402/api-keys/testing";
+import { CATALOG_KEY_VERSION, searchFields } from "@stellar-x402/bazaar";
 import { Keypair, Networks, StrKey, Transaction } from "@stellar/stellar-sdk";
 import type { PaymentRequirements } from "@x402/core/types";
+import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PostgresSpendStore, postgresStores } from "../src/adapters/postgres.js";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { NON_FINAL_STATES } from "../src/adapters/rules.js";
+import { createSearchCardRewrite } from "../src/catalog/search-cards.js";
 import { main, migrateMain } from "../src/main.js";
 import {
   HashConflictError,
@@ -26,6 +38,10 @@ import { transferPayload } from "./payment.js";
 import {
   catalogAttemptStoreContract,
   catalogStoreContract,
+  searchCardStoreContract,
+  catalogSearchContract,
+  catalogMeaningContract,
+  catalogQualityContract,
   rateLimitStoreContract,
   settlement,
   holdLease,
@@ -33,17 +49,8 @@ import {
   spendStoreContract,
 } from "./port-contracts.js";
 import { hardened, rpcStub } from "./rpc-stub.js";
+import { readCards, setVector, unitVector, vectorLiteral } from "./vectors.js";
 import { signerEnv } from "./fake-openbao.js";
-
-// `main()`'s EMF lines off stdout: `LOG_LEVEL` quiets the logger only.
-vi.mock("../src/adapters/emf-metrics.js", async (importActual) => {
-  const actual = await importActual<typeof import("../src/adapters/emf-metrics.js")>();
-  return {
-    ...actual,
-    emfMetrics: (opts: Parameters<typeof actual.emfMetrics>[0]) =>
-      actual.emfMetrics({ write: () => {}, ...opts }),
-  };
-});
 
 // `main()` checks its channel at startup, on the RPC it builds from `RPC_URLS`.
 const bootSecret = Keypair.random().secret();
@@ -150,6 +157,7 @@ describe("PostgreSQL stores", () => {
             beforeSubmit: async () => ({ allow: true }),
             onFinal: async () => {},
             onSuccess: async () => {},
+            listingOf: () => undefined,
           },
           logger: jsonLogger("error"),
           metrics: memoryMetrics(),
@@ -201,11 +209,116 @@ describe("PostgreSQL stores", () => {
   rateLimitStoreContract(async () => (await stores()).rateLimits);
   catalogStoreContract(async () => (await stores()).catalog);
   catalogAttemptStoreContract(async () => (await stores()).catalogAttempts);
+  catalogSearchContract(async () => (await stores()).catalog);
+  catalogMeaningContract(async () => ({
+    catalog: (await stores()).catalog,
+    setVector: (key, model, vector) => setVector(pool, key, model, vector),
+  }));
+  catalogQualityContract(async () => {
+    const all = await stores();
+    return {
+      catalog: all.catalog,
+      settlements: all.settlements,
+      curation: all.curation,
+      setVector: (key, model, vector) => setVector(pool, key, model, vector),
+    };
+  });
+  searchCardStoreContract(async () => {
+    const all = await stores();
+    return { catalog: all.catalog, cards: all.searchCards };
+  });
   apiKeyStoreContract(async () => (await stores()).apiKeys);
   sealedKeyStoreContract(async () => ({
     registry: (await stores()).apiKeys,
     sealed: new PostgresSealedKeyStore(pool),
   }));
+  accountPlanStoreContract(async () => {
+    await db.empty();
+    return new PostgresAccountPlanStore(pool);
+  });
+  accountUsageReaderContract(async () => {
+    const { spend } = await stores();
+    let reservations = 0;
+    return {
+      reader: new PostgresAccountUsageReader(pool),
+      // Through the spend store, so the view reads the rows its count limit counts.
+      pay: async (owner, at) => {
+        const limits = [{ scope: `account:${owner}` as const, maxCount: 1_000, since: 0 }];
+        const id = `r${reservations++}`;
+        expect(await spend.reserve({ id, amount: 1n, limits, now: at })).toMatchObject({
+          reserved: true,
+        });
+      },
+    };
+  });
+
+  describe("an account's payments through the view (0107)", () => {
+    const OWNER = "discord:412345678901234567";
+    const SINCE = Date.UTC(2026, 10, 1);
+    const limits = [
+      { scope: `account:${OWNER}` as const, maxCount: 1_000, since: 0 },
+      { scope: "free" as const, maxStroops: 1_000_000n, windowMs: 86_400_000 },
+      { scope: "global" as const, maxStroops: 1_000_000n, windowMs: 86_400_000 },
+    ];
+
+    it("counts what the store's count limit counts: reserved and committed, never released", async () => {
+      const { spend } = await stores();
+      for (const id of ["reserved", "committed", "released"])
+        await spend.reserve({ id, amount: 100n, limits, now: SINCE + 1 });
+      await spend.commit("committed", 40n);
+      await spend.release("released", SINCE + 2);
+      // A reservation of the account alone, without the shared scopes, counts too.
+      await spend.reserve({ id: "alone", amount: 100n, limits: limits.slice(0, 1), now: SINCE });
+      // Other scopes' rows, and an account whose owner starts like this one's, count nothing.
+      await spend.reserve({
+        id: "other",
+        amount: 100n,
+        limits: [{ scope: `account:${OWNER}0`, maxCount: 1_000, since: 0 }, limits[2]!],
+        now: SINCE,
+      });
+      const lastMonth = { scope: "account:discord:1" as const, maxCount: 1_000, since: 0 };
+      await spend.reserve({ id: "last month", amount: 100n, limits: [lastMonth], now: SINCE - 1 });
+      const reader = new PostgresAccountUsageReader(pool);
+      expect(await reader.paymentsSince(OWNER, SINCE)).toBe(3);
+      // The view finds an account's scope rows through its `spend_scopes` row, which the pruner
+      // keeps while the scope has a reservation after its cutoff: a horizon that covers the month
+      // leaves the month's count whole, and takes only the scopes it emptied.
+      expect(await spend.prune(SINCE, 1_000)).toBe(1);
+      expect(await spend.pruneScopes(SINCE, 1_000)).toBe(1);
+      expect(await reader.paymentsSince(OWNER, SINCE)).toBe(3);
+      expect(await reader.paymentsSince("discord:1", 0)).toBe(0);
+      // The store refuses the next one at a limit of 3, so the two agree.
+      expect(
+        await spend.reserve({
+          id: "fourth",
+          amount: 1n,
+          limits: [{ scope: `account:${OWNER}`, maxCount: 3, since: SINCE }],
+          now: SINCE + 3,
+        }),
+      ).toEqual({ reserved: false, scope: `account:${OWNER}`, limit: "count" });
+    });
+
+    it("needs no more than SELECT on account_plans and account_usage, the portal's grants", async () => {
+      const { spend } = await stores();
+      const plans = new PostgresAccountPlanStore(pool);
+      await plans.setPlan({ owner: OWNER, plan: "basic", now: 1, setBy: "operator:a" });
+      await spend.reserve({ id: "a", amount: 100n, limits, now: SINCE });
+      const role = `${schema}_portal`;
+      await holding(async (client) => {
+        // In the transaction `holding` rolls back, so the role never outlives the test.
+        await client.query(`CREATE ROLE ${role} NOLOGIN`);
+        await client.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role}`);
+        await client.query(`GRANT SELECT ON account_plans, account_usage TO ${role}`);
+        await client.query(`SET LOCAL ROLE ${role}`);
+        expect(await new PostgresAccountPlanStore(client).planOf(OWNER)).toBe("basic");
+        expect(await new PostgresAccountUsageReader(client).paymentsSince(OWNER, SINCE)).toBe(1);
+        // And the role really is that narrow: the view's tables are out of its reach.
+        await expect(client.query("SELECT 1 FROM spend_reservation_scopes")).rejects.toThrow(
+          /permission denied/,
+        );
+      });
+    });
+  });
 
   describe("the sealed store's revoke beside an issue for the same owner (0106)", () => {
     const OWNER = "discord:412345678901234567";
@@ -562,6 +675,7 @@ describe("PostgreSQL stores", () => {
       expect(await spend.reserve({ id: "a", amount: 1n, limits, now: 0 })).toEqual({
         reserved: false,
         scope: "global",
+        limit: "stroops",
       });
       spy.mockRestore();
       expect(single.totalCount).toBe(0);
@@ -725,6 +839,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -733,8 +848,11 @@ describe("PostgreSQL stores", () => {
     const pools = app.pools;
     expect(pools).toBeDefined();
     try {
-      // The startup sweep reads the settlements on the main pool, and only there.
+      // The startup sweep reads the settlements on the main pool, and only there; so does the
+      // search card rewrite.
       await app.reconciled;
+      // The vector pass waits for a model that never answers here, so it reads no card meanwhile.
+      await app.searchCardsRewritten;
       const main = pools?.main.totalCount;
       expect(main).toBeGreaterThan(0);
       const limits = [{ scope: "global" as const, maxStroops: 10n, windowMs: 1_000 }];
@@ -758,9 +876,9 @@ describe("PostgreSQL stores", () => {
         await ranOn(() => app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 })),
       ).toEqual(["reserve"]);
       expect(await ranOn(() => app.stores.rateLimits.hit("k", 60_000, 0))).toEqual(["rateLimits"]);
-      expect(await ranOn(() => app.stores.catalog.list({ limit: 1, offset: 0 }))).toEqual([
-        "discovery",
-      ]);
+      expect(
+        await ranOn(() => app.stores.catalog.list({ limit: 1, offset: 0 }, Date.now())),
+      ).toEqual(["discovery"]);
       // Catalog writes come from `/settle`, so they stay off the public listings' pool.
       expect(await ranOn(() => app.stores.catalog.upsert(catalogEntry()))).toEqual(["main"]);
       expect(await ranOn(() => app.stores.settlements.claim(settlement("1")))).toEqual(["main"]);
@@ -825,6 +943,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -855,6 +974,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -893,6 +1013,7 @@ describe("PostgreSQL stores", () => {
       DATABASE_URL: urlFor(schema),
       ...signerEnv(Keypair.fromSecret(bootSecret).publicKey()),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: bootChannel,
       RPC_URLS: rpc.url,
       PORT: "0",
@@ -969,6 +1090,385 @@ describe("PostgreSQL stores", () => {
     await expect(copy("a".repeat(64), Buffer.alloc(1025))).rejects.toThrow(/check/);
     await copy("a".repeat(64), Buffer.alloc(1024));
     await expect(copy("a".repeat(64), Buffer.from("x"))).rejects.toThrow(/api_key_copies_pkey/);
+  });
+
+  it("0017_catalog_search: weights a card's four fields A to D, and drops it with its listing (0120)", async () => {
+    await db.empty();
+    const { rows: listing } = await pool.query<{ seq: string }>(
+      `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+         resource, type, extension_keys)
+       VALUES ('stellar:testnet', 'G', 'GET', 'https://a.example/x', 1, NULL, 1, '{}', 'http', '{}')
+       RETURNING seq`,
+    );
+    const seq = listing[0]!.seq;
+    await pool.query(
+      `INSERT INTO catalog_search (seq, name, tags, description, parameters)
+       VALUES ($1, 'Tides', 'ocean', 'Weather', 'city')`,
+      [seq],
+    );
+    const words = await pool.query("SELECT words::text FROM catalog_search WHERE seq = $1", [seq]);
+    expect(words.rows[0].words).toBe("'citi':4 'ocean':2B 'tide':1A 'weather':3C");
+    const index = await pool.query(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'catalog_search_words'",
+    );
+    expect(index.rows[0].indexdef).toContain("USING gin (words)");
+    // A card for a listing the catalog doesn't hold is refused.
+    await expect(
+      pool.query(
+        `INSERT INTO catalog_search (seq, name, tags, description, parameters)
+         VALUES (-1, '', '', '', '')`,
+      ),
+    ).rejects.toThrow(/foreign key/);
+    // The store writes each field of the listing's card to its column.
+    await db.stores().searchCards.write({ seq, resource: {} as DiscoveryResource });
+    const card = await pool.query(
+      "SELECT name, tags, description, parameters, host FROM catalog_search WHERE seq = $1",
+      [seq],
+    );
+    expect(card.rows).toEqual([searchFields({} as DiscoveryResource)]);
+    await pool.query("DELETE FROM catalog WHERE seq = $1", [seq]);
+    const left = await pool.query("SELECT count(*)::int AS n FROM catalog_search");
+    expect(left.rows).toEqual([{ n: 0 }]);
+  });
+
+  it("writes a listing's search card in the catalog's own write, and only when the listing changes (0120)", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const card = async () =>
+      (await pool.query("SELECT name, tags, description, parameters, host FROM catalog_search"))
+        .rows;
+    const listing = (checkedAt: number, description: string) => {
+      const entry = catalogEntry();
+      return { ...entry, checkedAt, resource: { ...entry.resource, description } };
+    };
+    const fieldsOf = (description: string) => searchFields(listing(1, description).resource);
+    expect(await catalog.upsert(listing(1, "Weather"))).toBe("inserted");
+    expect(await card()).toEqual([fieldsOf("Weather")]);
+    expect(await catalog.upsert(listing(2, "Tides"))).toBe("updated");
+    expect(await card()).toEqual([fieldsOf("Tides")]);
+    // A check that started earlier writes neither the listing nor its card.
+    expect(await catalog.upsert(listing(1, "Stocks"))).toBe("stale");
+    expect(await card()).toEqual([fieldsOf("Tides")]);
+    // A listing stored before cards existed gets its card with its next write.
+    await pool.query("DELETE FROM catalog_search");
+    expect(await catalog.upsert(listing(3, "Waves"))).toBe("updated");
+    expect(await card()).toEqual([fieldsOf("Waves")]);
+  });
+
+  it("rewrites every card at start: a missing one, an out-of-date one, a rich listing's exactly (0120)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const rich = {
+      ...catalogEntry(),
+      resource: {
+        ...catalogEntry().resource,
+        description: "Météo ☀ for 2.5e-7 BTC",
+        tags: ["weather", "kraków"],
+        extensions: {
+          bazaar: {
+            info: { input: { type: "http", method: "GET", queryParams: { city: "Gdańsk" } } },
+            schema: {
+              properties: {
+                input: {
+                  properties: {
+                    queryParams: {
+                      properties: { city: { description: "City name", maxLength: 1e3 } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    await catalog.upsert(rich);
+    // A card left behind by older rules, and a listing stored before cards existed.
+    await pool.query("UPDATE catalog_search SET name = 'old'");
+    await pool.query(
+      `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+         resource, type, extension_keys)
+       VALUES ('stellar:testnet', 'G', 'GET', 'https://b.example/tides', 1, NULL, 1,
+         '{"resource":"https://b.example/tides","description":"Tides"}', 'http', '{}')`,
+    );
+    const rewrite = async () => {
+      const lines: string[] = [];
+      await createSearchCardRewrite({
+        store: searchCards,
+        logger: jsonLogger("info", (line) => lines.push(line)),
+        metrics: memoryMetrics(),
+      }).start();
+      return lines.map((line) => JSON.parse(line));
+    };
+    expect(await rewrite()).toContainEqual(expect.objectContaining({ written: 2 }));
+    const { rows } = await pool.query(
+      `SELECT c.resource, s.name, s.tags, s.description, s.parameters, s.host
+         FROM catalog c JOIN catalog_search s USING (seq) ORDER BY c.seq`,
+    );
+    expect(rows).toHaveLength(2);
+    for (const { resource, ...card } of rows) expect(card).toEqual(searchFields(resource));
+    // The next start finds every card already holding its text, and writes none.
+    expect(await rewrite()).toContainEqual(expect.objectContaining({ written: 0 }));
+  });
+
+  it("0021_catalog_search_host: adds host text NOT NULL DEFAULT '', '' on a card written before it, its text_hash kept (0154)", async () => {
+    const fresh = `${schema}_0020`;
+    await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    await pool.query(`CREATE SCHEMA ${fresh}`);
+    const old = poolFor(fresh, 2);
+    try {
+      const before = MIGRATIONS.findIndex((m) => m.name === "0021_catalog_search_host");
+      expect(before).toBe(20);
+      await migrate(old, 0, MIGRATIONS.slice(0, before));
+      // A card as the release before writes it: a listing on a tunnel, its four fields only.
+      const { rows: listing } = await old.query<{ seq: string }>(
+        `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+           resource, type, extension_keys)
+         VALUES ('stellar:testnet', 'G', 'GET', 'https://x.ts.net/x', 1, NULL, 1, '{}', 'http', '{}')
+         RETURNING seq`,
+      );
+      await old.query(
+        `INSERT INTO catalog_search (seq, name, tags, description, parameters)
+         VALUES ($1, 'Tides', 'ocean', 'Weather', 'city')`,
+        [listing[0]!.seq],
+      );
+      const hash = async () =>
+        (await old.query("SELECT text_hash FROM catalog_search")).rows[0].text_hash;
+      const hashBefore = await hash();
+      expect(await migrate(old, 0, MIGRATIONS.slice(0, before + 1))).toEqual([
+        "0021_catalog_search_host",
+      ]);
+      expect((await old.query("SELECT host FROM catalog_search")).rows).toEqual([{ host: "" }]);
+      expect(await hash()).toBe(hashBefore);
+      const { rows: added } = await old.query(
+        `SELECT data_type, is_nullable, column_default FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'catalog_search'
+           AND column_name = 'host'`,
+      );
+      expect(added).toEqual([{ data_type: "text", is_nullable: "NO", column_default: "''::text" }]);
+    } finally {
+      await old.end();
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    }
+  });
+
+  it("stores the listing's host on its card in the catalog's write, on insert and on update (0154)", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const hosts = async () => (await pool.query("SELECT host FROM catalog_search")).rows;
+    const entry = catalogEntry();
+    const listing = (checkedAt: number, description: string) => ({
+      ...entry,
+      checkedAt,
+      resource: { ...entry.resource, description },
+    });
+    expect(await catalog.upsert(listing(1, "Weather"))).toBe("inserted");
+    expect(await hosts()).toEqual([{ host: "seller.example.com" }]);
+    // A card written before the host column, then its listing written again.
+    await pool.query("UPDATE catalog_search SET host = ''");
+    expect(await catalog.upsert(listing(2, "Tides"))).toBe("updated");
+    expect(await hosts()).toEqual([{ host: "seller.example.com" }]);
+  });
+
+  it("rewrites a card whose host differs at start, its text_hash and vector kept, and then writes it no more (0154)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    const card = async () =>
+      (
+        await pool.query(
+          "SELECT name, tags, description, parameters, host, text_hash, model FROM catalog_search",
+        )
+      ).rows[0];
+    const written = await card();
+    expect(written).toMatchObject({ host: "seller.example.com", model: SEARCH_MODEL_ID });
+    // A card written before the host column: its text, hash and vector stand as they were.
+    await pool.query("UPDATE catalog_search SET host = ''");
+    expect(await card()).toEqual({ ...written, host: "" });
+    const [listing] = await searchCards.listings("0", 10);
+    expect(await searchCards.write(listing!)).toBe(true);
+    expect(await card()).toEqual(written);
+    expect(await searchCards.write(listing!)).toBe(false);
+  });
+
+  it("lowers a tunnel listing ×0.9 by its card's stored host: none on a card from before the host, applied once rewritten (0154)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const base = "https://base.example/x";
+    const tunnel = "https://x.ts.net/x";
+    for (const url of [base, tunnel]) {
+      const entry = catalogEntry();
+      await catalog.upsert({
+        ...entry,
+        key: { ...entry.key, resourceUrl: url },
+        resource: { ...entry.resource, resource: url, description: "weather" },
+      });
+    }
+    const ratio = async () => {
+      const hits = await catalog.search({ text: "weather", limit: 10 }, Date.now());
+      const rank = (url: string) => Number(hits.find((hit) => hit.key.resourceUrl === url)!.rank);
+      return Math.round((rank(tunnel) / rank(base)) * 1e6) / 1e6;
+    };
+    expect(await ratio()).toBe(0.9);
+    await pool.query("UPDATE catalog_search SET host = ''");
+    expect(await ratio()).toBe(1);
+    for (const listing of await searchCards.listings("0", 10))
+      expect(await searchCards.write(listing)).toBe(true);
+    expect(await ratio()).toBe(0.9);
+  });
+
+  it("waits for a listing write under way, and then writes no card over the newer one (0120)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    await catalog.upsert(catalogEntry());
+    const [read] = await searchCards.listings("0", 10);
+    const writer = await pool.connect();
+    try {
+      // A catalog write under way: the listing has changed but is not yet committed.
+      await writer.query("BEGIN");
+      await writer.query(
+        `UPDATE catalog SET resource = jsonb_set(resource, '{description}', '"Tides"') WHERE seq = $1`,
+        [read!.seq],
+      );
+      const rewrite = searchCards.write(read!);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await writer.query("COMMIT");
+      expect(await rewrite).toBe(false);
+    } finally {
+      writer.release();
+    }
+  });
+
+  // 0120 point A. Needs the `vector` extension (pgvector) in the test database.
+  it("gives each search card a model and a 384-number vector, one per listing (0120 A)", async () => {
+    await db.empty();
+    const { rows: columns } = await pool.query(
+      `SELECT attname, format_type(atttypid, atttypmod) AS type FROM pg_attribute
+        WHERE attrelid = 'catalog_search'::regclass AND attname IN ('model', 'embedding')
+        ORDER BY attname`,
+    );
+    expect(columns).toEqual([
+      { attname: "embedding", type: "public.vector(384)" },
+      { attname: "model", type: "text" },
+    ]);
+    const { catalog } = db.stores();
+    await catalog.upsert(catalogEntry());
+    // A new listing's card has no vector yet.
+    expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
+      [null, null],
+    ]);
+    const key = catalogEntry().key;
+    await setVector(pool, key, SEARCH_MODEL_ID, unitVector(0.8));
+    await setVector(pool, key, SEARCH_MODEL_ID, unitVector(0.6));
+    const cards = await readCards(pool);
+    expect(cards).toHaveLength(1);
+    // A vector of another size is refused.
+    await expect(
+      pool.query("UPDATE catalog_search SET embedding = $1::public.vector", [
+        vectorLiteral([1, 0, 0]),
+      ]),
+    ).rejects.toThrow(/dimensions/);
+  });
+
+  it("counts a listing without a card as waiting for its vector (ADR 0014)", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
+    // As after a rewrite that could not read the listings: the listing stands, its card is gone.
+    await pool.query("DELETE FROM catalog_search");
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
+  });
+
+  it("refuses a write of a card's model: only the database says which vector is current", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    await catalog.upsert(catalogEntry());
+    await expect(pool.query("UPDATE catalog_search SET model = 'm'")).rejects.toThrow(/model/);
+  });
+
+  it("stops counting a card's vector once any writer changes its text, one that knows nothing of vectors too", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
+    // As the release before this one writes a card: the text only, its vector untouched.
+    await pool.query("UPDATE catalog_search SET description = 'Currency rates'");
+    expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
+      [null, null],
+    ]);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
+    // The start's pass reads it again, and the search by meaning leaves it out meanwhile.
+    expect((await searchCards.cards("0", 10)).map((card) => card.description)).toEqual([
+      "Currency rates",
+    ]);
+    expect(
+      await catalog.search(
+        {
+          text: "x",
+          limit: 10,
+          meaning: unitVector(0.8),
+        },
+        Date.now(),
+      ),
+    ).toEqual([]);
+  });
+
+  it("counts a card's vector only while its text is the one embedded, the start's rewrite included", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    // A vector of a text this release never wrote: the rewrite's text does not match it.
+    await pool.query("UPDATE catalog_search SET name = 'old rules'");
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    const [listing] = await searchCards.listings("0", 10);
+    expect(await searchCards.write(listing!)).toBe(true);
+    expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
+      [null, null],
+    ]);
+    // The text it was made from back on the card: the vector is of it, so it counts again.
+    await pool.query("UPDATE catalog_search SET name = 'old rules'");
+    expect((await readCards(pool))[0]!.model).toBe(SEARCH_MODEL_ID);
+    expect(await searchCards.write(listing!)).toBe(true);
+    // The same text again: nothing is written, the vector stays.
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.6));
+    expect(await searchCards.write(listing!)).toBe(false);
+    expect((await readCards(pool))[0]!.model).toBe(SEARCH_MODEL_ID);
+  });
+
+  it("stops counting a card's vector when a catalog write changes its text, and keeps it when the text stays", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert({ ...entry, resource: { ...entry.resource, description: "Tides" } });
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    const before = (await readCards(pool))[0]!;
+    await catalog.upsert({
+      ...entry,
+      checkedAt: 2,
+      resource: { ...entry.resource, description: "Waves" },
+    });
+    const after = (await readCards(pool))[0]!;
+    expect(after.description).not.toBe(before.description);
+    // A vector counts only while it is of the card's current text (ADR 0014).
+    expect([after.model, after.embedding]).toEqual([null, null]);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.6));
+    const vectored = (await readCards(pool))[0]!;
+    // The same text written again, as a re-seed does: the vector stays.
+    await catalog.upsert({
+      ...entry,
+      checkedAt: 3,
+      resource: { ...entry.resource, description: "Waves" },
+    });
+    const same = (await readCards(pool))[0]!;
+    expect([same.model, same.embedding]).toEqual([vectored.model, vectored.embedding]);
   });
 
   it("applies the migrations once when two runs race", async () => {
@@ -1106,6 +1606,12 @@ describe("PostgreSQL stores", () => {
           "0014_api_key_copies",
           "0015_settlement_refused",
           "0016_catalog_seed",
+          "0017_catalog_search",
+          "0018_account_plans",
+          "0019_settlement_listing",
+          "0020_catalog_search_vector",
+          "0021_catalog_search_host",
+          "0022_catalog_curation",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1141,6 +1647,12 @@ describe("PostgreSQL stores", () => {
         "0014_api_key_copies",
         "0015_settlement_refused",
         "0016_catalog_seed",
+        "0017_catalog_search",
+        "0018_account_plans",
+        "0019_settlement_listing",
+        "0020_catalog_search_vector",
+        "0021_catalog_search_host",
+        "0022_catalog_curation",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
@@ -1273,7 +1785,28 @@ describe("PostgreSQL stores", () => {
     expect(await spend.reserve({ id: "b", amount: 60n, limits, now: 1 })).toEqual({
       reserved: false,
       scope: "global",
+      limit: "stroops",
     });
+  });
+
+  it("lets exactly maxCount of concurrent reserves past a count limit (0107)", async () => {
+    const { spend } = await stores();
+    // The account's scope alone, so only its lock serializes them: the count must run under it.
+    const scope = "account:discord:1" as const;
+    const limits = [{ scope, maxCount: 5, since: 0 }];
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        spend.reserve({ id: `r${i}`, amount: 1n, limits, now: 1 }),
+      ),
+    );
+    expect(results.filter((result) => result.reserved)).toHaveLength(5);
+    expect(results.filter((result) => !result.reserved)).toEqual(
+      Array.from({ length: 15 }, () => ({ reserved: false, scope, limit: "count" })),
+    );
+    const { rows } = await pool.query("SELECT id FROM spend_reservation_scopes WHERE scope = $1", [
+      scope,
+    ]);
+    expect(rows).toHaveLength(5);
   });
 
   it("prunes a reservation with its scope rows, and skips rows another transaction holds", async () => {
@@ -1337,5 +1870,135 @@ describe("PostgreSQL stores", () => {
     await catalog.upsert(catalogEntry());
     const { rows } = await pool.query("SELECT key_version FROM catalog");
     expect(rows).toEqual([{ key_version: CATALOG_KEY_VERSION }]);
+  });
+
+  describe("the listing of a settlement (0154)", () => {
+    const listing = { method: "GET", resourceUrl: "https://seller.example.com/data" };
+    /** Every settlements row, every column, in key order. */
+    const rows = async (on = pool) =>
+      (await on.query<Record<string, unknown>>("SELECT * FROM settlements ORDER BY key")).rows;
+    /** Each settlement's listing columns, in key order. */
+    const listings = async () =>
+      (
+        await pool.query<Record<string, unknown>>(
+          "SELECT key, listing_method, listing_url FROM settlements ORDER BY key",
+        )
+      ).rows;
+
+    it("adds nullable listing_method and listing_url to settlements, NULL on rows written before it (0154)", async () => {
+      const fresh = `${schema}_0018`;
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      await pool.query(`CREATE SCHEMA ${fresh}`);
+      const old = poolFor(fresh, 2);
+      try {
+        const before = MIGRATIONS.findIndex((m) => m.name === "0019_settlement_listing");
+        expect(before).toBe(18);
+        await migrate(old, 0, MIGRATIONS.slice(0, before));
+        // Two rows as the release before it wrote them: a success and a claimed one, copied
+        // column by column into the older table, which has no listing columns.
+        const { settlements } = await stores();
+        await settlements.claim(settlement("1"));
+        await settlements.transition(settlement("1").key, "claimed", {
+          state: "success",
+          updatedAt: 3_000,
+        });
+        await settlements.claim(settlement("2"));
+        const { rows: oldColumns } = await old.query<{ column_name: string }>(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_schema = current_schema() AND table_name = 'settlements'
+             AND is_generated = 'NEVER'`,
+        );
+        const columns = oldColumns.map(({ column_name }) => `"${column_name}"`).join(", ");
+        await pool.query(
+          `INSERT INTO ${fresh}.settlements (${columns})
+           SELECT ${columns} FROM ${schema}.settlements`,
+        );
+        expect(await migrate(old, 0, MIGRATIONS.slice(0, before + 1))).toEqual([
+          "0019_settlement_listing",
+        ]);
+        expect(
+          (await rows(old)).map(({ key, listing_method, listing_url }) => ({
+            key,
+            listing_method,
+            listing_url,
+          })),
+        ).toEqual([
+          { key: settlement("1").key, listing_method: null, listing_url: null },
+          { key: settlement("2").key, listing_method: null, listing_url: null },
+        ]);
+        const { rows: added } = await old.query(
+          `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+           WHERE table_schema = current_schema() AND table_name = 'settlements'
+             AND column_name IN ('listing_method', 'listing_url')
+           ORDER BY column_name`,
+        );
+        expect(added).toEqual([
+          { column_name: "listing_method", data_type: "text", is_nullable: "YES" },
+          { column_name: "listing_url", data_type: "text", is_nullable: "YES" },
+        ]);
+      } finally {
+        await old.end();
+        await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+      }
+    });
+
+    it("writes a claim's listing to listing_method and listing_url, and NULL for a claim without one (0154)", async () => {
+      const { settlements } = await stores();
+      await settlements.claim({ ...settlement("1"), listing });
+      await settlements.claim(settlement("2"));
+      expect(await listings()).toEqual([
+        {
+          key: settlement("1").key,
+          listing_method: "GET",
+          listing_url: "https://seller.example.com/data",
+        },
+        { key: settlement("2").key, listing_method: null, listing_url: null },
+      ]);
+    });
+
+    it("keeps the winning claim's listing: a claim that loses to the key changes nothing on its row (0154)", async () => {
+      const { settlements } = await stores();
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, i) =>
+          settlements.claim({
+            ...settlement("1"),
+            listing: { method: `M${i}`, resourceUrl: `https://seller.example.com/${i}` },
+          }),
+        ),
+      );
+      const winner = results.findIndex((result) => result.claimed);
+      expect(results.filter((result) => result.claimed)).toHaveLength(1);
+      const [won] = await rows();
+      expect(won).toMatchObject({
+        listing_method: `M${winner}`,
+        listing_url: `https://seller.example.com/${winner}`,
+      });
+
+      // A later claim of the key, with another listing or none, finds the row as it was.
+      await settlements.claim({ ...settlement("1"), listing });
+      await settlements.claim(settlement("1"));
+      expect(await rows()).toEqual([won]);
+    });
+
+    it("keeps a record's listing when it is reopened (0154)", async () => {
+      const { settlements } = await stores();
+      const s = settlement("1");
+      await settlements.claim({ ...s, listing });
+      await settlements.transition(s.key, "claimed", {
+        state: "rejected",
+        errorReason: SETTLE_REASONS.noChannelInTime,
+        updatedAt: 2_000,
+      });
+      const reopened = await settlements.reopen(
+        s.key,
+        s.fingerprint,
+        [SETTLE_REASONS.noChannelInTime],
+        3_000,
+      );
+      expect(reopened).toMatchObject({ state: "claimed", reopened: 1 });
+      expect(await listings()).toEqual([
+        { key: s.key, listing_method: "GET", listing_url: "https://seller.example.com/data" },
+      ]);
+    });
   });
 });

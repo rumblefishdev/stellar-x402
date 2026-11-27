@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { StrKey } from "@stellar/stellar-sdk";
+import { DEFAULT_ACCOUNT_PLANS, parseAccountPlans, type AccountPlan } from "@stellar-x402/api-keys";
 import { FEE_STATS_MIN_STROOPS } from "@stellar-x402/signer-pool";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import { z } from "zod";
+import { requiresApiKey } from "./http/api-key.js";
 
 /**
  * Facilitator configuration, read and validated once at startup from the environment (AD-12,
@@ -71,7 +73,28 @@ const SPEND_BUDGET_VARS = [
   "SPEND_PER_ASSET_STROOPS",
   "SPEND_PER_ASSET_OTHER_STROOPS",
   "SPEND_TIER_OTHER_STROOPS",
+  "SPEND_FREE_STROOPS",
 ] as const;
+
+/**
+ * The plans an API key holder's account can be on (0107): the same text the portal reads, so the
+ * two agree on every plan. The parser's own message quotes the entry, so a bad text gets this one.
+ */
+const accountPlans = z
+  .string()
+  .default(DEFAULT_ACCOUNT_PLANS)
+  .transform((text, ctx) => {
+    try {
+      return parseAccountPlans(text);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "must be <name>:<payments a month>:<fee stroops per 24 h>, comma-separated, with a free plan",
+      });
+      return z.NEVER;
+    }
+  });
 
 /** Fee settings reach upstream and the pool as a `number`. */
 const feeStroops = stroops(100n).refine(
@@ -104,6 +127,9 @@ function isPostgresUrl(value: string): boolean {
 /** Holds a password, so it is never logged and no message echoes it. */
 const databaseUrl = z.string().refine(isPostgresUrl, "must be a postgres:// URL");
 
+/** The search model container's URL (ADR 0014). */
+const searchModelUrl = z.string().refine(isHttpUrl, "must be an http(s) URL without credentials");
+
 const envSchema = z
   .object({
     NETWORK: oneOf([STELLAR_NETWORKS.testnet, STELLAR_NETWORKS.pubnet]).default(
@@ -111,6 +137,11 @@ const envSchema = z
     ),
     /** 0 lets the system pick a free port; the `listening` log line names it. */
     PORT: int(0, 65_535).default("4021"),
+    /**
+     * `GET /metrics` for the metrics agent, on its own listener off the public port (ADR 0011,
+     * "Metrics"). Unset, nothing listens: the tests and a local run need none. 0 picks a free port.
+     */
+    METRICS_PORT: int(0, 65_535).optional(),
     LOG_LEVEL: oneOf(["debug", "info", "warn", "error"]).default("info"),
     /** The commit the image was built from (its Dockerfile); unset on a local run. */
     GIT_COMMIT: z.string().optional(),
@@ -265,6 +296,14 @@ const envSchema = z
     /** All other tokens together, so junk tokens can't spend what USDC sellers need. */
     SPEND_TIER_OTHER_STROOPS: spendStroops.default("100000000"),
     /**
+     * Every account on the free plan together (0107): many Discord accounts use up only this, not
+     * the room `global` keeps for the accounts the operator raised. Only a settlement with an API
+     * key counts in it, so only on pubnet.
+     */
+    SPEND_FREE_STROOPS: spendStroops.default("250000000"),
+    /** `<name>:<payments a month>:<fee stroops per 24 h>`, comma-separated, with `free`. */
+    ACCOUNT_PLANS: accountPlans,
+    /**
      * `/settle` refuses while the fee account can spend less: 5 XLM, enough for the fees in flight
      * (about 1.25 XLM at 50 channels), so ADR 0013's alarms at 25 and 10 XLM fire first (0027).
      */
@@ -279,6 +318,11 @@ const envSchema = z
     CATALOG_LIST_LOCAL: oneOf(["true", "false"])
       .default("false")
       .transform((value) => value === "true"),
+    /**
+     * The search model container (ADR 0014), on the environment's internal network. Required, so
+     * an environment that forgot it stops at start instead of searching by words alone.
+     */
+    SEARCH_MODEL_URL: searchModelUrl,
 
     /** The breakers are fixed in code now (0024, `BREAKERS` in `spend/policy.ts`); refused, like `STORE`. */
     BREAKER_FAILURES: z.string().optional(),
@@ -361,18 +405,37 @@ const envSchema = z
         path: [name],
       });
     }
+    // An account's settlement reserves it against its plan's budget too (0107). Plans that didn't
+    // parse are named already, and aren't a `Map` here.
+    const plans = env.ACCOUNT_PLANS instanceof Map ? [...env.ACCOUNT_PLANS.values()] : [];
+    if (plans.some((plan) => plan.dailyFeeStroops < env.MAX_FEE_STROOPS))
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `must give every plan a fee budget of at least MAX_FEE_STROOPS (${env.MAX_FEE_STROOPS}): a settlement reserves the fee ceiling`,
+        path: ["ACCOUNT_PLANS"],
+      });
   })
-  // `/settle` spends on pubnet, so not before counting each API key owner's settlements in a fee
-  // budget of its own (0107), an alarm on a failing signer (0027) and deciding again how far the
-  // hot key's power reaches (0048). The spend budgets (0024) bound the loss, but self-payments
-  // from many cheap addresses can still use up the shared budgets and refuse every seller's USDC
-  // (0024 S-design, "Residual risk"; decision 31). Pubnet's callers already need an API key
-  // (0105), which is what such a budget is counted by. Whatever lands narrows the message to what
-  // is still missing (0009 decision 49); 0090, holding back a channel left open after a deploy,
-  // has landed.
+  // A free account's settlement counts in `global` too, so a larger `free` would let the free
+  // accounts fill `global` and refuse the accounts the operator raised (0107 decision 5). Whether
+  // `global` holds those accounts' budgets beside `free` is the operator's check when raising one
+  // (runbook, "Account plans"). Only where a key is required: elsewhere no settlement has an
+  // account, so nothing is reserved against `free`, and a lower `global` must still start.
+  .superRefine((env, ctx) => {
+    if (!requiresApiKey(env.NETWORK) || env.SPEND_FREE_STROOPS <= env.SPEND_GLOBAL_STROOPS) return;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `must be at most SPEND_GLOBAL_STROOPS (${env.SPEND_GLOBAL_STROOPS}): the free plan's settlements count in global too`,
+      path: ["SPEND_FREE_STROOPS"],
+    });
+  })
+  // `/settle` spends on pubnet, so not before deciding again how far the hot key's power reaches
+  // (0048). Whatever lands narrows the message to what is still missing (0009 decision 49). Landed:
+  // spend budgets (0024); holding back a channel left open after a deploy (0090); an alarm on a
+  // failing signer (0027's `signer-failures`, one per network the alarms list); and each API key
+  // owner's settlements counted in its own account (0107), so self-payments from many cheap
+  // addresses can no longer use up a budget other sellers need (0024's residual risk).
   .refine((env) => env.NETWORK !== STELLAR_NETWORKS.pubnet, {
-    message:
-      "stellar:pubnet is refused until per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
+    message: "stellar:pubnet is refused until the hot key's re-check (0048) lands",
     path: ["NETWORK"],
   });
 
@@ -384,10 +447,17 @@ export type Env = z.input<typeof envSchema>;
 /** `SETTLE_TIMEOUT_MS` when unset, unless `SETTLE_BUDGET_MS` is shorter. */
 const DEFAULT_SETTLE_TIMEOUT_MS = 20_000;
 
+/**
+ * How long a search waits for the query's vector before it ranks by words alone (ADR 0014). An
+ * interim value: a measurement of the model on the server sets it.
+ */
+const SEARCH_MODEL_TIMEOUT_MS = 2_000;
+
 /** Parsed environment, grouped for the parts that consume it. */
 export interface Config {
   network: (typeof STELLAR_NETWORKS)[keyof typeof STELLAR_NETWORKS];
   port: number;
+  metricsPort?: number;
   logLevel: "debug" | "info" | "warn" | "error";
   gitCommit?: string;
   rpcUrls: string[];
@@ -429,11 +499,17 @@ export interface Config {
     perAssetStroops: bigint;
     perOtherAssetStroops: bigint;
     tierOtherStroops: bigint;
+    /** Every account on the free plan together (0107). */
+    freeStroops: bigint;
+    /** The plans an API key holder's account can be on, by name, `free` among them (0107). */
+    accountPlans: ReadonlyMap<string, AccountPlan>;
     /** The fee account's balance below which `/settle` refuses. */
     floorStroops: bigint;
     balanceIntervalMs: number;
   };
   catalog: { listLocal: boolean };
+  /** The search model container (ADR 0014). */
+  searchModel: { url: string; timeoutMs: number };
 }
 
 /** Names every invalid setting; never echoes a value, so a secret can't leak into logs. */
@@ -521,6 +597,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   return {
     network: e.NETWORK,
     port: e.PORT,
+    ...(e.METRICS_PORT !== undefined && { metricsPort: e.METRICS_PORT }),
     logLevel: e.LOG_LEVEL,
     gitCommit: e.GIT_COMMIT,
     rpcUrls: e.RPC_URLS ?? [DEFAULT_TESTNET_RPC],
@@ -565,10 +642,13 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       perAssetStroops: e.SPEND_PER_ASSET_STROOPS,
       perOtherAssetStroops: e.SPEND_PER_ASSET_OTHER_STROOPS,
       tierOtherStroops: e.SPEND_TIER_OTHER_STROOPS,
+      freeStroops: e.SPEND_FREE_STROOPS,
+      accountPlans: e.ACCOUNT_PLANS,
       floorStroops: e.SPEND_FLOOR_STROOPS,
       balanceIntervalMs: e.SPEND_BALANCE_INTERVAL_MS,
     },
     catalog: { listLocal: e.CATALOG_LIST_LOCAL },
+    searchModel: { url: e.SEARCH_MODEL_URL, timeoutMs: SEARCH_MODEL_TIMEOUT_MS },
   };
 }
 
@@ -580,4 +660,14 @@ export function parseMigrateConfig(env: Record<string, string | undefined>): {
   databaseUrl: string;
 } {
   return { databaseUrl: parseEnv(migrateEnvSchema, env).DATABASE_URL };
+}
+
+/** `pnpm keys` reads the plans as the service does, so `plan` sets only one the service knows. */
+const plansEnvSchema = z.object({ ACCOUNT_PLANS: accountPlans });
+
+/** The plans `ACCOUNT_PLANS` defines, or the defaults; needs no other setting. */
+export function parseAccountPlansConfig(
+  env: Record<string, string | undefined>,
+): ReadonlyMap<string, AccountPlan> {
+  return parseEnv(plansEnvSchema, env).ACCOUNT_PLANS;
 }

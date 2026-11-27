@@ -65,6 +65,28 @@ its own channel pool, signer, RPC endpoints and store, before mainnet joins.
   left: a request with a real key waits behind the flood's reads. Decide whether the edge stops
   it (0038) or a guard on refusals does, with the faults the threat model lists (from Stanisław's
   review of #185, 2026-11-13).
+- From 0107, before pubnet opens (2026-11-24):
+  - add `stellar:pubnet` to infra's `networks` (`infra/envs/production.json`), so pubnet gets its
+    own `signer-failures` and `budget-nearing` alarms, and fire-test `budget-nearing` for `free`;
+  - size the registry's pool (3 connections): every pubnet settlement now reads its account's plan
+    there, inside the settle budget, so a slow read can use up the budget;
+  - point the portal at pubnet's database: until then the hub's usage counts testnet's, where no
+    payment has a key, and shows 0;
+  - run once by hand the runbook's Logs Insights query for `spend_limit_reached` and its
+    `keys plan` Docker command ("Account plans").
+- From the review of #236 (0107, 2026-11-24):
+  - the pruner's horizon is per network: it deletes `spend_reservations` by age alone, 62 days
+    on a network that requires a key and 7 elsewhere, so a pass with testnet's horizon over
+    pubnet's database would delete the month's rows and give every account its quota back
+    (Stanisław). Start after 0157's `compose()` test for the keyed wiring exists;
+  - take `ACCOUNT_PLANS`, `SPEND_FREE_STROOPS` and `SPEND_GLOBAL_STROOPS` from the server's `.env`
+    through `${…}` in both `deploy/production/compose.yaml` and `portal.compose.yaml`: neither
+    passes them today, so both services run on the defaults built into their images, and one
+    value read by both keeps the facilitator and the portal on the same plans without a pull
+    request (Oskar; the runbook's "Account plans" says how it is until then). Check what each
+    service does with an empty value before using `${…:-}`;
+  - log in the portal when a row names a plan its config lacks, as the facilitator's
+    `account_plan_unknown` does: today it shows `free` silently (Oskar).
 
 ## Open Questions
 
@@ -99,4 +121,6 @@ From Oskar's review of #93:
 - [ ] Each network's spend budgets, the global one included, count only its own fee account's fees
 - [ ] `deploy/` gives each network its own secret files, OpenBao socket mount and AppRole files
 - [ ] The "until 0126" notes in ADR 0004, ADR 0011 and the spine are gone
+- [ ] Once pubnet has its database, the mainnet sellers are seeded into its catalog with
+      `pnpm seed` (0155 decision 6: testnet's catalog holds testnet's listings only)
 - [ ] The open questions above are decided and recorded in ADR 0012 or the spine

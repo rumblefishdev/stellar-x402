@@ -7,6 +7,7 @@ import {
   type Operation,
   type rpc,
 } from "@stellar/stellar-sdk";
+import { monthEnd, utcInstant } from "@stellar-x402/api-keys";
 import type { StellarNetwork } from "@stellar-x402/config";
 import {
   FeeLimitError,
@@ -35,11 +36,12 @@ import {
   type ClaimResult,
   type LeaseFence,
   type SettlementKey,
+  type SettlementListing,
   type SettlementRecord,
   type SettlementStore,
 } from "../ports/index.js";
 import type { BeforeSubmitResult, Caller, SettlementHooks, SettlementOrigin } from "./hooks.js";
-import { NONCE_CONSUMED_REASON, type IsNonceUsed } from "./nonce-used.js";
+import type { IsNonceUsed } from "./nonce-used.js";
 import {
   attemptUpdates,
   createRecords,
@@ -47,19 +49,15 @@ import {
   resultUpdate,
   type Records,
 } from "./records.js";
+import { ADVICE, SETTLE_REASONS, UNSENT, UNSENT_REASONS, reasonAfterFailure } from "./reasons.js";
 import {
-  NOT_SIGN_AGAIN,
-  SETTLE_REASONS,
-  UNSENT,
-  UNSENT_REASONS,
-  reasonAfterFailure,
-} from "./reasons.js";
-import {
+  PAY_TO_BALANCE_MISSING,
   UpstreamTimeoutError,
   payerExpiration,
   payerNonce,
   type Check,
   type Verified,
+  type VerifyTrace,
 } from "./verify.js";
 
 /**
@@ -80,6 +78,8 @@ export const REFUSED_AFTER_VERIFY = new Set<string>([
   SETTLE_REASONS.ledgerBound,
   // Upstream's code, from `/settle`'s re-check of the checks.
   "invalid_exact_stellar_payload_fee_exceeds_maximum",
+  // The same refusal from the re-check, when the payment would create `payTo`'s balance (0107).
+  PAY_TO_BALANCE_MISSING,
 ]);
 
 /** The pool as `/settle` uses it. */
@@ -93,7 +93,7 @@ export interface SettlerDeps {
   check: Check;
   store: SettlementStore;
   submitter: Submitter;
-  hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
+  hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "listingOf" | "onSuccess">;
   logger: Logger;
   metrics: NetworkMetrics;
   /** Passed to `beforeSubmit` as the most the facilitator can pay for this settlement. */
@@ -137,6 +137,11 @@ export interface Settled {
   key?: SettlementKey;
   /** Answered from an existing record, not by the call that claimed it. */
   replay?: boolean;
+  /**
+   * The checks' {@link VerifyTrace.upstreamMessage}, when they refused: for the `settled` log,
+   * never sent.
+   */
+  upstreamMessage?: string;
   /**
    * Answered from a record claimed before 0073 (`reopened` -1), which never reopens: its answer
    * stays "sign a new payment", with no `extra.retryable` (0073 decision 25).
@@ -208,13 +213,16 @@ export function createSettler(deps: SettlerDeps): Settle & {
       return { success: true, transaction, network, payer: record.payer };
     }
     if (isFinal(record)) {
-      return failure(
+      const response = failure(
         record.errorReason ?? SETTLE_REASONS.unexpected,
         record.payer,
-        // Only a `refused` record has one: the checks' message (0086).
+        // A `refused` record's is the checks' message (0086), a `rejected` one's the
+        // before-submit hook's (0107); no other record has one.
         record.errorMessage,
         transaction,
       );
+      const extra = refusalExtra(record);
+      return extra ? { ...response, extra } : response;
     }
     // Not final yet: sent or about to be, unless nothing was signed.
     return transaction
@@ -319,27 +327,21 @@ export function createSettler(deps: SettlerDeps): Settle & {
   ): Promise<Settled> => {
     const { response } = settled;
     if (response.success || settled.claimedBefore0073) return settled;
-    const reason = response.errorReason ?? "";
-    // Another transaction used the nonce (0141): no repeat can settle it, and only the chain tells
-    // whether it paid, so the answer carries no advice at all.
-    if (reason === NONCE_CONSUMED_REASON || reason === SETTLE_REASONS.nonceConsumedElsewhere)
-      return settled;
-    // `payer_busy` recorded nothing (0024): like an unsent answer, the same payment can be sent
-    // again, so it carries `retryable` and "repeat the same payment", not "sign a new one".
-    const unsent =
-      ((UNSENT.has(reason) || settled.reopenRefused) && !response.transaction) ||
-      reason === SETTLE_REASONS.payerBusy;
-    const ended = settled.key !== undefined && !NOT_SIGN_AGAIN.has(reason);
-    if (!unsent && !ended) return settled;
+    const advice = ADVICE.get(response.errorReason ?? "");
+    if (advice === "none") return settled;
+    // A hash means an envelope was sent, so the record doesn't reopen.
+    const unsent = (advice === "repeat" || settled.reopenRefused) && !response.transaction;
+    // Without a record (`key`), only an unsent answer advises anything.
+    if (!unsent && settled.key === undefined) return settled;
     const valid = await validOnce();
     if (!valid) return settled;
     const { expiration, left } = valid;
     // First: a client reads the archived entries at the end of the checks' message (0066).
-    const withExtra = (advice: string, retryable: boolean): Settled => ({
+    const withExtra = (text: string, retryable: boolean): Settled => ({
       ...settled,
       response: {
         ...response,
-        errorMessage: response.errorMessage ? `${advice}; ${response.errorMessage}` : advice,
+        errorMessage: response.errorMessage ? `${text}; ${response.errorMessage}` : text,
         extra: { ...response.extra, retryable, expirationLedger: expiration },
       },
     });
@@ -839,8 +841,9 @@ export function createSettler(deps: SettlerDeps): Settle & {
       response: failure(SETTLE_REASONS.timeout, undefined),
     });
     let checked: Awaited<ReturnType<Check>>;
+    const trace: VerifyTrace = {};
     try {
-      checked = await bounded(deps.check(payload, requirements), left());
+      checked = await bounded(deps.check(payload, requirements, trace), left());
     } catch (error) {
       if (error instanceof OutOfTimeError) return unclaimed();
       // An RPC that gave no answer judged nothing, as `/verify`'s 503 says: nothing is claimed, so
@@ -869,6 +872,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
           });
           return {
             key: identity.key,
+            upstreamMessage: trace.upstreamMessage,
             response: failure(
               verdict.invalidReason ?? SETTLE_REASONS.unexpected,
               verdict.payer,
@@ -917,6 +921,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
           // payment" while this one's auth entry can still land elsewhere.
           return {
             key: record.key,
+            upstreamMessage: trace.upstreamMessage,
             response: failure(errorReason, verdict.payer, verdict.invalidMessage),
           };
         }
@@ -924,6 +929,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
       return {
         ...untouched,
         reopenRefused: reopening !== undefined,
+        upstreamMessage: trace.upstreamMessage,
         response: failure(
           verdict.invalidReason ?? SETTLE_REASONS.unexpected,
           verdict.payer,
@@ -934,6 +940,14 @@ export function createSettler(deps: SettlerDeps): Settle & {
     const { payer, nonce } = verified;
     const key: SettlementKey = `${network}:${payer}:${nonce}`;
     if (left() <= 0) return unclaimed();
+    // The listing goes into the claim (0154), so no later write can miss it. Cataloging never
+    // blocks settle (AD-8): a hook that throws only leaves the record without one.
+    let listing: SettlementListing | undefined;
+    try {
+      listing = deps.hooks.listingOf(payload, requirements);
+    } catch (error) {
+      hookFailed("listingOf", key, error);
+    }
     const settlement = {
       key,
       network,
@@ -943,6 +957,7 @@ export function createSettler(deps: SettlerDeps): Settle & {
       paymentPayload: payload,
       paymentRequirements: requirements,
       createdAt: startedAt,
+      listing,
     };
     // At least the store's grace: a claim cut off by a 0 ms bound may still land. A claim past
     // it is a 500, and the client's repeat finds the record.
@@ -1050,21 +1065,25 @@ export function createSettler(deps: SettlerDeps): Settle & {
       verdictOfHook = { allow: false, errorReason: SETTLE_REASONS.refused };
     }
     if (!verdictOfHook.allow) {
+      const { errorReason, errorMessage } = verdictOfHook;
+      // The message is stored with the reason, so a repeat answers the same (0107).
+      const refusal = {
+        state: "rejected" as const,
+        errorReason,
+        ...(errorMessage !== undefined && { errorMessage }),
+      };
       // Nothing was submitted, so the refusal stands even if it can't be stored. The record then
       // stays `claimed` with no hash, and a repeat after the budget ends it with `…_timeout`.
       try {
         await bounded(
-          advance(
-            key,
-            { state: "rejected", errorReason: verdictOfHook.errorReason },
-            { claim: claim.record.reopened },
-          ),
+          advance(key, refusal, { claim: claim.record.reopened }),
           Math.max(left(), storeGraceMs),
         );
       } catch (error) {
         recordFailed(key, error);
       }
-      return { key, response: failure(verdictOfHook.errorReason, payer) };
+      // Answered from the record this refusal stores, as a repeat of the payment is.
+      return { key, response: answer({ ...claim.record, ...refusal }) };
     }
 
     // The checks and the hook used up the budget: nothing is submitted.
@@ -1165,6 +1184,19 @@ function transferFrom(transaction: Transaction): string | undefined {
   if (operation?.type !== "invokeHostFunction") return undefined;
   const from: unknown = scValToNative(operation.func.invokeContract().args()[0]!);
   return typeof from === "string" ? from : undefined;
+}
+
+/**
+ * What a final record's answer carries in `extra`, from the record alone, so the first answer and
+ * a repeat's agree: for an account's used-up quota (0107), `resetsAt`, the start of the month
+ * after the claim the policy refused. Its message names the next month's start after the policy's
+ * own reading of the clock, taken after the checks: the two differ only when a month's first
+ * instant falls between the claim's start and that reading.
+ */
+function refusalExtra(record: SettlementRecord): SettleResponse["extra"] {
+  return record.errorReason === SETTLE_REASONS.quotaExhausted
+    ? { resetsAt: utcInstant(monthEnd(record.createdAt)) }
+    : undefined;
 }
 
 /** `settlement_reopened_total`'s labels: `reason`, a log field, only when it isn't empty (0027). */

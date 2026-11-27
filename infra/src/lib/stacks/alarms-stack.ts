@@ -1,4 +1,5 @@
-// The topic, the path to Slack, and every alarm of the groups that are on (0027 decisions 12, 26).
+// The topic, the path to Slack, and the alarms of the groups that are on that stay in CloudWatch
+// (0027 decisions 12, 26; 0139): every other row is a Prometheus rule (rules.ts).
 import * as cdk from "aws-cdk-lib";
 import * as chatbot from "aws-cdk-lib/aws-chatbot";
 import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
@@ -16,9 +17,15 @@ import { addProtocolAlarms } from "../alarms/protocol.js";
 import { addSettlementAlarms } from "../alarms/settlement.js";
 import type { EnvironmentConfig } from "../config.js";
 import { names } from "../names.js";
+import { keptInCloudWatch } from "../rules.js";
 
 export interface AlarmsStackProps extends cdk.StackProps {
   readonly config: EnvironmentConfig;
+  /**
+   * For tests: every row as CloudWatch builds it, the rows Prometheus took over included, so each
+   * row's own definition (which the rules read too) stays checked against the alarm list.
+   */
+  readonly everyRow?: boolean;
 }
 
 export class AlarmsStack extends cdk.Stack {
@@ -68,13 +75,15 @@ export class AlarmsStack extends cdk.Stack {
       groups: config.alarmGroups,
       action: new cloudwatchActions.SnsAction(topic),
     });
-    addAvailabilityAlarms(this.alarms, config);
-    addMoneyAlarms(this.alarms, config);
-    addProtocolAlarms(this.alarms, config);
-    addSettlementAlarms(this.alarms, config);
-    addHostAlarms(this.alarms, config);
-    addCostSilenceAlarms(this.alarms, config);
-    addUpstreamAlarms(this.alarms);
+    // Only the rows that stay in CloudWatch; the rest are the Prometheus rules (ADR 0011, 0139).
+    const kept = props.everyRow ? this.alarms : keptInCloudWatch(this.alarms);
+    addAvailabilityAlarms(kept, config);
+    addMoneyAlarms(kept, config);
+    addProtocolAlarms(kept, config);
+    addSettlementAlarms(kept, config);
+    addHostAlarms(kept, config);
+    addCostSilenceAlarms(kept, config);
+    addUpstreamAlarms(kept);
 
     new cdk.CfnOutput(this, "AlarmTopicArn", { value: topic.topicArn });
   }

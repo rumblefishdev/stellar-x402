@@ -1,0 +1,191 @@
+{
+  "network": "stellar:testnet",
+  "ranAt": "2026-11-26T14:23:46.108Z",
+  "facilitator": "GBJ4BV6YMYXZEET72KTQFMWQP665S4EPNTBLIQJB2DDZ52BSH52QKNNM",
+  "channelSetup": "3f0b64730a125221414c6661f43e55d6de911395091cdb9bec9580a7ec1e3479",
+  "buyer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+  "neverTrusted": {
+    "payTo": "GCNCONRZPJJBKRHK7QSQNWGB6B2I37GQDHQGNCHQMLQWIYMQJ67V77FY",
+    "checkTrustline": {
+      "status": "missing",
+      "classicAsset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      "reason": "no trustline"
+    },
+    "clients": {
+      "sdkPayingFetch": {
+        "type": "PaymentError",
+        "code": "payto_trustline_missing",
+        "message": "The seller's account GCNCONRZPJJBKRHK7QSQNWGB6B2I37GQDHQGNCHQMLQWIYMQJ67V77FY has no trustline to USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 (the asset contract CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA): the account must exist and hold one, and only the seller can add it. Nothing was sent.",
+        "paid": "none"
+      },
+      "upstreamFetch": {
+        "type": "Error",
+        "message": "Failed to create payment payload: Stellar trustline is missing for account GCNCONRZPJJBKRHK7QSQNWGB6B2I37GQDHQGNCHQMLQWIYMQJ67V77FY and asset CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA: HostError: Error(Contract, #13)"
+      }
+    }
+  },
+  "losesTrustline": {
+    "payTo": "GAEQBIONIY7D4YO5HCJW7WXCQMG2EK2FVYSPQ4FHU2QEBLZVU2QPI32N",
+    "trustlineOpened": "0fc01c179fddcfbea4b12c931ad4f66658d558f560de2f9d010d4e6861f0b527",
+    "checkTrustlineWhileSigning": {
+      "status": "ok",
+      "classicAsset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+    },
+    "trustlineRemoved": "f92da77115b88858cb8a51c5396caf20f0a18e8a5902ece9aa49732244532b8e",
+    "checkTrustlineAfterRemoval": {
+      "status": "missing",
+      "classicAsset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      "reason": "no trustline"
+    },
+    "first": {
+      "atSeller": {
+        "status": 402,
+        "error": "invalid_exact_stellar_payto_trustline_missing",
+        "body": "{\"error\":\"invalid_exact_stellar_payto_trustline_missing\"}"
+      },
+      "atVerify": {
+        "isValid": false,
+        "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+        "invalidMessage": "this payment will not settle here, but its auth entry may still land in ledger 5935934: sign a new payment once that ledger has closed; GAEQBIONIY7D4YO5HCJW7WXCQMG2EK2FVYSPQ4FHU2QEBLZVU2QPI32N has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935875: the account must exist and hold one",
+        "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+        "extra": {
+          "expirationLedger": 5935934
+        }
+      }
+    },
+    "merged": "0277ebed3656efb26e2c9dec4e4aa15e1510fbc52034ea2b1cb4fa3f131d474b",
+    "mergedInto": "GCNCONRZPJJBKRHK7QSQNWGB6B2I37GQDHQGNCHQMLQWIYMQJ67V77FY",
+    "checkTrustlineAfterMerge": {
+      "status": "missing",
+      "classicAsset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      "reason": "the account does not exist"
+    },
+    "second": {
+      "atSeller": {
+        "status": 402,
+        "error": "invalid_exact_stellar_payto_trustline_missing",
+        "body": "{\"error\":\"invalid_exact_stellar_payto_trustline_missing\"}"
+      },
+      "atVerify": {
+        "isValid": false,
+        "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+        "invalidMessage": "this payment will not settle here, but its auth entry may still land in ledger 5935934: sign a new payment once that ledger has closed; GAEQBIONIY7D4YO5HCJW7WXCQMG2EK2FVYSPQ4FHU2QEBLZVU2QPI32N has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935876: the account must exist and hold one",
+        "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+        "extra": {
+          "expirationLedger": 5935934
+        }
+      }
+    }
+  },
+  "sellerReceived": [
+    {
+      "seller": "A",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": false,
+      "status": 402,
+      "error": "Payment required"
+    },
+    {
+      "seller": "A",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": false,
+      "status": 402,
+      "error": "Payment required"
+    },
+    {
+      "seller": "B",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": false,
+      "status": 402,
+      "error": "Payment required"
+    },
+    {
+      "seller": "B",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": true,
+      "status": 402,
+      "error": "invalid_exact_stellar_payto_trustline_missing"
+    },
+    {
+      "seller": "B",
+      "method": "GET",
+      "url": "/weather?city=Warsaw",
+      "paid": true,
+      "status": 402,
+      "error": "invalid_exact_stellar_payto_trustline_missing"
+    }
+  ],
+  "sellerLog": [],
+  "refusalsRead": [
+    {
+      "status": "refused",
+      "reason": "invalid_exact_stellar_payto_trustline_missing",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935934: sign a new payment once that ledger has closed; GAEQBIONIY7D4YO5HCJW7WXCQMG2EK2FVYSPQ4FHU2QEBLZVU2QPI32N has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935875: the account must exist and hold one",
+      "sellerMustAct": true
+    },
+    {
+      "status": "refused",
+      "reason": "invalid_exact_stellar_payto_trustline_missing",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935934: sign a new payment once that ledger has closed; GAEQBIONIY7D4YO5HCJW7WXCQMG2EK2FVYSPQ4FHU2QEBLZVU2QPI32N has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935876: the account must exist and hold one",
+      "sellerMustAct": true
+    }
+  ],
+  "facilitatorVerified": [
+    {
+      "time": "2026-11-26T14:23:40.754Z",
+      "level": "info",
+      "event": "verified",
+      "network": "stellar:testnet",
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+      "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+      "rpc": "RPC_URLS[0]#c8522d1c",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935934: sign a new payment once that ledger has closed; GAEQBIONIY7D4YO5HCJW7WXCQMG2EK2FVYSPQ4FHU2QEBLZVU2QPI32N has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935875: the account must exist and hold one"
+    },
+    {
+      "time": "2026-11-26T14:23:40.770Z",
+      "level": "info",
+      "event": "verified",
+      "network": "stellar:testnet",
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+      "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935934: sign a new payment once that ledger has closed; GAEQBIONIY7D4YO5HCJW7WXCQMG2EK2FVYSPQ4FHU2QEBLZVU2QPI32N has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935875: the account must exist and hold one"
+    },
+    {
+      "time": "2026-11-26T14:23:46.092Z",
+      "level": "info",
+      "event": "verified",
+      "network": "stellar:testnet",
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+      "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+      "rpc": "RPC_URLS[0]#c8522d1c",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935934: sign a new payment once that ledger has closed; GAEQBIONIY7D4YO5HCJW7WXCQMG2EK2FVYSPQ4FHU2QEBLZVU2QPI32N has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935876: the account must exist and hold one"
+    },
+    {
+      "time": "2026-11-26T14:23:46.106Z",
+      "level": "info",
+      "event": "verified",
+      "network": "stellar:testnet",
+      "isValid": false,
+      "invalidReason": "invalid_exact_stellar_payto_trustline_missing",
+      "payer": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+      "message": "this payment will not settle here, but its auth entry may still land in ledger 5935934: sign a new payment once that ledger has closed; GAEQBIONIY7D4YO5HCJW7WXCQMG2EK2FVYSPQ4FHU2QEBLZVU2QPI32N has no USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 trustline as of ledger 5935876: the account must exist and hold one"
+    }
+  ],
+  "checks": {
+    "sdkStoppedBeforeSigning": true,
+    "upstreamFetchStoppedBeforeSigning": true,
+    "sellerAGotNoPayment": true,
+    "firstRefusedAtSeller": true,
+    "secondRefusedAtSeller": true,
+    "verifyNamesAccount": true,
+    "readerMarksSellerFix": true,
+    "facilitatorLoggedMessage": true
+  }
+}

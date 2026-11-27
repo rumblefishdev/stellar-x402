@@ -41,10 +41,44 @@ export interface CatalogQuery {
   offset: number;
 }
 
+/**
+ * A listing as `list` and `search` return it: the upstream shape and `curated`, whether its host's
+ * `stellar.toml` proof of its account passed (0070). Upstream has no such field.
+ */
+export type ListedResource = DiscoveryResource & { curated: boolean };
+
 export interface CatalogPage {
-  items: DiscoveryResource[];
+  items: ListedResource[];
   /** Matches before `limit` and `offset`. */
   total: number;
+}
+
+/** `GET /discovery/search`'s words and filters (0120); the route resolves `limit` and the cursor. */
+export interface CatalogSearch {
+  /** The query as the agent wrote it. */
+  text: string;
+  type?: string;
+  payTo?: string;
+  /** A CAIP-2 id; without one, both networks are searched (0155). */
+  network?: string;
+  limit: number;
+  /** The last result of the page before; this page starts after it. */
+  after?: CatalogSearchPosition;
+  /** The query's vector, of the store's model; without it, search ranks by words alone. */
+  meaning?: number[];
+}
+
+/**
+ * Where a result sits: its rank (by words, or the fused score), as PostgreSQL writes it, and its
+ * key for ties.
+ */
+export interface CatalogSearchPosition {
+  rank: string;
+  key: CatalogKey;
+}
+
+export interface CatalogSearchHit extends CatalogSearchPosition {
+  resource: ListedResource;
 }
 
 /** `stale`: the stored entry came from a check that started later; nothing was written. */
@@ -52,7 +86,9 @@ export type UpsertOutcome = "inserted" | "updated" | "stale";
 
 /** Bazaar catalog (AD-7, AD-19, AD-20). */
 export interface CatalogStore {
-  /** The stored entry of `key`, as `list` returns it. */
+  /** The model the cards' vectors and the query's are of (ADR 0014); a cursor names it. */
+  readonly searchModel: string;
+  /** The stored entry of `key`, as `list` returns it without `curated`. */
   get(key: CatalogKey): Promise<DiscoveryResource | undefined>;
   /**
    * Idempotent by key. Replaces the stored entry, `accepts` included, unless the stored one came
@@ -63,9 +99,27 @@ export interface CatalogStore {
   upsert(entry: CatalogEntry): Promise<UpsertOutcome>;
   /**
    * Matching entries in insertion order, with no ranking. An upsert of an existing key keeps its
-   * place, so offset paging doesn't shift each time a resource settles again.
+   * place, so offset paging doesn't shift each time a resource settles again. An entry is
+   * `curated` when its proof was checked in the 30 days before `now`, the app's clock, in ms.
    */
-  list(query: CatalogQuery): Promise<CatalogPage>;
+  list(query: CatalogQuery, now: number): Promise<CatalogPage>;
+  /**
+   * With `meaning`, entries whose vector of that model is close to it (cosine similarity 0.60 or
+   * more), ranked by meaning and by words fused (ADR 0014); words never add an entry. Without it,
+   * entries that hold a word of `text`, ranked by words: a word in the name counts most, then
+   * tags, description and parameters, and each repeat counts again (threat model, "Ranking by
+   * repeated words"). Either rank is then multiplied by the listing's quality factor q: its paying
+   * wallets from 30 days before `now` on, read from the settlements, a proof checked in the same
+   * 30 days, a tunnel host and an empty description (ADR 0014); `now` is the app's clock, in ms. Equal ranks go by key, so a page that
+   * starts `after` a result goes on where the page before stopped, unless a write between the
+   * pages moved the ranks.
+   */
+  search(query: CatalogSearch, now: number): Promise<CatalogSearchHit[]>;
+  /**
+   * Whether a listing that passes `query`'s filters has no vector of the store's model yet, or no
+   * card at all (ADR 0014): search by meaning can't find it, so an answer by meaning is partial.
+   */
+  waitingForVector(query: CatalogSearch): Promise<boolean>;
 }
 
 /** Where a listing attempt ended: the payment's copy, or the check of the seller's 402. */

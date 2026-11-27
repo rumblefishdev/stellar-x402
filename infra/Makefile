@@ -1,4 +1,4 @@
-# The AWS side of stellar-x402 (task 0027): four stacks, deployed by hand with SSO (decision 3).
+# The AWS side of stellar-x402 (task 0027): five stacks, deployed by hand with SSO (decision 3).
 # No workflow holds AWS credentials. Every deploy is agreed first: the account is shared.
 #
 #   aws sso login --profile stellar && export AWS_PROFILE=stellar
@@ -16,6 +16,7 @@ CDK := pnpm exec cdk --app "$(PRODUCTION_APP)"
 	diff-production-uptime deploy-production-uptime \
 	diff-production-alarms deploy-production-alarms \
 	diff-production-watch deploy-production-watch \
+	diff-production-heartbeat deploy-production-heartbeat \
 	fire-test check-series check-emf-disabled telemetry-arns rules
 
 # The catalog and the config package first: turbo builds what infra imports.
@@ -41,6 +42,9 @@ diff-production: build
 # On a fresh account or a rebuild, deploy Watch first, wait for `make check-series GROUP=watch`,
 # then Alarms: no stack depends on another, so --all may create the alarms before the check runs,
 # and watch-no-invocations treats missing data as breaching (it would page until the first run).
+# Heartbeat likewise: with `heartbeat` on, a rebuild makes the topic and the alarm together, and
+# monitoring-heartbeat, breaching on missing data, fires about 20 minutes later unless the VM's
+# Watchdog reaches the new topic first. Turn the group off for a rebuild, on once it publishes.
 # A deploy of all stacks ships every pending change, a parked one too (the explorer's 0312
 # "stowaway"), so the full diff is printed first, into the same output. --require-approval
 # broadening stops on IAM widening only: read the diff for removals too (the Prices API's 0157).
@@ -80,6 +84,14 @@ diff-production-watch: build
 deploy-production-watch: build
 	$(CDK) diff --strict $(PREFIX)-Watch
 	$(CDK) deploy $(PREFIX)-Watch --exclusively --require-approval broadening
+
+# The monitoring VM's heartbeat topic and alarm, and its Roles Anywhere role (lore 0139).
+diff-production-heartbeat: build
+	$(CDK) diff --strict $(PREFIX)-Heartbeat
+
+deploy-production-heartbeat: build
+	$(CDK) diff --strict $(PREFIX)-Heartbeat
+	$(CDK) deploy $(PREFIX)-Heartbeat --exclusively --require-approval broadening
 
 # The delivery test, after every deploy of the alarms (ADR 0011, decision 12): done only when a
 # person sees the message in Slack. The default alarm reads a metric written only on a failure,

@@ -12,7 +12,6 @@ import {
   TransactionBuilder,
   nativeToScVal,
 } from "@stellar/stellar-sdk";
-import { EMF_LINE_PREFIX } from "@stellar-x402/metrics-catalog";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MIGRATIONS, migrate } from "../src/adapters/postgres-schema.js";
 import { ConfigError, parseConfig } from "../src/config.js";
@@ -20,40 +19,36 @@ import { apiKeyHash, newApiKey } from "@stellar-x402/api-keys";
 import { supportedResponse } from "../src/http/supported.js";
 import { jsonLogger, rpcEndpointName } from "../src/logger.js";
 import { main } from "../src/main.js";
+import { spendHorizonMs } from "../src/pruner.js";
+import { longestSpendWindowMs } from "../src/spend/limits.js";
 import { start, type Started } from "../src/start.js";
 import { memoryMetrics } from "../src/metrics.js";
 import { testDatabase } from "./database.js";
 import { hardened, ledgerEntries, rpcStub } from "./rpc-stub.js";
 import { fakeOpenBao, signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
-type EmfModule = typeof import("../src/adapters/emf-metrics.js");
-type EmfWriter = ReturnType<EmfModule["emfMetrics"]>;
-/**
- * Each `emfMetrics()` call's options, the writer it returned and the seeds `main()` gave that
- * writer: `main()`'s seed and its issue logging are checked on them (0027).
- */
-const emf = vi.hoisted(() => ({
-  options: [] as Parameters<EmfModule["emfMetrics"]>[0][],
-  writers: [] as EmfWriter[],
-  seeds: [] as Parameters<EmfWriter["seedZero"]>[0][],
+type PromModule = typeof import("../src/adapters/prometheus-metrics.js");
+/** Each `prometheusMetrics()` call's options and writer: `main()`'s issue logging and liveness. */
+const prom = vi.hoisted(() => ({
+  options: [] as Parameters<PromModule["prometheusMetrics"]>[0][],
+  writers: [] as ReturnType<PromModule["prometheusMetrics"]>[],
+  /** How many `/metrics` listeners `main()` made. */
+  listeners: 0,
 }));
-vi.mock("../src/adapters/emf-metrics.js", async (importActual) => {
-  const actual = await importActual<EmfModule>();
+vi.mock("../src/adapters/prometheus-metrics.js", async (importActual) => {
+  const actual = await importActual<PromModule>();
   return {
     ...actual,
-    emfMetrics: (opts: Parameters<EmfModule["emfMetrics"]>[0]) => {
-      emf.options.push(opts);
-      // Off stdout unless the test gives `main()` a sink: `LOG_LEVEL` quiets the logger only.
-      const writer = actual.emfMetrics({ write: () => {}, ...opts });
-      emf.writers.push(writer);
-      const seedZero = writer.seedZero;
-      return {
-        ...writer,
-        seedZero: (series: Parameters<EmfWriter["seedZero"]>[0]) => {
-          emf.seeds.push(series);
-          seedZero(series);
-        },
-      };
+    prometheusMetrics: (opts: Parameters<PromModule["prometheusMetrics"]>[0]) => {
+      prom.options.push(opts);
+      const writer = actual.prometheusMetrics(opts);
+      prom.writers.push(writer);
+      return writer;
+    },
+    metricsListener: (render: () => string) => {
+      prom.listeners++;
+      return actual.metricsListener(render);
     },
   };
 });
@@ -65,6 +60,7 @@ const env = {
   DATABASE_URL: db.urlFor(db.schema),
   ...signerEnv(facilitator),
   CLIENT_IP: "socket",
+  SEARCH_MODEL_URL: "http://127.0.0.1:9",
   CHANNELS: Keypair.random().publicKey(),
   BODY_LIMIT_BYTES: "1024",
 };
@@ -97,6 +93,7 @@ describe("facilitator boot", () => {
     });
     app = await start({
       config,
+      embedder: noSearchModel,
       logger,
       metrics: memoryMetrics(),
       stores: db.stores(),
@@ -175,8 +172,7 @@ describe("startup with a bad config", () => {
   }, 20_000);
 
   it("refuses stellar:pubnet before serving anything", async () => {
-    // `/settle` spends there: not without the lease's fencing token, and not while self-payments
-    // can use up the shared spend budgets (0024's residual risk).
+    // `/settle` spends there: not before the hot key's reach is decided again (0048).
     const pubnet = {
       ...env,
       NETWORK: "stellar:pubnet",
@@ -185,7 +181,7 @@ describe("startup with a bad config", () => {
     const error = await main(pubnet).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigError);
     expect((error as ConfigError).problems).toEqual([
-      "NETWORK stellar:pubnet is refused until per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land",
+      "NETWORK stellar:pubnet is refused until the hot key's re-check (0048) lands",
     ]);
   });
 });
@@ -396,56 +392,80 @@ describe("main()", () => {
     }
   });
 
-  it("seeds settlement_sweeps_total for its network's listed sweeps, and nothing else (0027)", async () => {
-    emf.options.length = 0;
-    emf.seeds.length = 0;
+  it("serves /metrics on METRICS_PORT, with the liveness series once started, until close() (0139)", async () => {
+    const app = await main(
+      { ...env, RPC_URLS: rpc.url, PORT: "0", METRICS_PORT: "0", LOG_LEVEL: "error" },
+      { write: () => {} },
+    );
+    const metricsUrl = `http://127.0.0.1:${app.metricsPort}/metrics`;
+    try {
+      await app.reconciled;
+      // Off the public port, which the tunnel reaches: there /metrics is an unknown route.
+      expect(app.metricsPort).not.toBe(app.port);
+      expect((await fetch(`http://127.0.0.1:${app.port}/metrics`)).status).toBe(404);
+      const response = await fetch(metricsUrl);
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toMatch(/^facilitator_started_timestamp_seconds \d/m);
+      expect(text).toContain(
+        'settlement_sweeps_total{network="stellar:testnet",outcome="listed"} 1',
+      );
+    } finally {
+      await app.close();
+    }
+    // Closed last, the scraper's kept-alive connection included.
+    await expect(fetch(metricsUrl)).rejects.toThrow();
+  });
+
+  it("listens for /metrics only when METRICS_PORT is set (0139)", async () => {
     const app = await main(
       { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" },
       { write: () => {} },
     );
     await app.close();
-    expect(emf.options).toHaveLength(1);
-    expect(emf.seeds).toEqual([
-      [
-        {
-          name: "settlement_sweeps_total",
-          labels: { network: "stellar:testnet", outcome: "listed" },
-        },
-      ],
-    ]);
+    expect(app.metricsPort).toBeUndefined();
   });
 
-  it("writes no liveness seed for a start that fails, and stops the writer (0027 AD-4)", async () => {
-    emf.writers.length = 0;
-    emf.seeds.length = 0;
-    const lines: string[] = [];
+  it("writes no liveness series for a start that fails, and closes /metrics (0139)", async () => {
+    prom.writers.length = 0;
+    prom.listeners = 0;
+    // A port known in advance: `main()` rejects, so it never reports the one it took.
+    const probe = createServer().listen(0);
+    await once(probe, "listening");
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise((resolve) => probe.close(resolve));
     const error = await main(
-      { ...env, CHANNELS: `${env.CHANNELS},${masterActive}`, RPC_URLS: rpc.url, PORT: "0" },
-      { write: (line) => void lines.push(line) },
+      {
+        ...env,
+        CHANNELS: `${env.CHANNELS},${masterActive}`,
+        RPC_URLS: rpc.url,
+        PORT: "0",
+        METRICS_PORT: String(port),
+        LOG_LEVEL: "error",
+      },
+      { write: () => {} },
     ).catch((e: unknown) => e);
     expect(String(error)).toContain(`${masterActive}: master-key-active`);
-    expect(emf.seeds).toEqual([]);
-    // A crash loop of short starts shows as missing data, so `facilitator-silent` fires: the
-    // writer is stopped, and a flush (a minute boundary would run one) writes nothing, not even
-    // a count that came after the error.
-    expect(emf.writers).toHaveLength(1);
-    emf.writers[0]!.increment("http_requests_total", { route: "/verify", status: 200 });
-    await emf.writers[0]!.flush();
-    expect(lines.filter((line) => line.startsWith(EMF_LINE_PREFIX))).toEqual([]);
+    // A crash loop of short starts shows as a missing series, so `facilitator-silent` fires.
+    expect(prom.writers).toHaveLength(1);
+    expect(prom.writers[0]!.render()).not.toContain("facilitator_started_timestamp_seconds");
+    // It listened before the channel check refused the start, and closed on the way out.
+    expect(prom.listeners).toBe(1);
+    await expect(fetch(`http://127.0.0.1:${port}/metrics`)).rejects.toThrow();
   });
 
   it("logs each issue the writer reports as a metric_issue warning (0027)", async () => {
-    emf.options.length = 0;
+    prom.options.length = 0;
     const lines: string[] = [];
     const app = await main(
       { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "warn" },
       { write: (line) => void lines.push(line) },
     );
     try {
-      emf.options[0]!.onIssue!({
+      prom.options[0]!.onIssue!({
         kind: "unknown-value",
         name: "settlement_sweeps_total",
-        dim: "outcome",
+        label: "outcome",
         value: "bogus",
       });
       const logged = lines
@@ -457,41 +477,13 @@ describe("main()", () => {
           event: "metric_issue",
           kind: "unknown-value",
           name: "settlement_sweeps_total",
-          dim: "outcome",
+          label: "outcome",
           value: "bogus",
         }),
       ]);
     } finally {
       await app.close();
     }
-  });
-
-  it("ends close() with the metrics' final flush, on the log's sink (0027)", async () => {
-    const lines: string[] = [];
-    const app = await main(
-      { ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "info" },
-      { write: (line) => void lines.push(line) },
-    );
-    // The start sweep has listed, and the next one is an interval away: exactly one `listed`.
-    await app.reconciled;
-    await app.close();
-    // After the drain, the cataloger and the pruner: nothing writes once close() resolves.
-    const last = lines.at(-1)!;
-    expect(last.startsWith(EMF_LINE_PREFIX)).toBe(true);
-    // One line per write, as the log's.
-    expect(last.indexOf("\n")).toBe(last.length - 1);
-    // The seeded series, written in every window, so the flush always holds it. Summed over the
-    // windows (close() may fall in a later minute than the sweep), the one sweep that listed.
-    const seeds = lines
-      .filter((line) => line.startsWith(EMF_LINE_PREFIX))
-      .map((line) => JSON.parse(line) as Record<string, unknown>)
-      .filter((line) => "settlement_sweeps_total" in line && line.outcome === "listed");
-    expect(seeds.at(-1)).toMatchObject({ network: "stellar:testnet", outcome: "listed" });
-    expect(seeds.reduce((sum, line) => sum + Number(line.settlement_sweeps_total), 0)).toBe(1);
-    // Found first: a missing `shutdown_started` (-1) would pass the order check on its own.
-    const shutdown = lines.findIndex((line) => line.includes('"event":"shutdown_started"'));
-    expect(shutdown).toBeGreaterThanOrEqual(0);
-    expect(lines.lastIndexOf(last)).toBeGreaterThan(shutdown);
   });
 
   it("serves /supported for the key it checked the channels against", async () => {
@@ -583,7 +575,8 @@ describe("main()", () => {
       RATE_LIMIT_WINDOW_MS: String(hour),
     });
     try {
-      // A budget's window is never longer than SPEND_WINDOW_MS, which 0024 keeps.
+      // On testnet, which takes no API key, no limit sums more than SPEND_WINDOW_MS, which 0024
+      // keeps: no account month is counted (`longestSpendWindowMs`).
       const reserve = (id: string, at: number) =>
         app.stores.spend.reserve({
           id,
@@ -610,11 +603,24 @@ describe("main()", () => {
     }
   });
 
+  it("keeps an account's month of reservations where a key is required (0107)", () => {
+    const day = 86_400_000;
+    // An account's payments count from its month's 1st, up to 31 days back; the pruner keeps
+    // twice its window, so about 62 days, as 0107 decision 24 has it.
+    expect(longestSpendWindowMs(day, true)).toBe(31 * day);
+    expect(spendHorizonMs(longestSpendWindowMs(day, true))).toBe(62 * day);
+    expect(longestSpendWindowMs(40 * day, true)).toBe(40 * day);
+    // Where none is, no month is counted: SPEND_WINDOW_MS alone, as in the test above.
+    expect(longestSpendWindowMs(5 * day, false)).toBe(5 * day);
+  });
+
   it("prunes on its timer until it closes", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const app = await main({ ...env, RPC_URLS: rpc.url, PORT: "0", LOG_LEVEL: "error" });
       const prune = vi.spyOn(app.stores.spend, "prune");
+      // What stops the timer is the pruner's own test; here, that `main()`'s close calls it (0157).
+      const close = vi.spyOn(app.pruner, "close");
       try {
         // A tick comes within a minute, ±10%. It reads the latest ledger before any table, a
         // real request to the RPC that fake timers don't wait for (0156).
@@ -623,6 +629,9 @@ describe("main()", () => {
       } finally {
         await app.close();
       }
+      // Deterministic, unlike the check below: a stray tick reads the RPC before it prunes, a real
+      // request the fake timers don't wait for, so on a loaded machine that check can pass alone.
+      expect(close).toHaveBeenCalledTimes(1);
       prune.mockClear();
       await vi.advanceTimersByTimeAsync(10 * 66_000);
       expect(prune).not.toHaveBeenCalled();

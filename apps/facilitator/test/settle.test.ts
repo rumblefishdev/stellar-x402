@@ -11,6 +11,13 @@ import {
   xdr,
   rpc,
 } from "@stellar/stellar-sdk";
+import {
+  PostgresAccountPlanStore,
+  PostgresAccountUsageReader,
+  apiKeyHash,
+  newApiKey,
+  parseAccountPlans,
+} from "@stellar-x402/api-keys";
 import { STELLAR_NETWORKS } from "@stellar-x402/config";
 import {
   FallbackRpc,
@@ -65,11 +72,14 @@ import {
 } from "../src/settlement/settle.js";
 import {
   PAYER_AUTH_REASON,
+  PAY_TO_BALANCE_MISSING,
+  PAY_TO_BALANCE_MISSING_MESSAGE,
   UpstreamTimeoutError,
   createChecker,
   payerNonce,
   type Check,
 } from "../src/settlement/verify.js";
+import { createSpendPolicy } from "../src/spend/policy.js";
 import { testDatabase } from "./database.js";
 import measured from "./fixtures/nonce-consumed-elsewhere.json" with { type: "json" };
 import { holdLease } from "./port-contracts.js";
@@ -300,6 +310,7 @@ function setup(behaviour: Behaviour = landing(), overrides: Partial<SettlerDeps>
     }),
     onFinal: vi.fn<SettlementHooks["onFinal"]>(async () => {}),
     onSuccess: vi.fn<SettlementHooks["onSuccess"]>(async () => {}),
+    listingOf: vi.fn<SettlementHooks["listingOf"]>(() => undefined),
   };
   const lines: string[] = [];
   const metrics = memoryMetrics();
@@ -1155,6 +1166,57 @@ describe("createSettler", () => {
     );
   });
 
+  it("answers payTo's missing balance from its re-check with nothing signed, a fee refusal too (0107)", async () => {
+    // The real checks, over a SAC and a C-address payTo whose balance entry isn't there.
+    const check = createChecker({
+      network,
+      metrics: memoryMetrics().for({ network }),
+      upstream: {
+        verify: async () => ({
+          isValid: false,
+          invalidReason: "invalid_exact_stellar_payload_fee_exceeds_maximum",
+          invalidMessage: "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops",
+          payer,
+        }),
+      },
+      facilitator: Keypair.random().publicKey(),
+      channels: [Keypair.random().publicKey()],
+      minValidityLedgers: 2,
+      maxValidityLedgers: 66,
+      latestLedger: async () => CURRENT,
+      missingTrustline: async () => undefined,
+      nonceUsed: async () => false,
+      assets: { kind: async () => "sac" },
+      rpc: { getLedgerEntries: async () => ({ entries: [], latestLedger: CURRENT }) },
+    });
+    const { settle, submit, hooks, metrics } = setup(landing(), { check });
+    const toContract = { ...requirements, payTo: StrKey.encodeContract(Buffer.alloc(32, 9)) };
+    const expected = {
+      success: false,
+      errorReason: PAY_TO_BALANCE_MISSING,
+      errorMessage: `${untilExpiry.errorMessage}; ${PAY_TO_BALANCE_MISSING_MESSAGE}`,
+      extra: untilExpiry.extra,
+    };
+    const first = await settle(payload(), toContract);
+    expect(first.response).toMatchObject(expected);
+    // Upstream's message, with the fee, for the `settled` log only.
+    expect(first.upstreamMessage).toBe(
+      "simulation-derived fee 302000 stroops exceeds ceiling 250000 stroops",
+    );
+    expect(JSON.stringify(first.response)).not.toContain("302000");
+    // A repeat answers from the record.
+    expect((await settle(payload(), toContract)).response).toMatchObject(expected);
+    expect(hooks.beforeSubmit).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    // The fee went over the ceiling, as for upstream's own code.
+    expect(
+      metrics.value("settlement_refused_after_verify_total", {
+        reason: PAY_TO_BALANCE_MISSING,
+        stage: "check",
+      }),
+    ).toBe(1);
+  });
+
   it("warns and counts a fee or ledger refusal, which means the pool disagreed with /verify", async () => {
     for (const [error, reason] of [
       [new FeeLimitError("x"), "settle_exact_stellar_fee_exceeds_maximum"],
@@ -1207,6 +1269,8 @@ describe("createSettler", () => {
       latestLedger: async () => CURRENT,
       missingTrustline: async () => undefined,
       nonceUsed: async () => false,
+      assets: { kind: async () => "wasm" },
+      rpc: { getLedgerEntries: async () => ({ entries: [], latestLedger: CURRENT }) },
     });
     const { settle, submit } = setup(landing(), { check });
     const { response } = await settle(payload(), requirements);
@@ -1551,7 +1615,7 @@ describe("createSettler", () => {
   });
 
   it("counts every answer by its outcome: result success or error (0027)", async () => {
-    // `result` is the outcome's only dimension set: without it the EMF line has no valid set.
+    // `result` is the outcome's only dimension: without it the series is written as `other`.
     const { settle, metrics } = setup();
     await settle(payload(), requirements);
     await settle(payload(), requirements);
@@ -3102,6 +3166,268 @@ describe("createSettler", () => {
   });
 });
 
+/** Hands each `keyed()` setup nonces of its own, so a late `onFinal` can't reach another's ids. */
+let keyedNonces = 0;
+
+describe("an account's quota and fee budget (0107)", () => {
+  /** Keyed settlements' time: late in November 2026, UTC. */
+  const NOVEMBER = Date.UTC(2026, 10, 24, 12);
+  const DECEMBER = Date.UTC(2026, 11, 1);
+  const DAY = 86_400_000;
+  const CEILING = 250_000n;
+  const OWNER = "discord:1";
+  const QUOTA_MESSAGE =
+    "the account's monthly quota of 2 payments is used up until 2026-12-01T00:00:00Z; " +
+    "contact us for a higher plan";
+
+  /**
+   * `/settle` with the real spend policy, over the test database's spend store and account plans,
+   * on a network that requires an API key; the free plan allows 2 payments a month. Each payment
+   * the pool gets ends as `outcomes` says in turn, then `success`, under a hash of its own, and is
+   * charged `fee`; for `noChannel` the pool finds no channel in time, so nothing is sent.
+   * `onFinal`, if given, decides when the policy's `onFinal` runs, if at all.
+   */
+  function keyed(
+    opts: {
+      freeStroops?: bigint;
+      fee?: bigint;
+      outcomes?: (SubmitResult["status"] | "noChannel")[];
+      check?: Check;
+      onFinal?: (run: () => Promise<void>) => Promise<void>;
+    } = {},
+  ) {
+    const clock = { now: NOVEMBER };
+    const stores = db.stores();
+    const plans = new PostgresAccountPlanStore(db.pool);
+    const policy = createSpendPolicy({
+      store: stores.spend,
+      assets: { tier: () => "known", kind: async () => "sac", confirmed: () => true },
+      floor: { below: () => false },
+      budgets: {
+        windowMs: DAY,
+        globalStroops: 500_000_000n,
+        freeStroops: opts.freeStroops ?? 250_000_000n,
+        perPayerStroops: 20_000_000n,
+        perPayToStroops: 100_000_000n,
+        perKnownAssetStroops: 250_000_000n,
+        perOtherAssetStroops: 20_000_000n,
+        tierOtherStroops: 100_000_000n,
+      },
+      plans,
+      accountPlans: parseAccountPlans("free:2:20000000,basic:10000:25000000"),
+      keyed: true,
+      logger: jsonLogger("error", () => {}),
+      metrics: memoryMetrics(),
+      now: () => clock.now,
+    });
+    const outcomes = [...(opts.outcomes ?? [])];
+    let sent = 0;
+    const { settle, submit } = setup(
+      async (submitOpts) => {
+        const outcome = outcomes.shift() ?? "success";
+        if (outcome === "noChannel") throw new QueueTimeoutError("x");
+        const hash = (++sent).toString(16).padStart(64, "0");
+        await submitOpts.onSigned?.(hash, BOUNDS);
+        return { ...result(outcome, hash), feeCharged: opts.fee ?? 41_000n };
+      },
+      {
+        hooks: {
+          beforeSubmit: policy.beforeSubmit,
+          onFinal: (record, origin) => {
+            const run = () => policy.onFinal(record, origin);
+            return opts.onFinal ? opts.onFinal(run) : run();
+          },
+          onSuccess: async () => {},
+          listingOf: () => undefined,
+        },
+        now: () => clock.now,
+        ...(opts.check && { check: opts.check }),
+      },
+    );
+    const base = (keyedNonces += 100);
+    /** Payment `n` of the payer, sent to `/settle` with a key of `owner`'s. */
+    const pay = (n: number, owner = OWNER) =>
+      settle(payload([authEntry(payer, String(base + n))]), requirements, undefined, { owner });
+    const keyOf = (n: number) => `${network}:${payer}:${base + n}` as const;
+    return { pay, keyOf, submit, plans, stores, clock };
+  }
+
+  it("an account past its quota is refused with nothing signed", async () => {
+    const { pay, keyOf, submit, stores } = keyed();
+    expect((await pay(1)).response.success).toBe(true);
+    expect((await pay(2)).response.success).toBe(true);
+
+    // The advice of every answer that ended a payment, then the quota's own message.
+    expect((await pay(3)).response).toEqual({
+      success: false,
+      errorReason: SETTLE_REASONS.quotaExhausted,
+      errorMessage: `${untilExpiry.errorMessage}; ${QUOTA_MESSAGE}`,
+      payer,
+      transaction: "",
+      network,
+      extra: { resetsAt: "2026-12-01T00:00:00Z", ...untilExpiry.extra },
+    });
+    // Refused before anything was signed: the pool never saw it (criterion 2).
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(await stores.settlements.get(keyOf(3))).toMatchObject({
+      state: "rejected",
+      errorReason: SETTLE_REASONS.quotaExhausted,
+      errorMessage: QUOTA_MESSAGE,
+      hashes: [],
+    });
+  });
+
+  it("the same payment again answers the same refusal", async () => {
+    const { pay, submit, clock } = keyed();
+    await pay(1);
+    await pay(2);
+    const first = await pay(3);
+    expect(first.response).toMatchObject({
+      errorReason: SETTLE_REASONS.quotaExhausted,
+      errorMessage: expect.stringContaining(QUOTA_MESSAGE),
+      extra: { resetsAt: "2026-12-01T00:00:00Z" },
+    });
+
+    // From the record, without the hook: the same reason, message and `extra.resetsAt`, byte for
+    // byte, once the month has rolled too.
+    const again = await pay(3);
+    expect(again.replay).toBe(true);
+    expect(JSON.stringify(again.response)).toBe(JSON.stringify(first.response));
+    clock.now = DECEMBER;
+    expect(JSON.stringify((await pay(3)).response)).toBe(JSON.stringify(first.response));
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it("the quota carries over to a new key", async () => {
+    const { pay, stores } = keyed();
+    /** The owner `admit` lets a request with `key` in as. */
+    const ownerOf = async (key: string) => (await stores.apiKeys.ownerOf(apiKeyHash(key)))!;
+    const first = newApiKey();
+    await stores.apiKeys.issue({ hash: apiKeyHash(first), owner: OWNER, now: NOVEMBER });
+    expect((await pay(1, await ownerOf(first))).response.success).toBe(true);
+    expect((await pay(2, await ownerOf(first))).response.success).toBe(true);
+
+    // 0106's third criterion: a revoke and a new key start no new count.
+    await stores.apiKeys.revoke(OWNER, NOVEMBER);
+    const second = newApiKey();
+    await stores.apiKeys.issue({ hash: apiKeyHash(second), owner: OWNER, now: NOVEMBER });
+    expect(await stores.apiKeys.ownerOf(apiKeyHash(first))).toBeUndefined();
+    expect((await pay(3, await ownerOf(second))).response.errorReason).toBe(
+      SETTLE_REASONS.quotaExhausted,
+    );
+  });
+
+  it("the month's roll gives the quota back", async () => {
+    const { pay, clock } = keyed();
+    await pay(1);
+    await pay(2);
+    clock.now = DECEMBER - 1;
+    expect((await pay(3)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    // The 1st at 00:00:00.000 UTC is the new month's.
+    clock.now = DECEMBER;
+    expect((await pay(4)).response.success).toBe(true);
+  });
+
+  it("a raised plan settles at once", async () => {
+    const { pay, plans } = keyed();
+    await pay(1);
+    await pay(2);
+    expect((await pay(3)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    // The operator's `keys plan`: the account's next request reads it (criterion 2).
+    await plans.setPlan({ owner: OWNER, plan: "basic", now: NOVEMBER, setBy: "operator:test" });
+    expect((await pay(4)).response.success).toBe(true);
+  });
+
+  it("free accounts fill free; a raised account still settles", async () => {
+    // Each settlement is charged the ceiling, so two fill `free` (criterion 3).
+    const { pay, plans } = keyed({ freeStroops: 2n * CEILING, fee: CEILING });
+    const raised = { owner: "operator:acme", plan: "basic", now: NOVEMBER, setBy: "operator:test" };
+    await plans.setPlan(raised);
+    expect((await pay(1, "discord:1")).response.success).toBe(true);
+    expect((await pay(2, "discord:2")).response.success).toBe(true);
+
+    const refused = (await pay(3, "discord:3")).response;
+    expect(refused).toMatchObject({
+      success: false,
+      errorReason: SETTLE_REASONS.spendLimitFree,
+      errorMessage:
+        `${untilExpiry.errorMessage}; the free plan's shared allowance is used up for now; ` +
+        "try again later, or contact us for a higher plan",
+    });
+    expect(refused.extra).toEqual(untilExpiry.extra);
+    expect((await pay(4, raised.owner)).response.success).toBe(true);
+  });
+
+  it("a failed, included settlement counts as a payment; a refused one doesn't", async () => {
+    const check = vi.fn(passing);
+    const { pay, submit } = keyed({ outcomes: ["failed"], check });
+    // Included and failed: the network charged its fee, so it is one of the month's payments.
+    expect((await pay(1)).response.errorReason).toBe(SETTLE_REASONS.failed);
+    // Refused by the checks: never claimed, so never reserved.
+    const invalidReason = "invalid_exact_stellar_payload_fee_exceeds_maximum";
+    check.mockResolvedValueOnce({ response: { isValid: false, invalidReason, payer } });
+    expect((await pay(2)).response.errorReason).toBe(invalidReason);
+    expect((await pay(3)).response.success).toBe(true);
+    expect((await pay(4)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it("a payment the policy refused isn't one of the month's payments", async () => {
+    // `free` holds one ceiling a day, and each settlement is charged the ceiling.
+    const { pay, clock } = keyed({ freeStroops: CEILING, fee: CEILING });
+    /** The account's payments this month, as the portal's view counts them. */
+    const payments = () =>
+      new PostgresAccountUsageReader(db.pool).paymentsSince(OWNER, Date.UTC(2026, 10, 1));
+    expect((await pay(1)).response.success).toBe(true);
+    expect((await pay(2)).response.errorReason).toBe(SETTLE_REASONS.spendLimitFree);
+    expect(await payments()).toBe(1);
+
+    // A day on, `free` has room again, and the refusal left the month a payment short of its 2.
+    clock.now += DAY;
+    expect((await pay(3)).response.success).toBe(true);
+    clock.now += DAY;
+    expect((await pay(4)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    // Nor does the quota's own refusal count.
+    expect(await payments()).toBe(2);
+  });
+
+  // The review of #236: `/settle` doesn't wait for a claim's `onFinal`, and a claim may never get
+  // one (0073 decision 26), so the reopened claim gives up the earlier claim's reservation itself.
+  it.each([
+    ["comes after the repeat", true],
+    ["never comes", false],
+  ])("a reopened payment counts once when the earlier claim's onFinal %s", async (_, late) => {
+    const held: (() => Promise<void>)[] = [];
+    let hold = false;
+    const { pay, submit } = keyed({
+      outcomes: ["success", "noChannel"],
+      onFinal: async (run) => {
+        if (hold) held.push(run);
+        else await run();
+      },
+    });
+    const payments = () =>
+      new PostgresAccountUsageReader(db.pool).paymentsSince(OWNER, Date.UTC(2026, 10, 1));
+    expect((await pay(1)).response.success).toBe(true);
+
+    // The month's last payment: reserved, then the pool finds no channel, so nothing is sent.
+    hold = true;
+    expect((await pay(2)).response).toMatchObject({
+      errorReason: SETTLE_REASONS.noChannelInTime,
+      extra: { retryable: true },
+    });
+    hold = false;
+    // The client repeats it, as the answer says: the same payment, not a third one.
+    expect((await pay(2)).response.success).toBe(true);
+    expect(held).toHaveLength(1);
+    if (late) await held[0]!();
+
+    expect(await payments()).toBe(2);
+    expect((await pay(3)).response.errorReason).toBe(SETTLE_REASONS.quotaExhausted);
+    expect(submit).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("an answer that ended a payment (0082)", () => {
   it("says to sign again only once the expiration ledger has closed, on a repeat too", async () => {
     let ledger = EXPIRATION - 1;
@@ -3326,6 +3652,111 @@ describe("a check refusal (0086)", () => {
     });
     const { settle } = setup(landing(), { check, store });
     await expect(settle(payload(), requirements)).rejects.toThrow("store down");
+  });
+});
+
+describe("settle, the listing of a payment (0154)", () => {
+  const listing = { method: "GET", resourceUrl: "https://seller.example.com/data" };
+  /** Each settlement's listing columns, in key order. */
+  const listings = async () =>
+    (
+      await db.pool.query<Record<string, unknown>>(
+        "SELECT key, listing_method, listing_url FROM settlements ORDER BY key",
+      )
+    ).rows;
+  /** `store.claim`, recorded in `order` and still claiming. */
+  const recordClaims = (store: SettlementStore, order: string[]) => {
+    const claim = store.claim.bind(store);
+    return vi.spyOn(store, "claim").mockImplementation(async (settlement) => {
+      order.push("claim");
+      return claim(settlement);
+    });
+  };
+
+  it("asks listingOf for the payment's listing right before the claim, and claims with it (0154)", async () => {
+    const { settle, store, hooks, order } = setup();
+    hooks.listingOf.mockImplementation(() => {
+      order.push("listingOf");
+      return listing;
+    });
+    const claims = recordClaims(store, order);
+    const p = payload();
+    const settled = await settle(p, requirements);
+    expect(settled.response).toEqual({ success: true, transaction: HASH, network, payer });
+    expect(order).toEqual(["listingOf", "claim", "beforeSubmit", "submit"]);
+    expect(hooks.listingOf).toHaveBeenCalledTimes(1);
+    expect(hooks.listingOf).toHaveBeenCalledWith(p, requirements);
+    expect(claims.mock.calls[0]![0].listing).toEqual(listing);
+    expect(await listings()).toEqual([
+      { key, listing_method: "GET", listing_url: "https://seller.example.com/data" },
+    ]);
+  });
+
+  it("claims with no listing when listingOf names none (0154)", async () => {
+    const { settle, store, order } = setup();
+    const claims = recordClaims(store, order);
+    expect((await settle(payload(), requirements)).response.success).toBe(true);
+    expect(claims.mock.calls[0]![0].listing).toBeUndefined();
+    expect(await listings()).toEqual([{ key, listing_method: null, listing_url: null }]);
+  });
+
+  it("settles as without the hook when listingOf throws: no listing claimed, settlement_hook_failed logged and counted (0154)", async () => {
+    const { settle, store, submit, hooks, order, lines, metrics } = setup();
+    hooks.listingOf.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    const claims = recordClaims(store, order);
+    const settled = await settle(payload(), requirements);
+    expect(settled.response).toEqual({ success: true, transaction: HASH, network, payer });
+    expect(await store.get(key)).toMatchObject({ state: "success", hashes: [HASH] });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(claims).toHaveBeenCalledTimes(1);
+    expect(claims.mock.calls[0]![0].listing).toBeUndefined();
+    expect(await listings()).toEqual([{ key, listing_method: null, listing_url: null }]);
+    expect(metrics.value("settlement_hook_failures_total", { hook: "listingOf" })).toBe(1);
+    expect(lines.map((line) => JSON.parse(line))).toContainEqual(
+      expect.objectContaining({ event: "settlement_hook_failed", hook: "listingOf" }),
+    );
+  });
+
+  it("asks listingOf once per settle call, every claim attempt carrying its listing (0154)", async () => {
+    // The first payment holds its payer and asset's slot until `land()`: the second's claim is
+    // answered busy and tried again.
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    let signed!: () => void;
+    const isSigned = new Promise<void>((resolve) => (signed = resolve));
+    let calls = 0;
+    const { settle, store, hooks, order } = setup(async (opts) => {
+      if (calls++ > 0) return landing("success", "b".repeat(64))(opts);
+      await opts.onSigned?.(HASH, BOUNDS);
+      signed();
+      await landed;
+      return result();
+    });
+    hooks.listingOf.mockReturnValue(listing);
+    const claims = recordClaims(store, order);
+    const first = settle(payload(), requirements);
+    await isSigned;
+    const waiting = settle(payload([authEntry(payer, "8")]), requirements);
+    await delay(50);
+    land();
+    expect((await first).response.success).toBe(true);
+    expect((await waiting).response.success).toBe(true);
+    const secondKey = `${network}:${payer}:8`;
+    expect(claims.mock.calls.filter(([s]) => s.key === secondKey).length).toBeGreaterThan(1);
+    // One call per `/settle`: a claim tried again carries the same payment's listing.
+    expect(hooks.listingOf).toHaveBeenCalledTimes(2);
+    expect(claims.mock.calls.map(([s]) => s.listing)).toEqual(claims.mock.calls.map(() => listing));
+  });
+
+  it("asks listingOf nothing for a payment the checks refuse, as nothing is claimed (0154)", async () => {
+    const check: Check = async () => ({
+      response: { isValid: false, invalidReason: "invalid_exact_stellar_payload", payer },
+    });
+    const { settle, hooks } = setup(landing(), { check });
+    expect((await settle(payload(), requirements)).response.success).toBe(false);
+    expect(hooks.listingOf).not.toHaveBeenCalled();
   });
 });
 

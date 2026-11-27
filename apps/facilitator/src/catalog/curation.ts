@@ -1,0 +1,123 @@
+import { Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
+import type { StellarNetwork } from "@stellar-x402/config";
+import { guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
+import type { SorobanRpc } from "@stellar-x402/signer-pool";
+import { parse } from "smol-toml";
+import type { Logger } from "../logger.js";
+import type { CurationStore } from "../ports/curation-store.js";
+import { SELLER_USER_AGENT } from "./seller-check.js";
+
+/** How long a finished check stands before a paid call checks the host again (0070). */
+export const CURATION_RECHECK_MS = 6 * 60 * 60 * 1000;
+/** The largest `stellar.toml` SEP-1 allows. */
+export const STELLAR_TOML_BYTES = 100 * 1024;
+
+/**
+ * Whether a seller proves its `payTo` both ways (SEP-1): the host's `stellar.toml` lists it in
+ * `ACCOUNTS`, and the account's `home_domain` is the host. One way alone proves nothing: anyone
+ * can list any account, and any account can name any domain. Domain names compare without case
+ * (RFC 4343). A file that is not TOML proves nothing: many hosts answer every path, this one too,
+ * with their own page.
+ */
+export function provesPayTo(
+  toml: string,
+  homeDomain: string | undefined,
+  host: string,
+  payTo: string,
+): boolean {
+  let accounts: unknown;
+  try {
+    accounts = parse(toml).ACCOUNTS;
+  } catch {
+    return false;
+  }
+  return (
+    Array.isArray(accounts) &&
+    accounts.includes(payTo) &&
+    homeDomain?.toLowerCase() === host.toLowerCase()
+  );
+}
+
+/**
+ * Where SEP-1 puts the host's file: `https://<domain>/.well-known/stellar.toml`, with no port,
+ * whatever port the resource uses. A seller run on this machine (`allowInsecureLocal`, in
+ * development and tests) is asked at its own origin instead.
+ */
+export function stellarTomlUrl(resourceUrl: URL, allowInsecureLocal: boolean): string {
+  const base = allowInsecureLocal ? resourceUrl.origin : `https://${resourceUrl.hostname}`;
+  return `${base}/.well-known/stellar.toml`;
+}
+
+export interface CurationDeps {
+  store: CurationStore;
+  rpc: Pick<SorobanRpc, "getLedgerEntries">;
+  /** The facilitator's network: the only one whose accounts its RPC reads. */
+  network: StellarNetwork;
+  logger: Logger;
+  /** The seller checks' deadline and local rule; the body cap is SEP-1's. */
+  limits: Pick<SellerLimits, "timeoutMs" | "allowInsecureLocal">;
+  /** The app clock, ms. */
+  now?: () => number;
+}
+
+/**
+ * Checks a seller's `stellar.toml` proof on a paid call (0070), at most once per 6 h per host and
+ * account. Any answer from the host finishes the check, a status other than 200 as no proof. A
+ * check that fails (the host cannot be reached, the file is not TOML, the RPC) leaves the listing
+ * without the proof until one passes, logged, and keeps the last finished check's time, so the
+ * next paid call checks again. A store that fails rejects.
+ */
+export function createCuration({
+  store,
+  rpc,
+  network,
+  logger,
+  limits,
+  now = Date.now,
+}: CurationDeps) {
+  async function refresh(keyNetwork: StellarNetwork, resourceUrl: string, payTo: string) {
+    if (keyNetwork !== network) return;
+    // A contract account (`C…`) has no home_domain, so it is never curated (0070).
+    if (!StrKey.isValidEd25519PublicKey(payTo)) return;
+    const url = new URL(resourceUrl);
+    const key = { network, host: url.hostname, payTo };
+    let checkedAt: number | null = null;
+    try {
+      const stored = await store.get(key);
+      checkedAt = stored?.checkedAt ?? null;
+      if (checkedAt !== null && now() - checkedAt < CURATION_RECHECK_MS) return;
+      const started = now();
+      const toml = await readToml(stellarTomlUrl(url, limits.allowInsecureLocal));
+      // A host that answers without the file has given its answer: it proves nothing.
+      const curated =
+        toml !== undefined && provesPayTo(toml, await readHomeDomain(payTo), key.host, payTo);
+      await store.put({ ...key, curated, checkedAt: started });
+    } catch (error) {
+      logger.warn("curation_check_failed", { ...key, reason: String(error) });
+      await store.put({ ...key, curated: false, checkedAt });
+    }
+  }
+
+  // Not the SDK's `StellarToml.Resolver`: it fetches with no deadline and no public-address guard
+  // (@stellar/stellar-sdk 16.4.1 `lib/esm/stellartoml/index.js`), and the host here is a seller's.
+  /** The host's file, or `undefined` when it answers with a status other than 200. */
+  async function readToml(tomlUrl: string): Promise<string | undefined> {
+    const fetch = guardedFetch(
+      { ...limits, maxResponseBytes: STELLAR_TOML_BYTES },
+      AbortSignal.timeout(limits.timeoutMs),
+    );
+    const response = await fetch(tomlUrl, { headers: { "user-agent": SELLER_USER_AGENT } });
+    if (response.status !== 200) return undefined;
+    return await response.text();
+  }
+
+  async function readHomeDomain(payTo: string): Promise<string | undefined> {
+    const accountKey = xdr.LedgerKey.account(
+      new xdr.LedgerKeyAccount({ accountId: Keypair.fromPublicKey(payTo).xdrPublicKey() }),
+    );
+    const { entries } = await rpc.getLedgerEntries(accountKey);
+    return entries[0]?.val.account().homeDomain().toString();
+  }
+
+  return { refresh };
+}

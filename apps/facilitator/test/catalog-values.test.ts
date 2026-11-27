@@ -66,6 +66,7 @@ const HOOKS: Record<keyof SettlementHooks, true> = {
   onFinal: true,
   extensionResponses: true,
   onSuccess: true,
+  listingOf: true,
 };
 const SIGNER_STEPS: Record<SignerStep, true> = { sign: true, check: true };
 const BUDGET_KINDS: Record<BudgetKind, true> = {
@@ -74,6 +75,8 @@ const BUDGET_KINDS: Record<BudgetKind, true> = {
   asset: true,
   other: true,
   global: true,
+  account: true,
+  free: true,
 };
 
 /**
@@ -141,7 +144,8 @@ describe("the catalog's closed lists match their sources (0027)", () => {
       SETTLE_REASONS.breakerOpenPayTo,
       SETTLE_REASONS.breakerOpenAsset,
       SETTLE_REASONS.refused,
-      ...(Object.keys(BUDGET_KINDS) as BudgetKind[]).map(spendLimitReason),
+      ...(Object.keys(BUDGET_KINDS) as BudgetKind[]).map((kind) => spendLimitReason(kind)),
+      spendLimitReason("account", "count"),
     ];
     expect(listed("spend_refused_total", "reason")).toEqual(refusals.sort());
   });
@@ -166,15 +170,12 @@ describe("the catalog's closed lists match their sources (0027)", () => {
         "settlement/records.ts",
       ),
     );
-    // `settlements_refused` is #205's (0086), listed ahead of it.
     const tables = [
       ...readFileSync(new URL("../src/pruner.ts", import.meta.url), "utf8").matchAll(
         /table: "([a-z_]+)"/g,
       ),
     ].map((m) => m[1]!);
-    expect(listed("store_prune_failures_total", "table")).toEqual(
-      [...new Set([...tables, "settlements_refused"])].sort(),
-    );
+    expect(listed("store_prune_failures_total", "table")).toEqual([...new Set(tables)].sort());
   });
 
   it("rpc_on_fallback's rpc is an RPC_URLS index", () => {

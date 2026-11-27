@@ -275,6 +275,45 @@ describe("the units' output", () => {
     expect(settings(unit("x402@.service"), "SuccessExitStatus")).toEqual(["130"]);
   });
 
+  test("x402@ starts the facilitator with the search model it depends on (ADR 0014)", () => {
+    // `--no-deps` would skip depends_on, and the model would never start on the server.
+    expect(settings(unit("x402@.service"), "ExecStart")).toEqual([
+      "/usr/local/libexec/x402/x402-compose %i up --no-log-prefix --no-color --pull never --exit-code-from facilitator facilitator",
+    ]);
+  });
+
+  test("no two networks on the server share a subnet: Docker refuses the second one", () => {
+    const subnets = ["production/compose.yaml", "metrics/compose.yaml"].flatMap((path) =>
+      [...read(path).matchAll(/subnet: (\S+)/g)].map((m) => m[1]!),
+    );
+    expect(subnets.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(subnets).size).toBe(subnets.length);
+  });
+
+  test("the search model runs from the facilitator's image, capped, restarted, on its own network, never waited for (ADR 0014)", () => {
+    const compose = read("production/compose.yaml");
+    const model = compose.match(/^ {2}search-model:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? "";
+    expect(model).toContain("image: ${FACILITATOR_IMAGE:?set from digest by x402-compose}");
+    expect(model).toContain("command: [node, /search-model/dist/main.js]");
+    expect(model).toContain("restart: unless-stopped");
+    expect(model).toContain("mem_limit: 768m");
+    expect(model).toContain("cpus: 1");
+    expect(compose).toMatch(/depends_on:\n\s+search-model:\n\s+condition: service_started/);
+    expect(model).toMatch(/networks:\n\s+- search\n/);
+    // Its health is checked as the facilitator's is, on its own port.
+    expect(model).toContain(
+      "fetch('http://127.0.0.1:8080/health',{signal:AbortSignal.timeout(5000)})",
+    );
+    expect(model).toMatch(/interval: 10s\n\s+timeout: 5s\n\s+start_period: 30s\n\s+retries: 3\n/);
+    // The facilitator alone reaches it, over a network with no way out.
+    const facilitator = compose.match(/^ {2}facilitator:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? "";
+    expect(facilitator).toMatch(/networks:\n(?:\s+- \w+\n)*\s+- search\n/);
+    expect(compose).toMatch(
+      /^ {2}search:\n {4}name: x402-production-search\n {4}internal: true\n/m,
+    );
+    expect(read("../apps/facilitator/Dockerfile")).toContain("ENV ORT_DISABLE_TELEMETRY=1");
+  });
+
   test("every count the scripts write is a host counter of the catalog", () => {
     const calls = readdirSync(`${DEPLOY}/libexec`).flatMap((f) => [
       ...read(`libexec/${f}`).matchAll(/x402-host-probe count ([a-z0-9_]+)/g),
@@ -408,5 +447,31 @@ describe("the snapshot job", () => {
       "sys/storage/raft/snapshot",
     ]);
     expect(policy).toContain('capabilities = ["read"]');
+  });
+});
+
+// Compose interpolates the whole file, so a unit that runs `docker compose` without the facilitator
+// must set every variable `production/compose.yaml` requires (code review of 0048: CI's
+// production-postgres job checks only the database unit).
+describe("the units that run compose without the facilitator", () => {
+  const required = [...read("production/compose.yaml").matchAll(/\$\{([A-Z0-9_]+):\?/g)].map(
+    (m) => m[1]!,
+  );
+
+  test.each(["x402-db-testnet@.service", "x402-tunnel@.service"])(
+    "%s sets every variable compose.yaml requires",
+    (name) => {
+      const set = settings(unit(name), "Environment")
+        .flatMap((line) => line.split(/\s+/))
+        .map((pair) => pair.split("=")[0]);
+      expect(required.length).toBeGreaterThan(0);
+      expect(set).toEqual(expect.arrayContaining(required));
+    },
+  );
+
+  test("the playbook checks .env for every one compose.yaml reads from it", () => {
+    const fromEnv = required.filter((name) => name !== "FACILITATOR_IMAGE");
+    const playbook = read("ansible/playbook.yaml");
+    for (const name of fromEnv) expect(playbook).toContain(`- ${name}\n`);
   });
 });

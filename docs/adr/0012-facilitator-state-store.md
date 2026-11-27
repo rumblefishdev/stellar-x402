@@ -9,7 +9,9 @@
   2026-10-27 (task 0067: online migrations) and 2026-10-29 (task 0077: one facilitator for both
   networks, still with a database per network) and 2026-11-16 (task 0105: a pool for the API key
   registry's reads) and 2026-11-18 (task 0106: the portal's sealed key copies and its role) and
-  2026-11-20 (task 0155: one catalog for both networks)
+  2026-11-20 (task 0155: one catalog for both networks) and 2026-11-23 (task 0107: the portal's
+  role also reads each account's plan and payment times) and 2026-11-26 (task 0155: each
+  network's catalog holds only that network's listings)
 
 ## Context
 
@@ -50,9 +52,9 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
     and `catalog_attempts` carry the network, but `settlement_hashes` (AD-16's lookup by any of a
     settlement's hashes), `leases`, `rate_limits` and the three spend tables don't, so a shared
     database would need it in their keys and queries. A testnet reset wipes only testnet's
-    database, and backups, restores and migrations stay per network. The catalog is the exception
-    while it lives in testnet's database and holds both networks (task 0155): a reset takes the
-    seeded mainnet listings with it, and `pnpm seed` lists them again.
+    database, and backups, restores and migrations stay per network. The catalog follows the
+    same rule: testnet's database holds testnet's listings only, and mainnet sellers are seeded
+    into pubnet's database once it exists (task 0126).
     - The API key registry (`api_keys`, task 0105) carries no network either: a key is for the
       callers of the network whose database holds it. Only pubnet requires one, so only pubnet's
       registry is read; testnet's holds only the keys the portal issues for testing until pubnet
@@ -61,14 +63,17 @@ The first version of this ADR assumed ECS Fargate and RDS; it is in git history.
       the portal issues, so the API hub can show it again: AES-256-GCM under the portal's
       `KEY_ENCRYPTION_KEY`, which the database never holds, bound to the key's owner and hash,
       and deleted when the portal revokes the key. The portal's backend connects as a role of its
-      own, `x402_portal`, which reads and writes these two tables and nothing else. The
-      facilitator connects as the database's owner and never reads the copies, so they are
-      closed to it by the encryption, not by grants.
+      own, `x402_portal`, which reads and writes these two tables. Since 0107 it also reads, for
+      the usage the hub shows, `account_plans` (every account's plan row, the operator's note
+      included) and the view `account_usage` (the time of every account's payment the store
+      still keeps, about two months on pubnet, with its owner but no amount, fee or address), and
+      nothing else. The facilitator connects as the database's owner and never reads the copies,
+      so they are closed to it by the encryption, not by grants.
     - Each network's spend budgets count only its own fees, paid from its own fee account.
-    - The catalog is one table for both networks, each listing with its network, whatever
-      network the process settles on (task 0155): `/discovery/resources` without a `network`
-      filter lists both, and `network` narrows it. Still open, decided with the code in 0126:
-      which database holds that table once one process serves both networks, and the IP rate
+    - Each listing carries its network, and `/discovery/resources` filters by `network` (task
+      0155), but a network's catalog holds only that network's listings: mainnet's go into
+      pubnet's database, not testnet's (amended 2026-11-26). Still open, decided with the code in
+      0126: how one process serves both networks' catalogs, and the IP rate
       limiter's counters. Since 0105
       `/verify` and `/settle` count a request after its body named the network, so their counters
       can sit in that network's database; `/discovery/*` and a body that names no network still

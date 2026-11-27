@@ -5,7 +5,7 @@ type: FEATURE
 status: backlog
 milestone: 3
 related_adr: ["0001"]
-related_tasks: ["0136", "0015", "0034", "0041", "0102"]
+related_tasks: ["0136", "0015", "0034", "0041", "0102", "0165"]
 tags: [sdk, rust, seller, priority-medium, effort-medium, platform]
 links:
   - ../../../docs/rfp/07-x402-facilitator-bazaar.md
@@ -54,6 +54,7 @@ complete.
   than TypeScript.
 - Keep the crate's answers equal to the newest `@x402/express` (0136 decision 23), with upstream's
   check of a payment's echoed extensions (`extension_echo_mismatch`), the one check part 1 lacks.
+- Path parameters and `routeTemplate` in a listing: moved to 0165, which 0041's sellers need.
 - Buyer side: build and sign the Soroban auth entry for `exact`, and for `upto` if 0015 and 0034
   allow; pay a 402 from a Rust client. Or the owner drops the buyer side in writing.
 - Integrations for the frameworks beyond part 1's, chosen from what Rust sellers use.

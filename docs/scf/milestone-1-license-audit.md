@@ -71,3 +71,19 @@ neither tree above contains it.
 
 Separate processes, not linked into our code: OpenBao (MPL-2.0), PostgreSQL (PostgreSQL License),
 `cloudflared` (Apache-2.0) and the Amazon CloudWatch agent (MIT).
+
+## Added since this audit
+
+Search by meaning in the Bazaar (task 0120, [ADR 0014](../adr/0014-bazaar-search.md)) adds four
+outside parts, for the Tranche #2 audit to count with the rest of the tree:
+
+| Name                                        | Version             | License            | Where                                                       |
+| ------------------------------------------- | ------------------- | ------------------ | ----------------------------------------------------------- |
+| `onnxruntime-node`                          | 1.31.1              | MIT                | the search model's server, `apps/search-model`              |
+| `@huggingface/tokenizers`                   | 0.2.0               | Apache-2.0         | the search model's server                                   |
+| `ibm-granite/granite-embedding-30m-english` | revision `9b5b0964` | Apache-2.0         | the model's files, in the facilitator's image               |
+| pgvector                                    | 0.8.7               | PostgreSQL License | the PostgreSQL image, `pgvector/pgvector:0.8.7-pg18-trixie` |
+
+The server's other production dependencies, those of `onnxruntime-node`, are MIT, ISC,
+BSD-3-Clause and MIT OR CC0-1.0 (`pnpm --filter @stellar-x402/search-model licenses list --prod`),
+so the result above still holds.

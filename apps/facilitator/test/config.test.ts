@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Keypair } from "@stellar/stellar-sdk";
+import { DEFAULT_ACCOUNT_PLANS, parseAccountPlans } from "@stellar-x402/api-keys";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   type Config,
@@ -30,11 +31,15 @@ const minimal = {
   CHANNELS: `${CHANNEL_A}, ${CHANNEL_B}`,
   CLIENT_IP: "socket",
   DATABASE_URL: "postgres://db.internal/x402",
+  SEARCH_MODEL_URL: "http://search-model:8080",
 };
-/** Pubnet is refused until per-key fee budgets (0107) land, with 0027 and 0048; 0090 has. */
+/** Pubnet is refused until the hot key's re-check (0048) lands; 0090, 0107 and 0027 have. */
 const pubnet = { NETWORK: "stellar:pubnet" };
 const PUBNET_REFUSED =
-  "NETWORK stellar:pubnet is refused until per-key fee budgets (0107), the signer alarm (0027) and the hot key's re-check (0048) land";
+  "NETWORK stellar:pubnet is refused until the hot key's re-check (0048) lands";
+/** The free plan's shared budget above `global`, whose value is `global` (0107). */
+const freeAboveGlobal = (global: string) =>
+  `SPEND_FREE_STROOPS must be at most SPEND_GLOBAL_STROOPS (${global}): the free plan's settlements count in global too`;
 
 function problems(
   env: Record<string, string | undefined>,
@@ -80,9 +85,12 @@ describe("parseConfig", () => {
         perAssetStroops: 250_000_000n,
         perOtherAssetStroops: 20_000_000n,
         tierOtherStroops: 100_000_000n,
+        freeStroops: 250_000_000n,
+        accountPlans: parseAccountPlans(DEFAULT_ACCOUNT_PLANS),
         floorStroops: 50_000_000n,
         balanceIntervalMs: 30_000,
       },
+      searchModel: { url: "http://search-model:8080", timeoutMs: 2_000 },
       catalog: { listLocal: false },
     });
   });
@@ -91,6 +99,7 @@ describe("parseConfig", () => {
     // Distinct values, so two settings swapped in the mapping would fail. NETWORK can only be
     // testnet, its default, while pubnet is refused.
     const config = parseConfig({
+      SEARCH_MODEL_URL: "http://search-model:8080",
       NETWORK: "stellar:testnet",
       PORT: "8080",
       LOG_LEVEL: "debug",
@@ -120,6 +129,8 @@ describe("parseConfig", () => {
       SPEND_PER_ASSET_STROOPS: "300014",
       SPEND_PER_ASSET_OTHER_STROOPS: "300015",
       SPEND_TIER_OTHER_STROOPS: "300016",
+      SPEND_FREE_STROOPS: "300010",
+      ACCOUNT_PLANS: "free:7:300020, gold:8:300021",
       SPEND_FLOOR_STROOPS: "17",
       SPEND_BALANCE_INTERVAL_MS: "18000",
       CATALOG_LIST_LOCAL: "true",
@@ -157,9 +168,15 @@ describe("parseConfig", () => {
         perAssetStroops: 300_014n,
         perOtherAssetStroops: 300_015n,
         tierOtherStroops: 300_016n,
+        freeStroops: 300_010n,
+        accountPlans: new Map([
+          ["free", { name: "free", payments: 7, dailyFeeStroops: 300_020n }],
+          ["gold", { name: "gold", payments: 8, dailyFeeStroops: 300_021n }],
+        ]),
         floorStroops: 17n,
         balanceIntervalMs: 18_000,
       },
+      searchModel: { url: "http://search-model:8080", timeoutMs: 2_000 },
       catalog: { listLocal: true },
     });
   });
@@ -171,6 +188,7 @@ describe("parseConfig", () => {
       CHANNELS: ` ${CHANNEL_A} `,
       CLIENT_IP: " socket ",
       DATABASE_URL: " postgres://db.internal/x402 ",
+      SEARCH_MODEL_URL: " http://search-model:8080 ",
       RPC_URLS: "",
       PORT: " ",
     });
@@ -191,6 +209,7 @@ describe("parseConfig", () => {
       "CHANNELS is required",
       "DATABASE_URL is required",
       "CLIENT_IP is required",
+      "SEARCH_MODEL_URL is required",
     ]);
   });
 
@@ -397,6 +416,7 @@ describe("parseConfig", () => {
       "SPEND_PER_ASSET_STROOPS",
       "SPEND_PER_ASSET_OTHER_STROOPS",
       "SPEND_TIER_OTHER_STROOPS",
+      "SPEND_FREE_STROOPS",
       "SPEND_FLOOR_STROOPS",
     ]) {
       expect(() => parseConfig({ ...minimal, [name]: max })).not.toThrow();
@@ -420,6 +440,7 @@ describe("parseConfig", () => {
       "SPEND_PER_ASSET_STROOPS",
       "SPEND_PER_ASSET_OTHER_STROOPS",
       "SPEND_TIER_OTHER_STROOPS",
+      "SPEND_FREE_STROOPS",
     ]) {
       expect(problems({ ...minimal, MAX_FEE_STROOPS: "300000", [name]: "299999" })).toEqual([
         `${name} must be at least MAX_FEE_STROOPS (300000): a settlement reserves the fee ceiling`,
@@ -432,10 +453,48 @@ describe("parseConfig", () => {
     expect(() => parseConfig({ ...minimal, SPEND_FLOOR_STROOPS: "1" })).not.toThrow();
   });
 
-  it("refuses stellar:pubnet with nothing else wrong, until per-key fee budgets land", () => {
-    // Spend budgets (0024) bound the loss, but Sybil self-payments can still use up the shared
-    // budgets until callers are authenticated or pay (S-design, residual risk).
-    expect(PUBNET_REFUSED).not.toContain("0024");
+  it("keeps the free plan's shared budget within global where a key is required (0107)", () => {
+    // `global` counts the same settlements there. Pubnet is still refused, so both are named.
+    const keyed = { ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" };
+    expect(problems({ ...keyed, SPEND_FREE_STROOPS: "500000001" })).toEqual([
+      freeAboveGlobal("500000000"),
+      PUBNET_REFUSED,
+    ]);
+    expect(problems({ ...keyed, SPEND_FREE_STROOPS: "500000000" })).toEqual([PUBNET_REFUSED]);
+    // Testnet reserves nothing against `free`, so a `global` lowered below it still starts.
+    const testnet = parseConfig({ ...minimal, SPEND_GLOBAL_STROOPS: "250000" });
+    expect(testnet.spend).toMatchObject({ globalStroops: 250_000n, freeStroops: 250_000_000n });
+  });
+
+  it("reads the account plans the portal reads too, refusing bad text without echoing it (0107)", () => {
+    expect(parseConfig({ ...minimal, ACCOUNT_PLANS: "free:5:300000" }).spend.accountPlans).toEqual(
+      new Map([["free", { name: "free", payments: 5, dailyFeeStroops: 300_000n }]]),
+    );
+    // The portal's own message for the same setting.
+    for (const text of ["basic:10", "free:x:1", "free:1:1,free:2:2", "pro:1:300000", "secret!"]) {
+      const found = problems({ ...minimal, ACCOUNT_PLANS: text });
+      expect(found, text).toEqual([
+        "ACCOUNT_PLANS must be <name>:<payments a month>:<fee stroops per 24 h>, comma-separated, with a free plan",
+      ]);
+      expect(found.join(" "), text).not.toContain(text);
+    }
+  });
+
+  it("refuses a plan whose daily fee budget is below MAX_FEE_STROOPS, as any budget (0107)", () => {
+    // An account's settlement reserves the fee ceiling against its plan's budget too.
+    expect(problems({ ...minimal, ACCOUNT_PLANS: "free:1000:20000000,tiny:5:249999" })).toEqual([
+      "ACCOUNT_PLANS must give every plan a fee budget of at least MAX_FEE_STROOPS (250000): a settlement reserves the fee ceiling",
+    ]);
+    expect(() =>
+      parseConfig({ ...minimal, ACCOUNT_PLANS: "free:1000:20000000,tiny:5:250000" }),
+    ).not.toThrow();
+  });
+
+  it("refuses stellar:pubnet with nothing else wrong, until the hot key's re-check lands", () => {
+    // What has landed is no longer named (0009 decision 49): spend budgets (0024), the channel
+    // held back after a deploy (0090), each account's quota (0107) and the signer alarm (0027).
+    for (const landed of ["0024", "0090", "0107", "0027"])
+      expect(PUBNET_REFUSED).not.toContain(landed);
     expect(problems({ ...minimal, ...pubnet, RPC_URLS: "https://rpc.example" })).toEqual([
       PUBNET_REFUSED,
     ]);

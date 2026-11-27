@@ -20,9 +20,9 @@
  *                  the failover (0045)
  *   EXPECT_FAILOVER  1: also check that each `/verify` failed over, logging `rpc_failover`, and
  *                  was answered by `RPC_URLS[1]` (0045)
- *   DATABASE_URL   passed to the config, which requires one (default: compose's, 127.0.0.1:15432);
- *                  the verifiers open no store, so any `postgres://` URL works and no database
- *                  needs to run
+ *   DATABASE_URL   passed to the config, which requires one (default, also when blank:
+ *                  compose's, `test/compose-database.ts`); the verifiers open no store, so any
+ *                  `postgres://` URL works and no database needs to run
  *
  *   cd apps/facilitator
  *   CLIENT_SECRET=$(stellar keys show x402-verify-client) \
@@ -42,12 +42,12 @@ import { buildRpc, buildVerifier } from "../../src/main.js";
 import { memoryMetrics } from "../../src/metrics.js";
 import { UPSTREAM_TIMEOUT_MS } from "../../src/settlement/upstream.js";
 import { feeSettings } from "../../src/settlement/fees.js";
+import { databaseUrlOrCompose } from "../compose-database.js";
 import { signerEnv } from "../fake-openbao.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const network = "stellar:testnet";
-const databaseUrl =
-  process.env.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:15432/postgres";
+const databaseUrl = databaseUrlOrCompose();
 
 const clientSecret = process.env.CLIENT_SECRET;
 const payTo = process.env.PAY_TO;
@@ -95,6 +95,8 @@ async function verifyWith(
     LOG_LEVEL: "info",
     MIN_VALIDITY_LEDGERS: process.env.MIN_VALIDITY_LEDGERS,
     RPC_URLS: process.env.RPC_URLS,
+    // Required by the config; /verify never asks the search model, so nothing listens here.
+    SEARCH_MODEL_URL: "http://127.0.0.1:9",
   });
   const logger = jsonLogger(config.logLevel, write, config.rpcUrls);
   const rpc = buildRpc(config, logger);

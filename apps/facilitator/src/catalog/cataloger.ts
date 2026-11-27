@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import * as bazaarLib from "@stellar-x402/bazaar";
-import { isStellarNetwork } from "@stellar-x402/config";
+import { isStellarNetwork, type StellarNetwork } from "@stellar-x402/config";
 import type { PaymentRequired } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type { Logger } from "../logger.js";
@@ -61,6 +61,10 @@ export interface CatalogerDeps {
   /** A seller slower than this to answer the check gave no usable answer. */
   sellerTimeoutMs?: number;
   checksPerHost?: number;
+  /** The `stellar.toml` proof (0070), checked on each paid call whose listing is in the catalog. */
+  curation?: {
+    refresh(network: StellarNetwork, resourceUrl: string, payTo: string): Promise<void>;
+  };
   /** The app clock, ms. */
   now?: () => number;
 }
@@ -79,7 +83,7 @@ export interface SeedResult {
   detail?: string;
 }
 
-export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"> & {
+export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "listingOf" | "onSuccess"> & {
   /** Resolves once every in-flight `onSuccess` has settled (tests, graceful shutdown). */
   drain(): Promise<void>;
   /**
@@ -87,8 +91,13 @@ export type Cataloger = Pick<SettlementHooks, "extensionResponses" | "onSuccess"
    * learns the listing's keys from the 402, then each key gets the check a payment would start, on
    * that same 402 unless the seller declares another method or an MCP tool. `requests` counts the
    * requests sent, for the seed's pace. Never rejects: every failure is a result with its reason.
+   * `disallowed` is the host's robots.txt: a second request it disallows is not sent.
    */
-  seed(url: string, method: string): Promise<{ results: SeedResult[]; requests: number }>;
+  seed(
+    url: string,
+    method: string,
+    disallowed: (url: string) => boolean,
+  ): Promise<{ results: SeedResult[]; requests: number }>;
 };
 
 /**
@@ -101,6 +110,8 @@ const SELLER_RESPONSE_BYTES = 64 * 1024;
  * (122,729 B, 35 tools, 2026-10-28), since the tool's schemas come with it.
  */
 const MCP_RESPONSE_BYTES = 256 * 1024;
+/** How long a check waits for a seller's answer, its 402 or its `stellar.toml` (0070). */
+export const SELLER_TIMEOUT_MS = 10_000;
 /** A library error lists every issue; the attempt's row keeps its start. */
 const DETAIL_CHARS = 1_000;
 
@@ -126,8 +137,9 @@ export function createCataloger({
   bazaar = bazaarLib,
   upsertTimeoutMs = 10_000,
   listLocal = false,
-  sellerTimeoutMs = 10_000,
+  sellerTimeoutMs = SELLER_TIMEOUT_MS,
   checksPerHost = CHECKS_PER_HOST,
+  curation,
   now = Date.now,
 }: CatalogerDeps): Cataloger {
   const inFlight = new Set<Promise<void>>();
@@ -310,6 +322,21 @@ export function createCataloger({
         detail: String(error),
       } as const;
       await finish({ ...known, ...failed }, fields, origin);
+    } finally {
+      // Apart from the seller check (0070): however it ended, a paid listing that is in the
+      // catalog has its seller's `stellar.toml` proof checked.
+      if (known.key && known.url) await refreshCuration(known.key, known.url, fields);
+    }
+  }
+
+  /** A paid listing: check its seller's `stellar.toml` proof when it is in the catalog (0070). */
+  async function refreshCuration(key: CatalogKey, resourceUrl: string, fields: LogFields) {
+    if (!curation) return;
+    try {
+      if (!(await store.get(key))) return;
+      await curation.refresh(key.network, resourceUrl, key.payTo);
+    } catch (error) {
+      report(() => logger.error("curation_refresh_failed", { ...fields, resourceUrl, error }));
     }
   }
 
@@ -448,6 +475,15 @@ export function createCataloger({
         return { bazaar: { status: "rejected", rejectedReason: "internal_error" } };
       }
     },
+    listingOf(payload, requirements) {
+      // The same validation and key as the catalog's entry, so the search's quality score
+      // (ADR 0014) counts the payer under the listing the catalog holds. A throw reaches the
+      // settlement module, which logs and counts it as a hook failure.
+      const result = bazaar.validate(payload, requirements, options);
+      if (!result?.ok) return undefined;
+      const { method, resourceUrl } = bazaar.normalize(result, requirements).key;
+      return { method, resourceUrl };
+    },
     onSuccess(record, origin) {
       // Never rejects: an unhandled rejection would fail `/settle`'s process.
       const done = catalog(record, origin).catch((error: unknown) =>
@@ -460,7 +496,7 @@ export function createCataloger({
     async drain() {
       await Promise.allSettled([...inFlight]);
     },
-    async seed(url, method) {
+    async seed(url, method, disallowed) {
       const fields = { url, origin: "seed" };
       let requests = 1;
       try {
@@ -495,6 +531,23 @@ export function createCataloger({
           const key = listing.entry.key as CatalogKey;
           // The probe answered this method over HTTP: it is the check's answer, not asked again.
           const answered = listing.input.type === "http" && key.method === method;
+          // The 402's query parameters make a URL of their own, which robots.txt may disallow.
+          const asked =
+            listing.input.type === "http"
+              ? bazaarLib.sellerRequest(url, { ...listing.input, method: key.method }).url
+              : url;
+          if (!answered && disallowed(asked)) {
+            results.push({
+              url,
+              method: key.method,
+              network,
+              payTo,
+              outcome: "skipped",
+              reason: "robots",
+              detail: asked,
+            });
+            continue;
+          }
           if (!answered) requests++;
           const ended = await checkSeller({ ...fields, network }, "seed", {
             url,

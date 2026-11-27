@@ -21,8 +21,9 @@
  *   BATCH            payments in the concurrent batch (default 6)
  *   RPC_URLS         passed to the facilitator, and the script reads through the first (default:
  *                    SDF's testnet RPC)
- *   DATABASE_URL     the facilitator's PostgreSQL (default: compose's, 127.0.0.1:15432); the run
- *                    works in a schema of its own, `token_matrix`, recreated each run
+ *   DATABASE_URL     the facilitator's PostgreSQL (default, also when blank: compose's,
+ *                    `test/compose-database.ts`); the run works in a schema of its own,
+ *                    `token_matrix`, recreated each run
  *
  *   cd apps/facilitator
  *   CLIENT_SECRET=S… npx tsx test/live/token-matrix.ts
@@ -55,7 +56,9 @@ import pg from "pg";
 import { Agent, fetch } from "undici";
 import { migrate } from "../../src/adapters/postgres-schema.js";
 import { main } from "../../src/main.js";
+import { databaseUrlOrCompose } from "../compose-database.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
+import { startSearchModel } from "../search-model.js";
 
 const network = "stellar:testnet";
 // The script's own reads and setup go through the facilitator's first RPC.
@@ -66,7 +69,7 @@ const server = new rpc.Server(
 // The facilitator's stores are PostgreSQL: a schema of this run's own, recreated, so a missing
 // database stops the run before anything is spent on testnet.
 const SCHEMA = "token_matrix";
-const base = process.env.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:15432/postgres";
+const base = databaseUrlOrCompose();
 const databaseUrl = (() => {
   const url = new URL(base);
   url.searchParams.set("options", `-c search_path=${SCHEMA}`);
@@ -279,9 +282,11 @@ await sendAndPoll(setup, "channel setup");
 
 // The fake OpenBao holds this run's key: a testnet account funded for the run.
 const openbao = await fakeOpenBao(facilitator);
+const searchModel = await startSearchModel();
 const facilitatorServer = await main(
   {
     ...signerEnv(facilitator.publicKey(), openbao.socketPath),
+    SEARCH_MODEL_URL: searchModel.url,
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",
     LOG_LEVEL: "warn",
@@ -446,6 +451,7 @@ try {
 } finally {
   await facilitatorServer.close();
   openbao.close();
+  await searchModel.stop();
   await db.end();
   await admin.end();
 }

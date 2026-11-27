@@ -36,11 +36,15 @@
     "express-rate-limit": "^8.7.0",
     "pg": "^8.23.1",
     "robots-parser": "3.1.1",
+    "smol-toml": "1.9.0",
     "undici": "~7.30.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@stellar-x402/sdk": "workspace:*",
     "@types/express": "^5.0.6",
-    "@types/pg": "^8.23.1"
+    "@types/pg": "^8.23.1",
+    "@x402/express": "~2.31.0",
+    "@x402/fetch": "~2.31.0"
   }
 }

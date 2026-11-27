@@ -74,6 +74,15 @@ describe("packages/bazaar", () => {
     ]);
   });
 
+  it("keys the Rust crate's 402 of a route with a path parameter by its template (0165)", () => {
+    // The block the crate's own test holds its 402 to (`packages/sdk/rust/tests/axum_layer.rs`).
+    const fixture = "../../sdk/rust/tests/fixtures/bazaar-route-template.json";
+    const bazaar: unknown = JSON.parse(readFileSync(join(import.meta.dirname, fixture), "utf8"));
+    const p = pay("https://api.example.com/assets/native/price?city=Warsaw", bazaar);
+    expect(validate(p, req)).toMatchObject({ ok: true, routeTemplateIgnored: false });
+    expect(entry(p).key.resourceUrl).toBe("https://api.example.com/assets/:/price");
+  });
+
   it("stores the paid path when the template doesn't match it (G4)", () => {
     const p = pay("https://x.com/cheap", { info: http, routeTemplate: "/premium" });
     expect(validate(p, req)).toMatchObject({ routeTemplateIgnored: true });

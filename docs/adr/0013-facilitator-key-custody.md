@@ -21,7 +21,9 @@
   a local copy, task 0026); 2026-11-09 (the audit log disk alarm at 90%, after the server's disk
   alarm at 80%: on the server the audit volume shares `/` with everything else, so the two
   thresholds give a warning and then a last call instead of one doubled message; task 0027
-  decision 73)
+  decision 73); 2026-11-23 (pubnet's measured typical settlement beside ADR 0003's, task 0107);
+  2026-11-24 (task 0048: the key keeps its full power on our accounts until the stakes grow,
+  [ADR 0015](0015-hot-key-full-power.md), and the weekly review checks its 500 XLM trigger)
 - Supersedes: the key custody part of [ADR 0011](0011-facilitator-hosting.md) ("Keys, secrets and
   access": the SSM parameter for `FACILITATOR_SECRET` and the mainnet KMS key)
 
@@ -164,7 +166,8 @@
   every quarter and after any seal key rotation, passphrase change or OpenBao upgrade. Owned by
   Platform (0026).
 - **No cold key.** The OpenBao key stays each account's only signer, as AD-12 says today. 0048's
-  cold recovery signer is declined for now and re-checked before mainnet.
+  cold recovery signer is declined; the re-check kept the key's full power, revisited at 500 XLM
+  or before `upto` reaches mainnet ([ADR 0015](0015-hot-key-full-power.md)).
 - **If OpenBao's data and the unseal key are both lost,** the fee account and every channel are
   lost with their XLM. Recovery is then a new key, new accounts and new channels.
 
@@ -206,6 +209,9 @@
 - **The fee float is 100 XLM, with the alarm at 25 XLM, and no upper limit.** That is about 24,000
   typical `exact` settlements (~41,200 stroops each, ADR 0003), and about 5 days to act after the
   alarm at 1,000 settlements a day, before 0024's floor stops settlement at 5 XLM. Testnet uses the same numbers for now.
+  Measured on pubnet since (task 0107, 2026-11-23): a USDC `exact` settlement between two
+  accounts is charged 12,203 stroops, so the float is about 82,000 of them and the days to act
+  about three times as many; 41,200 came from testnet runs before today's `exact` transfer (0093).
   - **Top-ups are by hand.** Testnet: Friendbot, which only creates accounts, so a short script in
     the 0026 runbook funds a fresh account and merges it into the fee account. Mainnet:
     a withdrawal from the company's exchange account to the fee account; who makes it is named
@@ -215,7 +221,9 @@
     (0027). After the mainnet deploy, also the real fee spend, from 0027's `fee_charged_stroops`
     summed over 7 days and set against the balance's change, where a gap means the fee account
     paid for something other than settlements; the next refill amount; and whether this custody
-    still fits the float (see Rationale).
+    still fits the float (see Rationale); and whether mainnet's fee account balance plus 1.5 XLM
+    per mainnet channel has passed 500 XLM, ADR 0015's trigger to re-check the key's power.
+    Testnet's fee account holds Friendbot's 10,000 XLM, which puts nothing at stake.
 - **Rotation and break-in runbook** (0026):
   - a leaked token or secret ID: destroy the secret ID, revoke its tokens, issue a new one, and
     restart the facilitator, which reads it at start;
@@ -278,7 +286,8 @@
 ## Consequences
 
 - **The hot key can do anything on our accounts.** A theft costs the float plus downtime, and can
-  lock us out of the channels. 0048 stays a mainnet blocker until it is re-decided.
+  lock us out of the channels. [ADR 0015](0015-hot-key-full-power.md) accepts this until the
+  float and reserves pass 500 XLM or `upto` nears mainnet.
 - **Losing OpenBao's data and the backup set loses the accounts.** The restore drill tests both
   before mainnet and every quarter.
 - **We depend on the shared AWS account.** If it is closed or we lose access, the backup set goes
@@ -318,6 +327,7 @@
   - `notes/R-key-custody-options.md` and `notes/R-openbao-on-hetzner.md`: the options compared;
   - `spike/results.md`: Transit signatures on Stellar.
 - Tasks 0036 (signer), 0026 (deployment and runbook), 0027 (alarms), 0048 (thresholds, re-check)
+- [ADR 0015](0015-hot-key-full-power.md): the key's full power, and when to revisit it
 - OpenBao: [Transit](https://openbao.org/docs/secrets/transit/),
   [static seal](https://openbao.org/docs/configuration/seal/static/),
   [AppRole](https://openbao.org/docs/auth/approle/),

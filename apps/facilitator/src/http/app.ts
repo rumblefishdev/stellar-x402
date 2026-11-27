@@ -9,7 +9,7 @@ import type { SignerState } from "../adapters/openbao-signer.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { ProcessMetrics } from "../metrics.js";
-import type { Stores } from "../ports/index.js";
+import type { Embedder, Stores } from "../ports/index.js";
 import type { SettlementHooks } from "../settlement/hooks.js";
 import type { LeaseKeeper } from "../settlement/lease.js";
 import type { Reconciliation } from "../settlement/reconcile.js";
@@ -27,6 +27,7 @@ import { admit, callerOf } from "./admit.js";
 import { discoveryResources } from "./discovery.js";
 import { EXTENSION_RESPONSES_HEADER, encodeExtensionResponses } from "./extension-responses.js";
 import { rateLimit, rateLimiter, type RateLimit } from "./rate-limit.js";
+import { discoverySearch } from "./search.js";
 
 /** What the composition root hands to the HTTP adapter. Lanes add their services here. */
 export interface AppDeps {
@@ -61,6 +62,8 @@ export interface AppDeps {
   drain?: () => Promise<void>;
   /** The facilitator key's signer as `/health` reports it (0036); tests may leave it out. */
   signerState?: () => SignerState;
+  /** The search model (ADR 0014); `/discovery/search` ranks by words alone while it fails. */
+  embedder: Embedder;
 }
 
 /** Seconds a client waits before it tries `/settle` again on a process that can't settle now. */
@@ -208,6 +211,7 @@ export function createApp({
   lease,
   closing,
   signerState,
+  embedder,
 }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -290,6 +294,8 @@ export function createApp({
       // Which RPC URL answered: a lagging fallback rejects valid payments (AD-3).
       rpc: trace.rpc,
       message: LOGGED_MESSAGES.has(response.invalidReason) ? response.invalidMessage : undefined,
+      // Upstream's message our refusal replaced: the fee of a payment creating payTo's balance.
+      upstreamMessage: trace.upstreamMessage,
     });
     res.json(response);
   });
@@ -306,7 +312,7 @@ export function createApp({
     res.once("close", () => {
       if (!res.writableEnded) left.abort();
     });
-    const { response, record, afterResponse, key, replay } = await settle(
+    const { response, record, afterResponse, key, replay, upstreamMessage } = await settle(
       request.paymentPayload,
       request.paymentRequirements,
       left.signal,
@@ -330,6 +336,7 @@ export function createApp({
       success: response.success,
       errorReason: response.errorReason,
       message: LOGGED_MESSAGES.has(response.errorReason) ? response.errorMessage : undefined,
+      upstreamMessage,
       payer: response.payer,
       transaction: response.transaction || undefined,
     });
@@ -360,6 +367,7 @@ export function createApp({
   });
   app.use("/discovery", rateLimit(budget("discovery", config.http.rateLimit.discovery)));
   app.get("/discovery/resources", discoveryResources(stores.catalog, logger, metrics));
+  app.get("/discovery/search", discoverySearch(stores.catalog, embedder, logger, metrics));
 
   app.use((_req, res) => {
     res.status(404).json({ error: "not_found" });

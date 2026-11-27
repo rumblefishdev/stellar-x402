@@ -116,7 +116,10 @@ deploy.
    ```
 
    `x402@production` starts `digest.good`, so the new image isn't running yet. If step 2 ran
-   before the approval, approve the waiting `deploy` job now. If step 1's deploy failed,
+   before the approval, approve the waiting `deploy` job now. When the new compose file runs a
+   service only the new image holds, as the search model does (ADR 0014), that service fails on
+   `digest.good` while the facilitator runs: search ranks by words alone until the deploy starts
+   the new image. If step 1's deploy failed,
    **Run workflow** on `deploy/production` again now.
 
 Then check that each container kept what its compose file drops (task 0091):
@@ -222,14 +225,34 @@ ADR 0013's first upgrade (Not here yet).
 - Outbound 7844 over UDP and TCP allowed on the server (`cloudflared`).
 - Cloudflare: Browser Integrity Check off for the hostname, Bot Fight Mode off (0026).
 - The signer (0036), and the key's account and channels (OpenBao, step 6).
-- `/srv/x402/production/.env` with the key's address and its channels, from OpenBao's steps 4
-  and 6: public values, so a plain file, owned by `x402`, mode 0644, which the playbook leaves
-  alone. `compose.yaml` requires both: without them `x402@`, the deploy's `migrate-testnet` and
-  the `docker compose` commands here stop at interpolation.
+- `/srv/x402/production/.env` with the Transit key's name and version, its address and its
+  channels, from OpenBao's steps 4 and 6: public values, so a plain file, owned by `x402`,
+  mode 0644, which the playbook leaves alone. They change together, so they live together, and a
+  new key needs no pull request (ADR 0015). `compose.yaml` requires all four: without them `x402@`,
+  the deploy's `migrate-testnet` and the `docker compose` commands here stop at interpolation.
 
   ```sh
-  printf 'FACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' ADDRESS CHANNELS |
+  printf 'OPENBAO_KEY_TESTNET=%s\nOPENBAO_KEY_VERSION_TESTNET=%s\nFACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' \
+    KEY_NAME KEY_VERSION ADDRESS CHANNELS |
     ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env'
+  ```
+
+  `KEY_NAME` and `KEY_VERSION` are the Transit key's, from OpenBao's step 4: `stellar-testnet`
+  and `1` on a first setup, and something else after a "lost access" rebuild. This writes the
+  whole file, so use it only for a new `.env`; to change one value, edit only its line, as
+  [channel-quarantined](monitoring.md#channel-quarantined) does for `CHANNELS_TESTNET`.
+
+  A server set up before the key's name and version moved here (2026-11-24, task 0048) has only
+  the last two lines: add the first two before the playbook run that copies this `compose.yaml`.
+  From that copy on, any start of `x402@` stops at interpolation without them, so the playbook
+  refuses to copy the compose files while an existing `.env` lacks any of the four names. The
+  command adds the lines once, after a newline if the file doesn't end with one:
+
+  ```sh
+  ssh SERVER 'sudo sh -euc '\''f=/srv/x402/production/.env
+    grep -q "^OPENBAO_KEY_TESTNET=" "$f" && exit 0
+    [ -z "$(tail -c1 "$f")" ] || echo >> "$f"
+    printf "OPENBAO_KEY_TESTNET=stellar-testnet\nOPENBAO_KEY_VERSION_TESTNET=1\n" >> "$f"'\'''
   ```
 
 - After the first image is pushed: the GHCR package `x402-facilitator` made public, so the server
@@ -815,14 +838,20 @@ a run the timer starts after a reboot is skipped).
    `sudo systemctl reset-failed x402-openbao-snapshot.service` before starting it again.
 
    Then the `snapshots` alarm group goes on (`infra/README.md`), so a run that fails every night
-   alerts instead of showing only in the journal. From `infra/`:
+   alerts instead of showing only in the journal. Since 0139's switch its alarm is the Prometheus
+   rule `x402-snapshot-age` on the monitoring VM, not a CloudWatch alarm
+   ([monitoring, The Prometheus rules](monitoring.md#the-prometheus-rules)), so no AWS deploy.
+   From `infra/`:
 
    ```sh
-   make check-series GROUP=snapshots   # until it passes: the stamp's age has reached CloudWatch
-   # then "snapshots": true in infra/envs/production.json, by pull request
-   make deploy-production-alarms
-   make fire-test
+   # "snapshots": true in infra/envs/production.json, by pull request, with:
+   make rules   # adds x402-snapshot-age to deploy/metrics/rules/x402-production.yml
    ```
+
+   After the merge the rule file goes on the VM, where
+   `snapshot_age_seconds{project="x402"} < 93600` must return a value (the series is there even
+   with no stamp, at the probe's 1e9), and the rule is fired once on purpose and recorded in
+   [monitoring.md](monitoring.md#as-prometheus-rules).
 
 ### Changing Borg's passphrase
 
@@ -877,6 +906,189 @@ the alarm fires a day later:
 - To go back to the old passphrase on the repository: `borg key import` the secret's
   `borg_key_export` (it is locked by `borg_passphrase`), and move `borg-passphrase.old.cred` back.
 
+### The restore drill
+
+It proves the backup, using only the backup secret and the Storage Box (ADR 0013): the read-only
+account copies the Borg repository, the secret's export replaces the copy's key, the newest
+snapshot goes into a fresh OpenBao with the secret's seal key, a root token comes from the
+secret's recovery key, an AppRole logs in, and the Transit key's address is the one on chain.
+Before mainnet (first on testnet), then every quarter, and after any seal key rotation, Borg
+passphrase change or OpenBao upgrade.
+
+It runs in Docker on the admin's machine, which stands in for ADR 0013's throwaway machine: the
+restored OpenBao has no network (its own `network_mode: none`), Borg runs in a container with no
+network on the copy, and the only connection out is the copy from the box's read-only account. It
+writes nothing on the server, the box or AWS; reading the secret is one CloudTrail event, which
+step 9 lists. Everything secret lives in a directory in `/dev/shm`, a tmpfs, which step 10
+removes; if you stop before it, run step 10. One shell from step 1 to step 10, at the root of
+this repo, Docker and `jq` installed, and `aws sso login --profile soroban-admin` done.
+
+1. **The workspace and the secret.** Each field goes to its own file, the seal key and the
+   recovery key with no newline, as OpenBao and step 6 need them:
+
+   ```sh
+   umask 077
+   d=$(mktemp -d /dev/shm/x402-drill.XXXXXX)
+   AWS_PROFILE=soroban-admin aws secretsmanager get-secret-value --region eu-central-1 \
+     --secret-id x402/production/openbao-backup --query '{v:VersionId,s:SecretString}' --output json > "$d/secret.json"
+   s() { jq -er ".s | fromjson | .$1" "$d/secret.json"; }
+   jq -r .v "$d/secret.json"   # the version the drill reads, for the record
+   s storage_box_ro_ssh_key > "$d/ro-key"
+   s borg_key_export > "$d/borg-key"
+   printf %s "$(s borg_passphrase)" > "$d/borg-passphrase"
+   printf %s "$(s seal_key_hex)" > "$d/seal-key"
+   printf %s "$(s recovery_key)" > "$d/recovery-key"
+   [ "$(s seal_key_id)" = x402-openbao-1 ] && echo "seal key ID ok"
+   [ "$(shasum -a 256 < "$d/seal-key" | cut -d' ' -f1)" = "$(s seal_key_sha256)" ] && echo "seal key hash ok"
+   [ -z "$(s previous_seal_key_id)" ] && echo "no previous seal key"
+   ```
+
+   Three `ok` lines. After a seal key rotation the previous pair is set: add it to step 4's
+   `seal "static"` as `previous_key_id` and `previous_key`, as on the server.
+
+2. **The copy of the repository,** through the read-only account `u595862-sub3`, whose home is
+   the repositories' directory. The box's host key is the one pinned for the write account:
+
+   ```sh
+   sed -n 's/^\[u595862-sub2\./[u595862-sub3./p' deploy/ansible/files/storage-box.known_hosts > "$d/known_hosts"
+   rsync -a -e "ssh -p 23 -i $d/ro-key -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes \
+     -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$d/known_hosts" \
+     u595862-sub3@u595862-sub3.your-storagebox.de:openbao/ "$d/repo/"
+   du -sh "$d/repo"
+   ```
+
+3. **Borg, and the secret's key in the copy.** Borg 1.2 from Ubuntu 24.04, the server's package,
+   in a container. The copy's own key is removed first, so the export is what opens it:
+
+   ```sh
+   docker build -q -t x402-drill-borg - <<'EOF'
+   FROM ubuntu:24.04
+   RUN apt-get update && apt-get install -y --no-install-recommends borgbackup && rm -rf /var/lib/apt/lists/*
+   EOF
+   borg() { docker run --rm -i --network none --user "$(id -u):$(id -g)" -v "$d:/d" -e BORG_REPO=/d/repo \
+     -e BORG_BASE_DIR=/d/borg -e BORG_PASSCOMMAND='cat /d/borg-passphrase' --entrypoint "${E:-borg}" x402-drill-borg "$@"; }
+   borg --version   # borg 1.2.x
+   E=python3 borg -c 'import configparser as c; p = c.ConfigParser(interpolation=None); p.read("/d/repo/config"); p.remove_option("repository", "key"); p.write(open("/d/repo/config", "w"))'
+   borg list || echo "no key in the copy: expected"
+   borg key import /d/repo /d/borg-key
+   borg list
+   ```
+
+   `borg list` fails once, then lists the archives: the export and the passphrase open the
+   repository.
+
+4. **A fresh OpenBao** from `deploy/openbao`, under its own project and volume names, with the
+   secret's seal key. The seal stanza and the version must be the secret's:
+
+   ```sh
+   cp -r deploy/openbao "$d/openbao"
+   sed -i -e 's/^name: x402-openbao$/name: x402-openbao-drill/' \
+     -e 's/name: x402-openbao-\(data\|audit\|testnet\)$/name: x402-drill-openbao-\1/' "$d/openbao/compose.yaml"
+   grep -n 'name:' "$d/openbao/compose.yaml"
+   [ "$(sed -n '/^seal "static"/,/^}/p' "$d/openbao/config.hcl")" = "$(s seal_config)" ] && echo "seal stanza ok"
+   grep -q "openbao/openbao:$(s openbao_version)@" "$d/openbao/compose.yaml" && echo "version ok"
+   chmod 0444 "$d/seal-key" "$d/openbao/config.hcl"   # read inside by uid 100 (step 1's umask made them 0600); the directory stays 0700
+   docker volume create x402-drill-openbao-data && docker volume create x402-drill-openbao-audit
+   dc() { SECRETS_DIR=$d docker compose -f "$d/openbao/compose.yaml" "$@"; }
+   bao() { dc exec -T -e BAO_TOKEN openbao bao "$@"; }
+   dc up -d
+   sleep 5; bao status   # Initialized false
+   init=$(bao operator init -recovery-shares=1 -recovery-threshold=1 -format=json </dev/null)
+   export BAO_TOKEN=$(printf %s "$init" | jq -r .root_token); unset init
+   ```
+
+   The names are `x402-openbao-drill` and `x402-drill-openbao-…`, never the server's. Init's root
+   token only serves the restore, which replaces it.
+
+5. **The newest snapshot, restored:**
+
+   ```sh
+   a=$(borg list --last 1 --format '{archive}')
+   echo "$a"
+   borg extract --stdout "::$a" openbao.snap > "$d/openbao.snap"
+   gzip -t "$d/openbao.snap" && ls -l "$d/openbao.snap"
+   dc exec -T openbao sh -c 'cat > /tmp/raft.snap' < "$d/openbao.snap"
+   bao operator raft snapshot restore /tmp/raft.snap
+   ```
+
+   With the right seal key under the same ID it is accepted as it is. If it answers `could not
+verify hash file`, run it again with `-force` and record that it needed it; `-force` can't get
+   round a wrong seal key, which leaves OpenBao sealed. The restore finishes in the background:
+
+   ```sh
+   unset BAO_TOKEN
+   for i in $(seq 30); do bao status -format=json 2>/dev/null | jq -e '.sealed == false' > /dev/null && break; sleep 2; done
+   bao status   # Sealed false
+   ```
+
+6. **A root token from the recovery key,** through the legacy API, as on the server (OpenBao, A
+   new root token), with the key from the file:
+
+   ```sh
+   key=$(cat "$d/recovery-key")
+   [ ${#key} -eq 44 ] && echo ok || echo 'bad key: stop here'
+   n=$(bao read -field=otp_length sys/generate-root/attempt)
+   otp=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c "$n")
+   nonce=$(printf %s "$otp" | bao write -field=nonce sys/generate-root/attempt otp=-)
+   encoded=$(printf %s "$key" | bao write -field=encoded_token sys/generate-root/update key=- nonce="$nonce")
+   export BAO_TOKEN=$(encoded=$encoded otp=$otp python3 -c 'import base64, os; e, o = os.environ["encoded"], os.environ["otp"]; print(bytes(a ^ b for a, b in zip(base64.b64decode(e + "=" * (-len(e) % 4)), o.encode())).decode())')
+   unset key otp nonce encoded
+   bao token lookup -format=json | jq -c .data.policies   # ["root"]
+   ```
+
+7. **An AppRole login,** testnet's, with a new secret ID issued in this copy only:
+
+   ```sh
+   rid=$(bao read -field=role_id auth/approle/role/x402-testnet/role-id </dev/null)
+   sid=$(bao write -f -field=secret_id auth/approle/role/x402-testnet/secret-id </dev/null)
+   printf '{"role_id":"%s","secret_id":"%s"}' "$rid" "$sid" |
+     BAO_TOKEN= bao write -format=json auth/approle/login - | jq -c .auth.policies   # ["x402-testnet"]
+   unset rid sid
+   ```
+
+8. **The Transit key against the chain.** The address of the restored key must be testnet's
+   facilitator address (`FACILITATOR_ADDRESS_TESTNET`, the fee account), and that account's
+   signer on chain:
+
+   ```sh
+   pub=$(bao read -format=json transit/keys/stellar-testnet | jq -r '.data.keys[(.data.latest_version | tostring)].public_key')
+   addr=$(cd packages/signer-pool && node -e 'console.log(require("@stellar/stellar-sdk").StrKey.encodeEd25519PublicKey(Buffer.from(process.argv[1], "base64")))' "$pub")
+   echo "$addr"
+   curl -s "https://horizon-testnet.stellar.org/accounts/$addr" | jq -c '[.signers[] | {key, weight}]'
+   ```
+
+   The address is `GAVE5V5IOMNNBOZXGZSQOP447L2QLCG6ELIIPO6CFJLGZVY4YIK3KKRP`, and Horizon lists
+   it as a signer of its own account.
+
+9. **Reads of the secret that weren't drills,** in CloudTrail's 90 days (the read-only profile is
+   enough; it pages slowly, a few minutes):
+
+   ```sh
+   AWS_PROFILE=soroban-readonly aws cloudtrail lookup-events --region eu-central-1 \
+     --lookup-attributes AttributeKey=EventName,AttributeValue=GetSecretValue \
+     --start-time "$(date -u -d '-90 days' +%FT%TZ)" --output json |
+     jq -r '.Events[] | (.CloudTrailEvent | fromjson) as $e
+       | select(($e.requestParameters.secretId // "") | contains("openbao-backup"))
+       | "\(.EventTime) \($e.userIdentity.arn | sub(".*/"; "")) \($e.sourceIPAddress) \($e.errorCode // "ok")"'
+   ```
+
+   Each line must be one we know: a setup or rotation step in this runbook, or a drill. One that
+   isn't is the suspected key theft of ADR 0013.
+
+10. **Removal,** also after a drill that stopped partway:
+
+    ```sh
+    unset BAO_TOKEN pub addr a
+    dc down
+    docker volume rm x402-drill-openbao-data x402-drill-openbao-audit x402-drill-openbao-testnet
+    shred -fu "$d"/ro-key "$d"/borg-key "$d"/borg-passphrase "$d"/seal-key "$d"/recovery-key "$d"/secret.json
+    rm -rf "$d"; unset d
+    docker image rm x402-drill-borg
+    ```
+
+Record the result in the task that ran it: the date, the secret's version, the archive, whether
+the restore needed `-force`, the address, the login, and the CloudTrail lines.
+
 ### Testing locally
 
 The script takes its paths from the environment, so it runs against a throwaway OpenBao and a
@@ -886,6 +1098,184 @@ place), `X402_OPENBAO_DIR` (a copy of `deploy/openbao` with its own volume names
 implementation notes have the run of 2026-11-05: a snapshot, the restore of it into a second
 OpenBao through a copy of the repository with its key imported from the export, and the same
 Transit key after it.
+
+## Lost access to the facilitator's accounts
+
+The key keeps its full power on the fee account and the channels
+([ADR 0015](adr/0015-hot-key-full-power.md)), so a thief can add a signer, remove ours and take
+the float. This section moves the facilitator to a new key, a new fee account and new channels,
+and abandons the old ones with their XLM (about 130 XLM at launch). Shown for testnet; mainnet's
+names come with 0038.
+
+**When:**
+
+- The facilitator refuses to start with `extra-signer` from `checkChannel`, or a channel or the fee
+  account has a signer, threshold or weight nobody on the team set.
+- XLM left the fee account that no settlement or top-up explains (`balance-critical`, the theft
+  alarm once 0127 turns it on).
+- OpenBao's data is lost and a restore from a snapshot failed.
+
+Not for a planned rotation while our key still works: that one keeps the accounts (ADR 0013, 0099;
+not here yet).
+
+1. **Stop the facilitator** and note the time:
+
+   ```sh
+   sudo systemctl stop x402@production
+   ```
+
+2. **Decide whether this server stays.** A new key in an OpenBao that someone else can read is
+   stolen the same way.
+
+   | What happened                                                                                                                                     | Then                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+   | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | A secret ID or token seen outside the server, and OpenBao's audit log shows every signature came from the facilitator's token at its settle times | Not this section: the key wasn't used. OpenBao has no network (`network_mode: none`), so a credential can't sign from outside the server. Keep the accounts and cut off the one that leaked: testnet's secret ID or an AppRole token, step 3's `revoke-prefix`, `destroy` and new secret ID lines; a root token, by its accessor ([A lost shell](#openbao)); the snapshots' secret ID, step 3's `destroy` loop on `x402-snapshot`, then a new one with step 4 of "OpenBao snapshots → Setting it up". Then start `x402@production` again: step 1 stopped it, and it reads a new secret ID only at a start. |
+   | A signature the facilitator didn't make, root on the server, code in the facilitator's container, or you don't know                               | The server doesn't stay: whoever signed was on the server or in the container. Stop here: a clean server, set up with "Before the first deploy" and OpenBao's steps 1–6 with the two changes below, and every secret the server held rotated ([Credentials](#credentials)). Then steps 6 and 7 below.                                                                                                                                                                                                                                                                                                      |
+   | OpenBao's disk, with no break-in, and the restore failed                                                                                          | The server stays. OpenBao starts over with new volumes, as its "Setting it up" says (stop `x402-openbao`, `compose down`, the two volumes removed and made again): the failed restore's Raft data makes `init` refuse, and a running OpenBao keeps the old seal key, so the next restart can't unseal. Then OpenBao's steps 1–5 make a new `stellar-testnet` at version 1, with the two changes below; skip step 3.                                                                                                                                                                                        |
+
+   The backup secret lives in AWS, so it outlives any server: in the last two rows it already
+   exists, and two of OpenBao's steps change:
+
+   - **Step 3 updates the backup secret, it doesn't create it.** `create-secret` fails on the
+     existing `x402/production/openbao-backup`. Never delete it and create it again: its Borg
+     passphrase and key export are the only copy of them off the server, and the backups need
+     them. Write the new seal key,
+     recovery key and seal config into it and keep its Borg and Storage Box fields, with the
+     variables of step 3:
+
+     ```sh
+     id=x402/production/openbao-backup
+     cur=$(aws secretsmanager get-secret-value --region eu-central-1 --secret-id $id --query SecretString --output text)
+     new=$(printf %s "$cur" | seal_key=$seal_key recovery_key=$(printf %s "$init" | jq -r '.recovery_keys_b64[0]') \
+       sha=$(printf %s "$seal_key" | shasum -a 256 | cut -d' ' -f1) \
+       seal_config=$(sed -n '/^seal "static"/,/^}/p' deploy/openbao/config.hcl) \
+       jq -c '.seal_key_hex = env.seal_key | .seal_key_sha256 = env.sha | .recovery_key = env.recovery_key
+         | .seal_config = env.seal_config | .updated = (now | todate)')
+     printf %s "$new" | aws secretsmanager put-secret-value --region eu-central-1 --secret-id $id \
+       --secret-string file:///dev/stdin --query VersionId --output text
+     ```
+
+   - **Then the snapshots' AppRole again:** "OpenBao snapshots → Setting it up", step 4. The old
+     one went with the old storage, so every nightly snapshot fails until it runs.
+
+3. **A new version of the key, and new credentials.** In a root shell with a root token ([A new
+   root token](#openbao)), one command per paste, each with its indented continuation lines, as
+   in OpenBao's step 4. The key keeps its name, so
+   the AppRole's policy (`transit/sign/stellar-testnet`) still fits and nothing in the repo
+   changes. `min_encryption_version` stops anyone signing with an older version; then every token
+   the AppRole issued is revoked and every secret ID destroyed, and a new secret ID goes into the
+   facilitator's credential.
+
+   ```sh
+   sudo -i
+   cd /srv/x402/openbao
+   read -rs BAO_TOKEN && export BAO_TOKEN   # paste the root token, Enter
+   bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
+   n=testnet
+   bao write -f transit/keys/stellar-$n/rotate </dev/null >/dev/null
+   v=$(bao read -field=latest_version transit/keys/stellar-$n </dev/null) && echo "version $v"
+   bao write transit/keys/stellar-$n/config min_encryption_version=$v </dev/null >/dev/null
+   bao write -f sys/leases/revoke-prefix/auth/approle/login </dev/null
+   ids=$(bao list -format=json auth/approle/role/x402-$n/secret-id </dev/null |
+     python3 -c 'import json, sys; print(" ".join(json.load(sys.stdin)))') && echo "ids: $ids"
+   for a in $ids; do
+     bao write auth/approle/role/x402-$n/secret-id-accessor/destroy secret_id_accessor=$a </dev/null && echo "destroyed $a"
+   done
+   s=$(bao write -f -field=secret_id auth/approle/role/x402-$n/secret-id </dev/null) && [ -n "$s" ] &&
+     printf %s "$s" | systemd-creds encrypt --with-key=host --name=approle-secret-id.$n - \
+       /srv/x402/production/creds/approle-secret-id.$n.cred
+   [ -n "$s" ] && [ "$(systemd-creds decrypt --name=approle-secret-id.$n \
+     /srv/x402/production/creds/approle-secret-id.$n.cred -)" = "$s" ] && echo "credential ok" || echo 'credential bad: stop here'
+   unset s
+   bao read -format=json transit/keys/stellar-$n </dev/null   # .data.keys["<v>"].public_key
+   bao token revoke -self; unset BAO_TOKEN
+   ```
+
+   Paste the `s=` line and its two continuation lines as one: they take the secret ID and write
+   the credential in one command, and `[ -n "$s" ]` stops an empty one. The check after it
+   compares the credential with `$s`, so it must print `credential ok`; a byte count alone would
+   pass on the old file, whose destroyed secret ID is 36 bytes too. Run each line once: in the
+   2026-11-26 drill an encrypt line most likely ran a second time after `unset s`, the
+   credential held nothing, and `x402@` failed at its start (step 6). A line that wraps in the
+   terminal can also reach the shell cut, which is why the loop above is on several lines.
+
+   The address comes from that public key with OpenBao's step 4 `node -e` line. Note `v`: it goes
+   into `.env` in step 5.
+
+4. **A new fee account and new channels** for that address: OpenBao's step 6. On testnet Friendbot
+   funds the fee account with 10,000 XLM; mainnet's float comes from the company's exchange account
+   ([Topping up the fee account](#topping-up-the-fee-account)).
+
+5. **The four values in `.env`**, written whole, with the version from step 3. They go to
+   `.env.new` first, are read back, and only then replace `.env`: a write straight to `.env` that
+   stops half way (a placeholder the shell refuses, Ctrl-C) leaves it empty, and every start of
+   `x402@` then stops at interpolation. It writes the four values only: add back by hand any
+   comment line the old file had. Each block is its own paste:
+
+   ```sh
+   printf 'OPENBAO_KEY_TESTNET=%s\nOPENBAO_KEY_VERSION_TESTNET=%s\nFACILITATOR_ADDRESS_TESTNET=%s\nCHANNELS_TESTNET=%s\n' \
+     stellar-testnet VERSION ADDRESS CHANNELS |
+     ssh SERVER 'sudo install -o x402 -g x402 -m 0644 /dev/stdin /srv/x402/production/.env.new'
+   ssh SERVER 'sudo cat -A /srv/x402/production/.env.new'
+   ```
+
+   `cat -A` ends every line in `$` and shows nothing else. Only then, the move, which keeps the
+   old file as `.env.old` and refuses a `.env.new` without its channels; the Compose check shows
+   the four values as Compose reads them:
+
+   ```sh
+   ssh SERVER 'cd /srv/x402/production && sudo grep -q "^CHANNELS_TESTNET=G" .env.new && sudo cp -p .env .env.old && sudo mv .env.new .env && sudo /usr/local/libexec/x402/x402-compose production config facilitator | grep -E "OPENBAO_KEY|FACILITATOR_ADDRESS|CHANNELS" | cut -c1-90'
+   ```
+
+6. **Start it, and check the signer.** A well-formed version, or an address the channels accept,
+   doesn't stop the start, even when it's wrong: the
+   facilitator runs, `/health` says `signer: failed`, the log has `signer_failed` with its reason
+   (`address_mismatch` for a wrong address, `error` for a version below `min_encryption_version`,
+   which OpenBao answers with a 500, `denied` for a credential), and every settle fails until it
+   is fixed.
+
+   ```sh
+   sudo systemctl start x402@production
+   sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator \
+     node -e "fetch('http://127.0.0.1:4021/health').then((r) => r.text()).then(console.log)"
+   curl -s https://x402-facilitator.sorobanscan.com/supported   # signers: the new address
+   ```
+
+   `ready`, `listed` and `signer: "ok"`, and one paid request settles.
+
+   Three mistakes stop the start instead, before `/health` exists, so the check above has nothing
+   to talk to: a malformed version (`VERSION`, `v2`, `0`) fails the config check, an address
+   that isn't the channels' signer fails `checkChannels` with `facilitator-not-signer`, and an
+   empty secret ID credential (step 3) fails with `OPENBAO_SECRET_ID_FILE is empty`. `x402@`
+   restarts until systemd gives up (5 starts in 5 minutes). The journal has only systemd's
+   `status=1/FAILURE`; the reason (`startup_failed`, `facilitator-not-signer`) is in the
+   facilitator's own log, as in [The watchdog](#the-watchdog):
+   `sudo tail -n 20 /var/log/x402/production/facilitator.log`. Fix `.env`, then
+   `sudo systemctl reset-failed x402@production` and start it again. An empty credential needs
+   no change to `.env`: a new root token, step 3's `ids=` and `for` lines (they destroy the
+   secret ID that step made), its `s=` line and the check after it, then `reset-failed` and the
+   start. In the drill that took 4 minutes.
+
+7. **The alarms on the new fee account:** a pull request that changes `feeAccounts` in
+   `infra/envs/production.json`, then in `infra/` both stacks that hold the address:
+   `make diff-production-watch` and `make deploy-production-watch` (what Watch reads), then
+   `make diff-production-alarms` and `make deploy-production-alarms` (the text of `balance-low`
+   and `balance-critical`, "Top up <account>"). Until both run, those alarms read the old account
+   and fire as it drains, and their text tells whoever is on call to top up the abandoned account
+   the thief holds: don't. The facilitator doesn't wait for this.
+
+**After it:**
+
+- An OpenBao snapshot now, so the new key version is off the server before the nightly run:
+  `sudo systemctl start x402-openbao-snapshot.service`, checked as in
+  [OpenBao snapshots](#openbao-snapshots). It replaces that day's earlier archive, since
+  `prune --keep-daily 14` keeps the last of each day.
+- The old addresses stay under the old key for good. Nothing may trust them: no contract may take a
+  channel address as an authority, and `upto`'s receiver authorizer is always the current key
+  (ADR 0015).
+- Open `upto` authorizations bound to the old address can't be revoked; they expire within their
+  window (threat model, "A stolen key charges open `upto` authorizations").
+- Record the time, the abandoned addresses and the XLM left behind in the weekly review.
 
 ## Topping up the fee account
 
@@ -925,6 +1315,81 @@ testnet's reset, Friendbot creates it again (OpenBao, step 6).
 
 **Mainnet.** A withdrawal from the company's exchange account to the fee account. Who makes it,
 and a backup person, are named before mainnet (ADR 0013, 0026).
+
+## Account plans
+
+On pubnet each API key holder's account has a plan: payments a calendar month and a fee budget
+per 24 h (task 0107). An account without a plan is on `free`, and every free account shares
+`free`'s budget. The plans, the limits and what each refusal means are in the
+[facilitator README](../apps/facilitator/README.md), "Accounts and plans". A seller who needs
+more writes to us; until charging past the quota exists (0108), the operator raises its plan by
+hand.
+
+**Granting a plan.**
+
+1. **Check that `global` holds it.** `SPEND_GLOBAL_STROOPS` must be at least `SPEND_FREE_STROOPS`
+   plus the fee budget of every account on a raised plan, this one included: then no account,
+   attacked or with a leaked key, takes more than its own day's budget from the others, and
+   `global` never fills. `keys plans` (below) lists the raised accounts. At the defaults `global`
+   (500,000,000) less `free` (250,000,000) leaves 250,000,000: ten `basic` accounts at 25,000,000,
+   or two `pro` at 100,000,000 and two `basic`. The facilitator checks only that `free` is at most
+   `global`; this sum is yours.
+2. **No room: raise `global`, and the float first.** `global` stays at most the float less its
+   25 XLM alarm (0024's rule, ADR 0007), so one window can't take the fee account to the alarm: a
+   `global` of 60 XLM needs a float of at least 85 XLM. Top up (Topping up the fee account), then
+   set `SPEND_GLOBAL_STROOPS` and restart the facilitator, which drains, so plan it like a deploy.
+   No compose file passes the variable yet: see "Changing the plans themselves" below.
+3. **Set the plan**, with why, in the facilitator's container of the account's network, so the
+   command reads that service's database and its own `ACCOUNT_PLANS`, and refuses a plan the
+   service doesn't have. Pass your login: `$USER` is unset under `docker exec`, and the row would
+   record `operator:unknown` as who set it.
+
+   ```sh
+   sudo /usr/local/libexec/x402/x402-compose production exec -T -e USER="$USER" facilitator \
+     node dist/keys.js plan discord:412345678901234567 basic asked on Discord
+   sudo /usr/local/libexec/x402/x402-compose production exec -T facilitator node dist/keys.js plans
+   ```
+
+   It prints the row it wrote: owner, plan, when, by whom and the note. The plan holds from the
+   account's next settlement, with nothing restarted, and its month's count is kept. Lowering a
+   plan is the same command. Until pubnet has its database and services (0126) the only container
+   is testnet's, where no settlement carries a key: a plan set there shows only in the hub's tab,
+   which reads testnet's database until then.
+
+**Changing the plans themselves** is `ACCOUNT_PLANS`, in the facilitator's environment and the
+portal's, with the same text in both: the facilitator counts by it and the portal shows the hub
+the quota from it. Each takes it at its start. Today neither `deploy/production/compose.yaml` nor
+`portal.compose.yaml` passes it, nor `SPEND_FREE_STROOPS` or `SPEND_GLOBAL_STROOPS`: each lists
+its variables by name, so both services run on the defaults built into their images, which are
+the same. Until 0126 a change is a pull request that adds the variable to both files with the
+same value, deployed together. 0126 takes the three from the server's `.env` through `${…}`, as
+`FACILITATOR_ADDRESS` is today, so both services get one value and a change needs no pull
+request. Before removing a plan, move its accounts to another one: a row naming a plan the config
+lacks counts as `free`, and each of its settlements logs `account_plan_unknown`. The portal logs
+nothing for such a row and shows the hub the `free` quota.
+
+**Which accounts reach a limit.** Each refusal by a budget logs `spend_limit_reached` with the
+budget's `scope`, an account's as `account:<owner>`, and `limit`: `count` for its monthly quota,
+`stroops` for a fee budget. In Logs Insights on `/x402/production/app`:
+
+```
+filter event = "spend_limit_reached"
+| stats count() as refusals by scope, `limit`
+| sort refusals desc
+| limit 50
+```
+
+An account refused with `stroops` many times a day is paying more than usual per settlement,
+which a buyer's wallet can cause (threat model, "A buyer uses up a seller's quota"). `free` among
+the scopes, beside many free accounts each at its own fee budget, looks like the free tier used up
+by many accounts (threat model, "Shared budget exhaustion by Sybil self-payments"); the
+`budget-nearing` alarm fires for `free` before that.
+
+**The float on pubnet** is not decided yet: ADR 0013's 100 XLM, its alarm at 25 XLM and `global`
+at 50 XLM are the starting figures. A typical pubnet settlement is charged 12,203 stroops, so
+100 XLM is about 82,000 of them. Under a sustained attack on `free`, which costs up to 25 XLM a
+day, the float falls to its alarm in about 3 days; every raised plan's budget that `global` must
+hold raises the float with it (step 2).
 
 ## The CloudWatch agent
 
@@ -978,18 +1443,18 @@ outlives the server (0027 decision 1); `journalctl -u` keeps only a unit's own s
 lines. The watchdog, the host probe, the helper and the agent itself stay in the journal (the
 agent's own log is `/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log`).
 
-| `/var/log/x402/`                  | Written by                                    | Stream, group                                      |
-| --------------------------------- | --------------------------------------------- | -------------------------------------------------- |
-| `production/facilitator.log`      | `x402@production`, stdout                     | `facilitator` in `app`; its EMF lines in `metrics` |
-| `production/facilitator.err.log`  | `x402@production`, stderr                     | `facilitator-stderr` in `app`                      |
-| `production/postgres-testnet.log` | `x402-db-testnet@production`                  | `postgres-testnet` in `app`                        |
-| `production/cloudflared.log`      | `x402-tunnel@production`                      | `cloudflared` in `app`                             |
-| `production/deploy.log`           | the deploys, their migrations, `x402-migrate` | `deploy` in `app`                                  |
-| `production/portal.log`           | `x402-portal@production`                      | `portal` in `app`                                  |
-| `production/portal-deploy.log`    | the portal's deploys                          | `portal-deploy` in `app`                           |
-| `openbao/openbao.log`             | `x402-openbao`                                | `openbao` in `app`                                 |
-| `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`                                |
-| `metrics/agent.log`               | `x402-metrics`                                | `metrics-agent` in `app`                           |
+| `/var/log/x402/`                  | Written by                                    | Stream, group                 |
+| --------------------------------- | --------------------------------------------- | ----------------------------- |
+| `production/facilitator.log`      | `x402@production`, stdout                     | `facilitator` in `app`        |
+| `production/facilitator.err.log`  | `x402@production`, stderr                     | `facilitator-stderr` in `app` |
+| `production/postgres-testnet.log` | `x402-db-testnet@production`                  | `postgres-testnet` in `app`   |
+| `production/cloudflared.log`      | `x402-tunnel@production`                      | `cloudflared` in `app`        |
+| `production/deploy.log`           | the deploys, their migrations, `x402-migrate` | `deploy` in `app`             |
+| `production/portal.log`           | `x402-portal@production`                      | `portal` in `app`             |
+| `production/portal-deploy.log`    | the portal's deploys                          | `portal-deploy` in `app`      |
+| `openbao/openbao.log`             | `x402-openbao`                                | `openbao` in `app`            |
+| `host/metrics.log`                | the host probe, the watchdog, `x402@`'s stop  | `host` in `metrics`           |
+| `metrics/agent.log`               | `x402-metrics`                                | `metrics-agent` in `app`      |
 
 `x402-logrotate.timer` runs every 10 minutes and rotates each file once a day, empty or not, or
 sooner once past 100 MB; it keeps 10, `*.log.1` as it was and the older ones compressed, and
@@ -1098,12 +1563,15 @@ doesn't start.
    compose file, the units, `deploy-portal.sh`, the portal's deploy key and its sudo rule, enables
    `x402-portal@production`, which its condition skips until the first deploy, and restarts the
    CloudWatch agent, whose config gained two files. Nothing else restarts.
-3. **The database role.** The backend reads and writes the registry's two tables and nothing else
-   in the database: it can't read a settlement, change a key's owner or hash, or delete a key's
-   row. The two `SET`s keep the statements, with the password, out of Postgres's log if one
-   fails. The rest is one transaction, and the credential is written only once it has committed:
-   a failed run (a `GRANT` before `0014`, say) changes nothing, and the backend's password stays
-   the role's.
+3. **The database role.** The backend reads and writes the registry's two tables, and reads two
+   things for the usage the hub shows (0107): `account_plans`, every account's plan row with the
+   operator's note, and the view `account_usage`, the time of every account's payment the store
+   still keeps, with its owner but no amount, fee or address. A leaked `portal-database-url`
+   gives those too. Nothing else in the database: it can't read a settlement or the spend tables
+   themselves, change a key's owner or hash, or delete a key's row. The two `SET`s keep the
+   statements, with the password, out of Postgres's log if one fails. The rest is one
+   transaction, and the credential is written only once it has committed: a failed run (a `GRANT`
+   before `0014`, say) changes nothing, and the backend's password stays the role's.
 
    ```sh
    (
@@ -1120,6 +1588,7 @@ doesn't start.
    GRANT SELECT, INSERT ON api_keys TO x402_portal;
    GRANT UPDATE (state, revoked_at) ON api_keys TO x402_portal;
    GRANT SELECT, INSERT, DELETE ON api_key_copies TO x402_portal;
+   GRANT SELECT ON account_plans, account_usage TO x402_portal;
    COMMIT;
    SQL
      then
@@ -1135,16 +1604,20 @@ doesn't start.
    ```
 
    On success psql prints `SET`, `SET`, `BEGIN`, `CREATE ROLE` (the first time only),
-   `ALTER ROLE`, three `GRANT`s and `COMMIT`, and the step nothing more. A failed statement prints
+   `ALTER ROLE`, four `GRANT`s and `COMMIT`, and the step nothing more. A failed statement prints
    psql's `ERROR:`, then `stopped: the role was not made or changed; the credential is unchanged`,
    and the subshell exits 1. The subshell keeps `pw` and the `cd` out of your shell. Run again, it
-   converges: the role keeps its grants and takes a new password, and the credential follows.
-   That is also how the password changes later; restart the unit after it if the backend runs,
-   since it reads the credential when it starts.
-   `deploy/scripts/check-production-portal.sh` makes its role from these `GRANT` lines. A
-   migration that replaces either table with a new one must grant again: the grants are the
-   table's, not the name's. The grants don't keep anyone else from the copies: the facilitator
-   connects as the database's owner, so only the encryption does (0106 decision 18).
+   converges: the role keeps its grants and takes a new password, and the credential follows;
+   that is also how the password changes later. Every run sets a new password, so restart
+   `x402-portal@production` after it whenever the backend runs: it reads the credential when it
+   starts, and its new connections fail until it has read the new one. The last `GRANT` (0107) is
+   for the account's use the backend shows the hub: run this step again on the existing role once
+   the facilitator has applied `0018_account_plans`, or `account` answers `usage: null` (logged as
+   `hub_usage_unavailable`). `deploy/scripts/check-production-portal.sh` makes its role from these
+   `GRANT` lines. A migration that replaces one of the four objects (the view `account_usage`
+   included, by `DROP VIEW` and `CREATE VIEW`) must grant again: the grants are the object's, not
+   the name's. The grants don't keep anyone else from the copies: the facilitator connects as the
+   database's owner, so only the encryption does (0106 decision 18).
 
 4. **The key encryption key**, on the server. It seals the copies and is kept nowhere else; a
    second one would leave every copy sealed under the first unable to open (Its other secrets,
@@ -1559,19 +2032,20 @@ One JSON object per line in `/var/log/x402/production/portal.log`, shipped as `p
 the first 12 hex digits of its SHA-256; never a key, a token, a secret or a Discord id. No alarm
 reads them yet: what watches the backend is the uptime probe on its `/health` (Monitoring, below).
 
-| Event                                                           | Level | Means, and what to do                                                                                                                                                                     |
-| --------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `startup_failed`                                                | error | the process exits: `problems` names each bad setting, never its value, or `error` says the database is out of reach or lacks a table. **Act**                                             |
-| `hub_call_failed`, `pool_error`, `not_ready`                    | error | the database failed (`502 key_unavailable`, or `issue`'s `outcome: failed`), or something else in a call (`500 internal`). **Act** on a run of them                                       |
-| `hub_key_copy_unreadable`                                       | error | a copy exists and doesn't open: the wrong `KEY_ENCRYPTION_KEY`, or a damaged row. **Act**                                                                                                 |
-| `shutdown_failed`                                               | error | a stop didn't end cleanly, and the process exited 1                                                                                                                                       |
-| `hub_call_refused` with `invalid_token`                         | warn  | **expected from strangers**. Only a run of them while the hub's x402 tab fails means the two sides disagree: the secret changed on one side only, or the two clocks more than 5 s apart   |
-| `hub_call_refused` with `action_not_allowed`                    | warn  | the hub doesn't send one: a hub bug, or a captured token replayed. Look                                                                                                                   |
-| `hub_strangers_limited`                                         | warn  | one address (an IPv6 /56) is over 30 calls a minute with tokens that don't verify; once per window. Right after a change of the secret, the hub's own calls (Changing the token's secret) |
-| `hub_key_issued`, `hub_key_revealed`, `hub_key_revoked`         | info  | the key events, with `jti`, `act` and `key_id`                                                                                                                                            |
-| `hub_issue_refused`, `hub_reveal_refused`, `hub_revoke_refused` | info  | what a call came to, its `outcome` (`has_key`, `capped`, `too_young`, `no_key`, …): the account's state, not a fault                                                                      |
-| `hub_account_answered`                                          | info  | the `state` `account` gave                                                                                                                                                                |
-| `listening`                                                     | info  | started, with its port                                                                                                                                                                    |
+| Event                                                           | Level | Means, and what to do                                                                                                                                                                          |
+| --------------------------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `startup_failed`                                                | error | the process exits: `problems` names each bad setting, never its value, or `error` says the database is out of reach or lacks a table. **Act**                                                  |
+| `hub_call_failed`, `pool_error`, `not_ready`                    | error | the database failed (`502 key_unavailable`, or `issue`'s `outcome: failed`), or something else in a call (`500 internal`). **Act** on a run of them                                            |
+| `hub_usage_unavailable`                                         | error | the plan or the count couldn't be read, and `account` answers `usage: null` (the key is still answered): the role lacks the 0107 grant (**run the role's step again**), or the database failed |
+| `hub_key_copy_unreadable`                                       | error | a copy exists and doesn't open: the wrong `KEY_ENCRYPTION_KEY`, or a damaged row. **Act**                                                                                                      |
+| `shutdown_failed`                                               | error | a stop didn't end cleanly, and the process exited 1                                                                                                                                            |
+| `hub_call_refused` with `invalid_token`                         | warn  | **expected from strangers**. Only a run of them while the hub's x402 tab fails means the two sides disagree: the secret changed on one side only, or the two clocks more than 5 s apart        |
+| `hub_call_refused` with `action_not_allowed`                    | warn  | the hub doesn't send one: a hub bug, or a captured token replayed. Look                                                                                                                        |
+| `hub_strangers_limited`                                         | warn  | one address (an IPv6 /56) is over 30 calls a minute with tokens that don't verify; once per window. Right after a change of the secret, the hub's own calls (Changing the token's secret)      |
+| `hub_key_issued`, `hub_key_revealed`, `hub_key_revoked`         | info  | the key events, with `jti`, `act` and `key_id`                                                                                                                                                 |
+| `hub_issue_refused`, `hub_reveal_refused`, `hub_revoke_refused` | info  | what a call came to, its `outcome` (`has_key`, `capped`, `too_young`, `no_key`, …): the account's state, not a fault                                                                           |
+| `hub_account_answered`                                          | info  | the `state` `account` gave                                                                                                                                                                     |
+| `listening`                                                     | info  | started, with its port                                                                                                                                                                         |
 
 A call with no bearer at all is logged at `debug` only, which the backend doesn't write (its
 `LOG_LEVEL` is `info`). `startup_failed` repeats: the unit restarts the process after 5 s, up to 5
@@ -1688,8 +2162,10 @@ while the VM can't be reached. node_exporter's textfile collector reads the host
 `/var/lib/x402/textfile`: `host-probe.prom`, the gauges of its last run, replaced whole each
 minute, so its age is the probe's; and one file per counter (`watchdog_restarts_total.prom`,
 `facilitator_failures_total.prom`), the total since the file was made, written when the event
-happens and rewritten by every run, so every file's age is the probe's. The facilitator's
-`/metrics` joins at the switch (0139 step 7). ClickHouse's own endpoint is on, but listens on
+happens and rewritten by every run, so every file's age is the probe's. The agent scrapes the
+facilitator too, at `facilitator:9464` on the `x402-metrics` network the facilitator joins:
+`METRICS_PORT` in `deploy/production/compose.yaml` sets the port, and unset, the facilitator
+serves no `/metrics` (0139). ClickHouse's own endpoint is on, but listens on
 127.0.0.1 inside `app-clickhouse-1` (the explorer's
 `crates/db-clickhouse/config.d/prometheus.xml`), so the agent can't reach it yet: only
 `docker exec` or a scraper in that container's network namespace can. The VM lets only the CNs in
@@ -1715,13 +2191,28 @@ cd /srv/x402/metrics && sudo docker compose exec -T agent \
 ```
 
 On the VM, in Prometheus (`ssh -L 9090:localhost:9090 monitoring`), each of these answers for
-`ch-prod-01`: `up{job="node"} == 1`, `node_textfile_scrape_error == 0`, and
-`time() - node_textfile_mtime_seconds < 120` for all three of the probe's files.
+`ch-prod-01`: `up{job="node"} == 1`, `up{job="facilitator"} == 1`,
+`node_textfile_scrape_error == 0`, and `time() - node_textfile_mtime_seconds < 120` for all three
+of the probe's files.
+
+**The facilitator needs the agent's network.** `x402-metrics` is the agent's project's network,
+external to production's, so the facilitator can't start where the agent's project never ran, or
+after a `docker compose down` of it (`systemctl stop` is `compose stop`, which keeps the network).
+`x402@production` then fails at once with `network x402-metrics declared as external, but could
+not be found` in `/var/log/x402/production/facilitator.err.log`, five times, and stays `failed`
+(`StartLimitBurst`): starting the agent later doesn't bring it back. The fix:
+
+```sh
+sudo systemctl start x402-metrics
+sudo docker network inspect x402-metrics --format '{{.Name}}'   # x402-metrics
+sudo systemctl reset-failed x402@production && sudo systemctl start x402@production
+```
 
 ## Not here yet
 
-- OpenBao's restore drill, key rotation as an on-chain signer change, mainnet's
-  fee float top-ups (0036, 0047). After a restore on the same server, restart the facilitator: a token newer
+- Key rotation as an on-chain signer change, mainnet's fee float top-ups (0036, 0047). A restore
+  on the server itself has no steps yet (the drill above restores into a copy); after one,
+  restart the facilitator: a token newer
   than the snapshot answers 403 until its hour ends, and a 403 doesn't make the signer log in again.
 - The key theft transaction (ADR 0013): no tool signs it and it has never run (0099).
 - A leaked token or secret ID, OpenBao upgrades and what `/settle` does meanwhile, and the weekly

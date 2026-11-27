@@ -173,9 +173,20 @@ impl PaymentRequired {
 
     /// Asks a facilitator that catalogs to list the route, as `listing` describes it. `method` is
     /// the method of the request being answered.
-    pub fn with_listing(mut self, listing: &Listing, method: &str) -> Self {
+    pub fn with_listing(self, listing: &Listing, method: &str) -> Self {
+        self.listed(listing, method, None)
+    }
+
+    /// [`Self::with_listing`] for a route the router matched: `route` is its pattern and the
+    /// request's path.
+    pub(crate) fn listed(
+        mut self,
+        listing: &Listing,
+        method: &str,
+        route: Option<(&str, &str)>,
+    ) -> Self {
         self.extensions
-            .insert("bazaar".to_owned(), listing.extension(method));
+            .insert("bazaar".to_owned(), listing.extension(method, route));
         self
     }
 

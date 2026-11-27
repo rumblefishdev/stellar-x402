@@ -15,6 +15,7 @@ import type { Settle } from "../src/settlement/settle.js";
 import type { Verify } from "../src/settlement/verify.js";
 import { testDatabase } from "./database.js";
 import { signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 /** The network `parseConfig` defaults to: the one the route below settles on. */
 const SERVED = STELLAR_NETWORKS.testnet;
@@ -181,6 +182,7 @@ describe("GET /discovery/resources", () => {
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       // Every case calls from one address; rate-limit.test.ts covers the route's limit.
       RATE_LIMIT_DISCOVERY: "1000000",
     };
@@ -190,6 +192,7 @@ describe("GET /discovery/resources", () => {
     await seed(stores);
     app = await start({
       config,
+      embedder: noSearchModel,
       logger,
       metrics,
       stores,

@@ -18,6 +18,7 @@ import type { Settle } from "../src/settlement/settle.js";
 import { testDatabase } from "./database.js";
 import { bazaarExtensions, depthOf } from "./payment.js";
 import { signerEnv } from "./fake-openbao.js";
+import { noSearchModel } from "./vectors.js";
 
 const requirements: PaymentRequirements = {
   scheme: "exact",
@@ -56,12 +57,14 @@ describe("POST /settle", () => {
       ...signerEnv(Keypair.random().publicKey()),
       DATABASE_URL: db.urlFor(db.schema),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
       CHANNELS: Keypair.random().publicKey(),
     };
     const config = { ...parseConfig(env), port: 0 };
     const logger = jsonLogger("debug", (line) => lines.push(line));
     app = await start({
       config,
+      embedder: noSearchModel,
       logger,
       metrics: memoryMetrics(),
       stores: db.stores(),
@@ -319,6 +322,27 @@ describe("POST /settle", () => {
     expect(settled.map((line) => line.message)).toEqual(["G… has no USDC trustline", undefined]);
   });
 
+  // 0107 decision 31: `/settle`'s re-check refuses as `/verify` does, so the fee upstream measured
+  // is kept in the log alone (0157, from Oskar's review of #236).
+  it("logs the fee of a payment creating payTo's balance, which its answer doesn't name", async () => {
+    const upstreamMessage = "simulation-derived fee 128027 stroops exceeds ceiling 100000 stroops";
+    const errorReason = "invalid_exact_stellar_pay_to_balance_missing";
+    settle.mockResolvedValueOnce({
+      response: {
+        success: false,
+        transaction: "",
+        network: requirements.network,
+        errorReason,
+        errorMessage: "payTo has no balance of this token yet",
+      },
+      upstreamMessage,
+    });
+    const response = await post(request);
+    expect(JSON.stringify(await response.json())).not.toContain("128027");
+    const settled = lines.map((line) => JSON.parse(line)).find((l) => l.event === "settled");
+    expect(settled).toMatchObject({ errorReason, upstreamMessage });
+  });
+
   it("answers 500 and logs the error when settling throws", async () => {
     settle.mockRejectedValueOnce(new Error("store down"));
     const response = await post(request);
@@ -342,10 +366,12 @@ describe("POST /settle beside reconciliation (0019 decision 27)", () => {
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
     };
     const config = { ...parseConfig(env), port: 0 };
     const app = await start({
       config,
+      embedder: noSearchModel,
       logger: jsonLogger("error"),
       stores: db.stores(),
       verify: async () => ({ isValid: true }),
@@ -394,10 +420,12 @@ describe("POST /settle without the channel lease (0025)", () => {
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
     };
     const config = { ...parseConfig(env), port: 0 };
     const app = await start({
       config,
+      embedder: noSearchModel,
       logger: jsonLogger("error"),
       stores: { ...db.stores(), rateLimits },
       verify: async () => ({ isValid: true }),
@@ -483,12 +511,14 @@ describe("shutdown (0025)", () => {
       DATABASE_URL: db.urlFor(db.schema),
       CHANNELS: Keypair.random().publicKey(),
       CLIENT_IP: "socket",
+      SEARCH_MODEL_URL: "http://127.0.0.1:9",
     };
     const config = { ...parseConfig(env), port: 0 };
     const lines: string[] = [];
     const app = await start(
       {
         config,
+        embedder: noSearchModel,
         logger: jsonLogger("info", (line) => lines.push(line)),
         stores: db.stores(),
         verify: async () => ({ isValid: true }),

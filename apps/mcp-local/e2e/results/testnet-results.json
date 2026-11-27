@@ -1,7 +1,7 @@
 {
-  "ranAt": "2026-11-13T12:13:43.088Z",
-  "commit": "706a8e9a1e019fb35e305befd8ebff6396c2dcae",
-  "rows": 121,
+  "ranAt": "2026-11-26T12:47:43.348Z",
+  "commit": "30995a041c3a69b1260e0f07d2cc65d84f829028",
+  "rows": 132,
   "failed": 0,
   "results": [
     {
@@ -27,7 +27,7 @@
     },
     {
       "id": "E-13b",
-      "check": "signature valid for 60 more ledgers: within the offer's 300 s and 300 s",
+      "check": "signature valid for 59 more ledgers: within the offer's 300 s and 300 s",
       "expected": [
         true,
         true
@@ -57,12 +57,29 @@
       "id": "E-14",
       "check": "both calls (the second is not over_budget: the amount came back)",
       "expected": [
-        "insufficient_funds",
-        "insufficient_funds"
+        "payer_trustline_missing",
+        "payer_trustline_missing"
       ],
       "got": [
-        "insufficient_funds",
-        "insufficient_funds"
+        "payer_trustline_missing",
+        "payer_trustline_missing"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14",
+      "check": "the tool text names the payer's account and the asset, in both calls",
+      "expected": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "got": [
+        true,
+        true,
+        true,
+        true
       ],
       "pass": true
     },
@@ -96,6 +113,92 @@
       ],
       "got": [
         "insufficient_funds",
+        true,
+        false
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14d",
+      "check": "refused, nothing sent, the amount given back",
+      "expected": [
+        "payto_trustline_missing",
+        0,
+        "0"
+      ],
+      "got": [
+        "payto_trustline_missing",
+        0,
+        "0"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14d",
+      "check": "the tool text names the seller's account and the asset, and not the payer's",
+      "expected": [
+        true,
+        true,
+        false
+      ],
+      "got": [
+        true,
+        true,
+        false
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14d",
+      "check": "cause in the log, not in the tool text",
+      "expected": [
+        true,
+        false
+      ],
+      "got": [
+        true,
+        false
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14e",
+      "check": "refused, nothing sent, the amount given back",
+      "expected": [
+        "payto_trustline_missing",
+        0,
+        "0"
+      ],
+      "got": [
+        "payto_trustline_missing",
+        0,
+        "0"
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14e",
+      "check": "the tool text names the seller's account and the asset, and not the payer's",
+      "expected": [
+        true,
+        true,
+        false
+      ],
+      "got": [
+        true,
+        true,
+        false
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-14e",
+      "check": "cause in the log, not in the tool text",
+      "expected": [
+        true,
+        false
+      ],
+      "got": [
         true,
         false
       ],
@@ -658,14 +761,16 @@
       "expected": [
         [
           "get_resource",
-          "list_resources"
+          "list_resources",
+          "search_resources"
         ],
         true
       ],
       "got": [
         [
           "get_resource",
-          "list_resources"
+          "list_resources",
+          "search_resources"
         ],
         true
       ],
@@ -695,7 +800,8 @@
         [
           "call_paid_http",
           "get_resource",
-          "list_resources"
+          "list_resources",
+          "search_resources"
         ],
         true
       ],
@@ -703,7 +809,8 @@
         [
           "call_paid_http",
           "get_resource",
-          "list_resources"
+          "list_resources",
+          "search_resources"
         ],
         true
       ],
@@ -730,11 +837,10 @@
         [
           "https://h1.example.com/",
           "https://h2.example.com/",
-          "https://h3.example.com/",
           "https://m1.example.com/mcp",
           "https://m2.example.com/mcp"
         ],
-        5,
+        4,
         true,
         1
       ],
@@ -742,11 +848,10 @@
         [
           "https://h1.example.com/",
           "https://h2.example.com/",
-          "https://h3.example.com/",
           "https://m1.example.com/mcp",
           "https://m2.example.com/mcp"
         ],
-        5,
+        4,
         true,
         1
       ],
@@ -758,20 +863,18 @@
       "expected": [
         [
           "https://h1.example.com/",
-          "https://h2.example.com/",
-          "https://h3.example.com/"
+          "https://h2.example.com/"
         ],
-        3,
+        2,
         true,
         1
       ],
       "got": [
         [
           "https://h1.example.com/",
-          "https://h2.example.com/",
-          "https://h3.example.com/"
+          "https://h2.example.com/"
         ],
-        3,
+        2,
         true,
         1
       ],
@@ -850,7 +953,7 @@
           "https://h1.example.com/",
           "https://h2.example.com/"
         ],
-        5,
+        4,
         true,
         1
       ],
@@ -859,7 +962,7 @@
           "https://h1.example.com/",
           "https://h2.example.com/"
         ],
-        5,
+        4,
         true,
         1
       ],
@@ -867,12 +970,12 @@
     },
     {
       "id": "E-04",
-      "check": "{\"limit\":2,\"offset\":4}: entries, total, filters passed, one request",
+      "check": "{\"limit\":2,\"offset\":3}: entries, total, filters passed, one request",
       "expected": [
         [
           "https://m2.example.com/mcp"
         ],
-        5,
+        4,
         true,
         1
       ],
@@ -880,7 +983,7 @@
         [
           "https://m2.example.com/mcp"
         ],
-        5,
+        4,
         true,
         1
       ],
@@ -1002,7 +1105,7 @@
     },
     {
       "id": "E-06",
-      "check": "call_paid_http {\"url\":\"http://127.0.0.1:41153/ok\",\"method\":\"HEAD\"}: -32602",
+      "check": "call_paid_http {\"url\":\"http://127.0.0.1:45139/ok\",\"method\":\"HEAD\"}: -32602",
       "expected": [
         true,
         true
@@ -1053,8 +1156,8 @@
     {
       "id": "E-07",
       "check": "buyer balance unchanged",
-      "expected": "500000",
-      "got": "500000",
+      "expected": "200080000",
+      "got": "200080000",
       "pass": true
     },
     {
@@ -1244,7 +1347,7 @@
     },
     {
       "id": "E-09g",
-      "check": "get_resource http://127.0.0.1.nip.io:38149/free",
+      "check": "get_resource http://127.0.0.1.nip.io:38743/free",
       "expected": "unsafe_url",
       "got": "unsafe_url",
       "pass": true
@@ -1409,7 +1512,7 @@
         true
       ],
       "pass": true,
-      "transaction": "118b37d00e3590bb8090815b4d0385cc0cc3923d0a3f1ccf963c0629ce0f789e"
+      "transaction": "fa9dc75211a22067c7c0a695cfcc5c7346743b780978517498ce35a3d7bde3fb"
     },
     {
       "id": "E-21",
@@ -1431,7 +1534,7 @@
         }
       ],
       "pass": true,
-      "transaction": "118b37d00e3590bb8090815b4d0385cc0cc3923d0a3f1ccf963c0629ce0f789e"
+      "transaction": "fa9dc75211a22067c7c0a695cfcc5c7346743b780978517498ce35a3d7bde3fb"
     },
     {
       "id": "E-21",
@@ -1447,7 +1550,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "118b37d00e3590bb8090815b4d0385cc0cc3923d0a3f1ccf963c0629ce0f789e"
+      "transaction": "fa9dc75211a22067c7c0a695cfcc5c7346743b780978517498ce35a3d7bde3fb"
     },
     {
       "id": "E-22a",
@@ -1471,7 +1574,7 @@
         true
       ],
       "pass": true,
-      "transaction": "494233720028a9e56592580d088e733a5bf5e6fd033418ca05c3d4cc89cef6b9"
+      "transaction": "e56ff0982d6815f31665a2c8f59611dd5a55ea9b4066e303e4f37f345f7867e7"
     },
     {
       "id": "E-22a",
@@ -1493,7 +1596,7 @@
         }
       ],
       "pass": true,
-      "transaction": "494233720028a9e56592580d088e733a5bf5e6fd033418ca05c3d4cc89cef6b9"
+      "transaction": "e56ff0982d6815f31665a2c8f59611dd5a55ea9b4066e303e4f37f345f7867e7"
     },
     {
       "id": "E-22a",
@@ -1509,7 +1612,7 @@
         "0"
       ],
       "pass": true,
-      "transaction": "494233720028a9e56592580d088e733a5bf5e6fd033418ca05c3d4cc89cef6b9"
+      "transaction": "e56ff0982d6815f31665a2c8f59611dd5a55ea9b4066e303e4f37f345f7867e7"
     },
     {
       "id": "E-22b",
@@ -1529,46 +1632,131 @@
       "id": "E-22",
       "check": "buyer balance unchanged after b and after c",
       "expected": [
-        "480000",
-        "480000"
+        "200060000",
+        "200060000"
       ],
       "got": [
-        "480000",
-        "480000"
+        "200060000",
+        "200060000"
       ],
       "pass": true
     },
     {
+      "id": "E-25",
+      "check": "search finds the example seller on testnet, in the route's order, partialResults as the route",
+      "expected": [
+        "ok",
+        true,
+        "stellar:testnet",
+        [
+          "http://127.0.0.1:35035/weather"
+        ],
+        true
+      ],
+      "got": [
+        "ok",
+        true,
+        "stellar:testnet",
+        [
+          "http://127.0.0.1:35035/weather"
+        ],
+        true
+      ],
+      "pass": true
+    },
+    {
+      "id": "E-25",
+      "check": "paid result: the weather, on testnet, 10000 in USDC, a hash",
+      "expected": [
+        "ok",
+        200,
+        true,
+        "stellar:testnet",
+        "10000",
+        "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        true
+      ],
+      "got": [
+        "ok",
+        200,
+        true,
+        "stellar:testnet",
+        "10000",
+        "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        true
+      ],
+      "pass": true,
+      "transaction": "dff0c143934e44a2122d1233d30cb6280cef91e3e77804cbfa8a8e8ce9b770d6"
+    },
+    {
+      "id": "E-25",
+      "check": "the transaction succeeded and moved 0.001 USDC from the buyer to the seller",
+      "expected": [
+        true,
+        {
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
+          "amount": "0.0010000"
+        }
+      ],
+      "got": [
+        true,
+        {
+          "from": "GDARC6Q2SB2O6BQ4M3OXD75363YRU5QXDRRC53IHDMMDREL6TNO457VZ",
+          "to": "GDHBG2354YS6ONMU6P22EKNEXQTRQUI4J3LSCNRRE2DWK3EYZ4UW2LQT",
+          "amount": "0.0010000"
+        }
+      ],
+      "pass": true,
+      "transaction": "dff0c143934e44a2122d1233d30cb6280cef91e3e77804cbfa8a8e8ce9b770d6"
+    },
+    {
+      "id": "E-25",
+      "check": "buyer −10000, seller +10000, buyer XLM unchanged (the facilitator pays fees)",
+      "expected": [
+        "-10000",
+        "10000",
+        "0"
+      ],
+      "got": [
+        "-10000",
+        "10000",
+        "0"
+      ],
+      "pass": true,
+      "transaction": "dff0c143934e44a2122d1233d30cb6280cef91e3e77804cbfa8a8e8ce9b770d6"
+    },
+    {
       "id": "E-23",
-      "check": "no buyer secret in 266 captures from 54 processes",
+      "check": "no buyer secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no buyer without its S secret in 266 captures from 54 processes",
+      "check": "no buyer without its S secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no unfunded secret in 266 captures from 54 processes",
+      "check": "no unfunded secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no drained (E-14b) secret in 266 captures from 54 processes",
+      "check": "no drained (E-14b) secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true
     },
     {
       "id": "E-23",
-      "check": "no malformed key of E-01l secret in 266 captures from 54 processes",
+      "check": "no malformed key of E-01l secret in 281 captures from 58 processes",
       "expected": false,
       "got": false,
       "pass": true

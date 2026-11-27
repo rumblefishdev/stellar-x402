@@ -10,8 +10,11 @@
  *    minute it is over the per-key budget; a minute later the seller is asked and the listing
  *    keeps the seller's text and price.
  * 4. The seller raises its price; the buyer's next copy differs, and the check replaces the offer.
+ * 5. The seller raises it again but answers the check with a redirect (0085): the payment settles,
+ *    the attempt's reason is `redirect`, the redirect is not followed and the listing keeps step 4.
  *
- * Env: DATABASE_URL (default: the compose database, schema `catalog_smoke`, recreated).
+ * Env: DATABASE_URL (default, also when blank: the compose database, schema `catalog_smoke`,
+ * recreated).
  * Fresh friendbot-funded keys; the facilitator pays the fees.
  *
  *   cd apps/facilitator && npx tsx test/live/catalog-smoke.ts
@@ -37,7 +40,9 @@ import pg from "pg";
 import { Agent, fetch } from "undici";
 import { migrate } from "../../src/adapters/postgres-schema.js";
 import { main } from "../../src/main.js";
+import { databaseUrlOrCompose } from "../compose-database.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
+import { startSearchModel } from "../search-model.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -47,7 +52,7 @@ const http = new Agent({ headersTimeout: 120_000 });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const SCHEMA = "catalog_smoke";
-const base = process.env.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:15432/postgres";
+const base = databaseUrlOrCompose();
 const databaseUrl = (() => {
   const url = new URL(base);
   url.searchParams.set("options", `-c search_path=${SCHEMA}`);
@@ -92,9 +97,11 @@ if (created.status !== "SUCCESS") throw new Error(`channel setup ${created.statu
 
 // The fake OpenBao holds this run's key: a testnet account funded for the run.
 const openbao = await fakeOpenBao(facilitator);
+const searchModel = await startSearchModel();
 const facilitatorServer = await main(
   {
     ...signerEnv(facilitator.publicKey(), openbao.socketPath),
+    SEARCH_MODEL_URL: searchModel.url,
     DATABASE_URL: databaseUrl,
     CLIENT_IP: "socket",
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
@@ -109,6 +116,9 @@ const facilitatorUrl = `http://127.0.0.1:${facilitatorServer.port}`;
 
 // The seller: GET /weather costs `price` stroops of testnet XLM, described for the Bazaar.
 let price = "10000";
+/** Set for step 5: the check that follows the next paid request is answered with a redirect. */
+let redirectCheck = false;
+let redirectArmed = false;
 const unpaid: string[] = [];
 const settles: { transaction?: string; extensionResponses: string | null }[] = [];
 const bazaar = {
@@ -132,6 +142,11 @@ const sellerServer = createServer((req, res) => {
     const signature = req.headers["payment-signature"];
     if (typeof signature !== "string") {
       unpaid.push(`${req.method} ${req.url}`);
+      if (redirectArmed) {
+        redirectArmed = false;
+        res.writeHead(302, { location: "https://example.com/" }).end();
+        return;
+      }
       const terms: PaymentRequired = {
         x402Version: 2,
         resource: { url, description: "Weather by city", mimeType: "application/json" },
@@ -141,6 +156,8 @@ const sellerServer = createServer((req, res) => {
       res.writeHead(402, { "payment-required": encodePaymentRequiredHeader(terms) }).end();
       return;
     }
+    // Armed before settling: the facilitator's check starts once the settle response is sent.
+    if (redirectCheck) redirectArmed = true;
     const answer = await fetch(`${facilitatorUrl}/settle`, {
       dispatcher: http,
       method: "POST",
@@ -258,6 +275,13 @@ try {
   await attemptsReach(5);
   steps.afterNewPrice = { listing: await listing(), unpaid: [...unpaid] };
 
+  price = "30000";
+  redirectCheck = true;
+  await nextMinute();
+  steps.buyerPaysSellerRedirects = await buy();
+  await attemptsReach(6);
+  steps.afterRedirect = { listing: await listing(), unpaid: [...unpaid] };
+
   const rows = (
     await db.query(
       `SELECT stage, outcome, reason, payer, transaction, resource_url, url, content_hash
@@ -296,6 +320,7 @@ try {
   sellerServer.close();
   await facilitatorServer.close();
   openbao.close();
+  await searchModel.stop();
   await db.end();
   await admin.end();
 }

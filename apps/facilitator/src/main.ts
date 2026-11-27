@@ -1,6 +1,17 @@
+import { once } from "node:events";
 import { readFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { rpc as stellarRpc } from "@stellar/stellar-sdk";
-import { apiKeyHash, isApiKeyOwner, newApiKey } from "@stellar-x402/api-keys";
+import {
+  PostgresAccountPlanStore,
+  apiKeyHash,
+  isApiKeyOwner,
+  newApiKey,
+  type AccountPlan,
+  type AccountPlanRecord,
+} from "@stellar-x402/api-keys";
+import { SEARCH_MODEL_ID } from "@stellar-x402/config";
 import {
   FallbackRpc,
   SettlementSubmitter,
@@ -10,15 +21,20 @@ import {
 import { getNetworkPassphrase, getUsdcAddress, type FacilitatorStellarSigner } from "@x402/stellar";
 import type pg from "pg";
 import { Agent, setGlobalDispatcher } from "undici";
-import { emfMetrics } from "./adapters/emf-metrics.js";
 import { openBaoSigner, type OpenBaoSigner } from "./adapters/openbao-signer.js";
+import { metricsListener, prometheusMetrics } from "./adapters/prometheus-metrics.js";
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
-import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
+import { createSearchModelClient, searchModelReady } from "./adapters/search-model.js";
+import { SELLER_TIMEOUT_MS, createCataloger, type Cataloger } from "./catalog/cataloger.js";
+import { createCuration } from "./catalog/curation.js";
+import { createSearchCardRewrite } from "./catalog/search-cards.js";
+import { createSearchVectors, type SearchVectors } from "./catalog/search-vectors.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
-import { parseConfig, parseMigrateConfig } from "./config.js";
+import { parseAccountPlansConfig, parseConfig, parseMigrateConfig } from "./config.js";
 import type { Config } from "./config.js";
 import type { AppDeps } from "./http/app.js";
+import { requiresApiKey } from "./http/api-key.js";
 import { supportedResponse } from "./http/supported.js";
 import { captureConsoleError, jsonLogger, rpcEndpointName, type Logger } from "./logger.js";
 import { memoryMetrics, type NetworkMetrics, type ProcessMetrics } from "./metrics.js";
@@ -46,8 +62,9 @@ import {
   failureReason,
   type UpstreamSeams,
 } from "./settlement/upstream.js";
-import { createAssetKinds } from "./spend/asset-kinds.js";
+import { createAssetKinds, type AssetKinds } from "./spend/asset-kinds.js";
 import { BALANCE_STALE_ALARM_MS, createBalanceFloor } from "./spend/balance-floor.js";
+import { longestSpendWindowMs } from "./spend/limits.js";
 import { createSpendPolicy, verifyWithBreakers } from "./spend/policy.js";
 import { verifyWithRefusals } from "./settlement/refusals.js";
 import { start } from "./start.js";
@@ -107,7 +124,7 @@ function verifyOnlySigner(address: string): FacilitatorStellarSigner {
  * The verify checks' dependencies from the config (AD-3, AD-5, AD-10, AD-22): {@link buildUpstream},
  * the channels and the validity minimum. `/verify` and `/settle` build their checks from the same
  * object. `fees` is the caller's, so the pool is built from the same `fees.pool` and shares its
- * bid.
+ * bid. `assets` is the spend policy's too, so the two share one cache of the tokens' kinds.
  */
 export function buildChecks(
   config: Config,
@@ -119,7 +136,7 @@ export function buildChecks(
   logger: Pick<Logger, "warn" | "info">,
   metrics: NetworkMetrics,
   seams?: UpstreamSeams,
-): VerifierDeps {
+): VerifierDeps & { assets: AssetKinds } {
   // Upstream knows only the facilitator key, and only in plain form; the channels and the muxed
   // facilitator are `createChecker`'s check (AD-5).
   const facilitator = verifyOnlySigner(config.signer.address);
@@ -134,6 +151,9 @@ export function buildChecks(
     missingTrustline: createTrustlineLookup(rpc, config.network, logger),
     nonceUsed: createNonceLookup(rpc, config.network, logger),
     metrics,
+    // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
+    assets: createAssetKinds({ rpc, known: [getUsdcAddress(config.network)] }),
+    rpc,
   };
 }
 
@@ -173,7 +193,7 @@ export function buildSettlement(
     fees: FeeSettings;
     checks: VerifierDeps;
     store: SettlementStore;
-    hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "onSuccess">;
+    hooks: Pick<SettlementHooks, "beforeSubmit" | "onFinal" | "listingOf" | "onSuccess">;
     logger: Logger;
     metrics: NetworkMetrics;
     /** The facilitator key's signer. */
@@ -289,7 +309,7 @@ export function buildSettlement(
 /**
  * Every part `main()` serves, built from the config on the given stores: the cataloger, one RPC
  * and one fee configuration shared by `/verify`, `/settle` and the pool. `main()` passes the
- * PostgreSQL stores and the EMF writer; tests pass their own `rpc`, `makeScheme`, pool `sleep`
+ * PostgreSQL stores and the Prometheus writer; tests pass their own `rpc`, `makeScheme`, pool `sleep`
  * and `metrics` (in memory by default).
  *
  * Metrics follow each one's catalog `scope` (0027 AD-3): every part of this network (settlement,
@@ -316,6 +336,8 @@ export function compose(
   signer: OpenBaoSigner;
   /** Unstarted: `main()` starts it with the process and stops it before the final flush. */
   rpcStall: RpcStallTracker;
+  /** Unstarted: `main()` starts the loop after the search card rewrite. */
+  vectors: SearchVectors;
 } {
   const { logger } = opts;
   const { stores } = opts;
@@ -323,6 +345,22 @@ export function compose(
   // One child per network; a root write of a network-scoped metric would carry no `network`, so
   // the root's type doesn't take one.
   const metrics = root.for({ network: config.network });
+  // The search model (ADR 0014): the route asks it for each query's vector, the vectors for each
+  // listing's. The cards serve every network, so they write through the root.
+  const embedder = createSearchModelClient({ ...config.searchModel, model: SEARCH_MODEL_ID });
+  const vectors = createSearchVectors({
+    store: stores.searchCards,
+    embedder,
+    ready: () => searchModelReady(config.searchModel),
+    logger,
+    metrics: root,
+  });
+  // The model's health whether anyone searches or not (ADR 0014): each run of the vectors' loop
+  // asks it, every 30 s at least. The model serves every network.
+  root.registerGauge("search_model_up", () => ({ value: vectors.up() }));
+  // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
+  // A test's `rpc` serves every URL.
+  const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
   // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
@@ -332,10 +370,14 @@ export function compose(
     logger,
     metrics: root,
     listLocal: config.catalog.listLocal,
+    curation: createCuration({
+      store: stores.curation,
+      rpc,
+      network: config.network,
+      logger,
+      limits: { timeoutMs: SELLER_TIMEOUT_MS, allowInsecureLocal: config.catalog.listLocal },
+    }),
   });
-  // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
-  // A test's `rpc` serves every URL.
-  const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
   // 1 while calls are off `RPC_URLS[0]` (0027 AD-5), so a move to another endpoint reaches the
   // owner. The label is the endpoint's name, as `buildRpc` names it, never its URL.
   const primary = rpcEndpointName(config.rpcUrls[0]!, 0);
@@ -389,18 +431,23 @@ export function compose(
   }
   const policy = createSpendPolicy({
     store: stores.spend,
-    // USDC is the known asset (the high tier); every other token, SAC or wasm, gets the low one.
-    assets: createAssetKinds({ rpc, known: [getUsdcAddress(config.network)] }),
+    assets: checks.assets,
     floor,
     budgets: {
       windowMs: config.spend.windowMs,
       globalStroops: config.spend.globalStroops,
+      freeStroops: config.spend.freeStroops,
       perPayerStroops: config.spend.perPayerStroops,
       perPayToStroops: config.spend.perPayToStroops,
       perKnownAssetStroops: config.spend.perAssetStroops,
       perOtherAssetStroops: config.spend.perOtherAssetStroops,
       tierOtherStroops: config.spend.tierOtherStroops,
     },
+    // On a network that requires an API key, each settlement counts in its caller's account,
+    // by the plan the registry names (0107).
+    plans: stores.accountPlans,
+    accountPlans: config.spend.accountPlans,
+    keyed: requiresApiKey(config.network),
     logger,
     metrics,
   });
@@ -412,6 +459,7 @@ export function compose(
     hooks: {
       beforeSubmit: policy.beforeSubmit,
       onFinal: policy.onFinal,
+      listingOf: cataloger.listingOf,
       onSuccess: cataloger.onSuccess,
     },
     logger,
@@ -447,20 +495,19 @@ export function compose(
       floor,
       drain,
       signerState: signer.state,
+      embedder,
     },
     cataloger,
     metrics: root,
     rpc,
     signer,
     rpcStall,
+    vectors,
   };
 }
 
 export interface MainOptions {
-  /**
-   * Where the log lines and the EMF metric lines go, each ending in a newline; stdout by default.
-   * The smoke scripts read them here.
-   */
+  /** Where the log lines go, each ending in a newline; stdout by default. The smoke scripts read them here. */
   write?: (line: string) => void;
 }
 
@@ -479,8 +526,8 @@ export async function main(
     | undefined;
   const endPools = () => Promise.all(Object.values(pools ?? {}).map((p) => p.end()));
   let rpcStall: RpcStallTracker | undefined;
-  /** The EMF writer, for the catch: a start that failed stops it. */
-  let emf: ReturnType<typeof emfMetrics> | undefined;
+  /** `/metrics`'s listener, for the catch: a start that failed closes it. */
+  let metricsServer: Server | undefined;
   try {
     // stellar-sdk's RPC and Horizon clients use the global fetch with no timeout of their own, and
     // an upstream call cut off by its deadline can't be cancelled. undici's defaults would hold its
@@ -510,17 +557,20 @@ export async function main(
     // Every RPC_URLS entry must serve NETWORK: another network's RPC reads every channel as
     // missing. Checked first, so a wrong URL is named instead of every channel.
     await checkRpcNetworks(config.rpcUrls, getNetworkPassphrase(config.network));
-    const stores = postgresStores(pools.main, pools);
-    // The EMF writer (0027 AD-4) on its own sink, never through the logger. Its timers start
-    // with the graph's gauges, so a startup that hangs still writes them; its liveness seed waits
-    // for `start()` below. On stdout by default, where each write is awaited by the final flush.
-    const { write } = opts;
-    const metrics = (emf = emfMetrics({
-      ...(write && { write: (line: string) => write(`${line}\n`) }),
+    const stores = postgresStores(pools.main, pools, SEARCH_MODEL_ID);
+    // The metrics as Prometheus text (ADR 0011, "Metrics"; 0139), read by the agent on the server.
+    // `/metrics` listens before the graph is built, so a startup that hangs still shows its
+    // gauges; the liveness series waits for `start()` below.
+    const metrics = prometheusMetrics({
+      networks: [config.network],
       onIssue: (issue) => logger.warn("metric_issue", { ...issue }),
-    }));
+    });
+    if (config.metricsPort !== undefined) {
+      metricsServer = createServer(metricsListener(metrics.render)).listen(config.metricsPort);
+      await once(metricsServer, "listening");
+    }
     const composed = compose(config, { logger, stores, metrics });
-    const { deps, cataloger, rpc, signer } = composed;
+    const { deps, cataloger, rpc, signer, vectors } = composed;
     // With the graph, like the writer's timers: an RPC that hangs the startup checks shows as a
     // rising `rpc_stalled_seconds`.
     rpcStall = composed.rpcStall;
@@ -536,15 +586,14 @@ export async function main(
       restoreConsole();
       throw error;
     });
-    // The liveness point `facilitator-silent` reads, from the service's start on (AD-4): a start
-    // that hangs or fails, a crash loop of them included, writes none and shows as missing data.
-    metrics.seedZero([
-      { name: "settlement_sweeps_total", labels: { network: config.network, outcome: "listed" } },
-    ]);
+    // The liveness series `facilitator-silent` reads, from the service's start on: a start that
+    // hangs or fails, a crash loop of them included, writes none.
+    metrics.markStarted();
     // Not awaited: the service starts and `/verify` answers without OpenBao; the outcome goes to
     // the log and `/health`'s `signer`, and a failed check tries again (0036 decision 4).
     void signer.check();
-    // Every budget sums the one window (0024 S-design §5).
+    // Every budget sums the one window (0024 S-design §5); where a key is required, an account's
+    // payments are counted from the start of its month too (0107).
     const pruner = createPruner({
       settlements: stores.settlements,
       ledger: {
@@ -554,37 +603,46 @@ export async function main(
       spend: stores.spend,
       rateLimits: stores.rateLimits,
       catalogAttempts: stores.catalogAttempts,
-      spendWindowMs: config.spend.windowMs,
+      spendWindowMs: longestSpendWindowMs(config.spend.windowMs, requiresApiKey(config.network)),
       rateLimitWindowMs: config.http.rateLimit.windowMs,
       logger,
       metrics,
     });
     pruner.start();
-    // Catalog writes and a prune already under way finish before the process exits, and before
-    // the pools end, even if closing the server fails; the pools end even if draining fails.
-    // The metrics' final flush comes last, after every part that counts, and is awaited:
-    // `server.ts` exits once this resolves, and a write to a stdout pipe is asynchronous.
+    const searchCards = createSearchCardRewrite({ store: stores.searchCards, logger, metrics });
+    const searchCardsRewritten = searchCards.start();
+    // After the rewrite, so each vector is made from the card's text under this release's rules.
+    const searchVectorsWritten = searchCardsRewritten.then(() => vectors.start());
+    // Catalog writes, a prune, the search card rewrite and the vector run already under way
+    // finish before the process exits, and before the pools end, even if closing the server fails;
+    // the pools end even if draining fails. `/metrics` closes last, after every part that counts,
+    // so a scrape meanwhile still reads them.
     const closeOnce = async () => {
       signer.close();
+      // The search card rewrite and the vectors' loop stop at once, so they hold no connection
+      // through the drain. A pass that hasn't started yet then reads nothing.
+      const rewriteClosed = searchCards.close();
+      const vectorsClosed = vectors.close();
       try {
         try {
           await started.close();
         } finally {
           try {
-            await Promise.all([cataloger.drain(), pruner.close()]);
+            await Promise.all([cataloger.drain(), pruner.close(), rewriteClosed, vectorsClosed]);
           } finally {
             await endPools();
           }
         }
       } finally {
-        // Its last reading goes out with the final flush; no read starts after it.
         rpcStall?.stop();
-        await metrics.close();
+        await closeMetrics(metricsServer);
       }
     };
     let closing: Promise<void> | undefined;
     return {
       ...started,
+      /** `/metrics`'s port when `METRICS_PORT` is set: for tests, which pass 0. */
+      ...(metricsServer && { metricsPort: (metricsServer.address() as AddressInfo).port }),
       /** The graph's stores and their pools: for tests. */
       stores,
       pools,
@@ -594,6 +652,10 @@ export async function main(
       logger,
       /** Settles once the first sweep has ended: for tests. */
       reconciled: deps.reconciliation?.reconciled ?? Promise.resolve(),
+      /** Settles once the search card rewrite at start has ended: for tests. */
+      searchCardsRewritten,
+      /** Settles once the vectors' first run has ended: for tests. */
+      searchVectorsWritten,
       // A second signal (SIGINT after SIGTERM) gets the first call's promise: running it again
       // would end the pools under requests the first is still waiting for.
       close: () => (closing ??= closeOnce()),
@@ -602,14 +664,20 @@ export async function main(
     // Logged here, where an RPC URL is named as its `RPC_URLS` entry, never by its host
     // (ADR 0011); `server.ts` logs only a `ConfigError`, which comes before the logger.
     logger.error("startup_failed", { error });
-    // No final metrics flush: the writer stops with its open window unwritten, so a start that
-    // failed adds no point after the error. It wrote no seed either (above), so a crash loop
-    // shows as missing data. Eager-first lines are out already.
-    emf?.stop();
+    // It wrote no liveness series (above), so a crash loop shows as missing data.
+    await closeMetrics(metricsServer);
     rpcStall?.stop();
     await endPools();
     throw error;
   }
+}
+
+/** Closes `/metrics`, the scraper's kept-alive connection included, which would hold `close()`. */
+async function closeMetrics(server: Server | undefined): Promise<void> {
+  if (!server?.listening) return;
+  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+  server.closeAllConnections();
+  await closed;
 }
 
 /** Logs an idle connection's error with its message only; the URL never reaches the log. */
@@ -638,22 +706,43 @@ export class KeysError extends Error {
   override name = "KeysError";
 }
 
-const KEYS_USAGE = `usage: keys issue <name> | keys revoke <name | owner> | keys list
+/** The key script's usage, naming the plans `plan` takes. */
+const keysUsage = (plans: ReadonlyMap<string, AccountPlan>) =>
+  `usage: keys issue <name> | keys revoke <name | owner> | keys list | keys plan <owner> <plan> [note…] | keys plans
   issue <name>     a new key for operator:<name>, printed once; <name> is a-z, 0-9, "_" and "-"
   revoke <owner>   revokes the owner's active key at once; a bare <name> means operator:<name>
-  list             every key: owner, state, times and the start of its hash`;
+  list             every key: owner, state, times and the start of its hash
+  plan <owner> <plan> [note…]
+                   sets the owner's plan, one of ${[...plans.keys()].join(", ")}; the rest of the line is why
+  plans            every plan set: owner, plan, when, by whom and why`;
 
 /** A name the operator gives a key's holder: what follows `operator:` in the owner. */
 const OPERATOR_NAME = /^[a-z0-9][a-z0-9_-]*$/;
 
 type KeysCommand =
-  { command: "issue"; owner: string } | { command: "revoke"; owner: string } | { command: "list" };
+  | { command: "issue"; owner: string }
+  | { command: "revoke"; owner: string }
+  | { command: "list" }
+  | { command: "plan"; owner: string; plan: string; note?: string }
+  | { command: "plans" };
 
 /** The command line of the key script; anything it doesn't take is a {@link KeysError}. */
-function parseKeysCommand(argv: readonly string[]): KeysCommand {
+function parseKeysCommand(
+  argv: readonly string[],
+  plans: ReadonlyMap<string, AccountPlan>,
+): KeysCommand {
   const [command, target, ...rest] = argv;
-  const usage = () => new KeysError(KEYS_USAGE);
-  if (command === "list" && target === undefined) return { command };
+  const usage = () => new KeysError(keysUsage(plans));
+  if ((command === "list" || command === "plans") && target === undefined) return { command };
+  if (command === "plan") {
+    // The whole owner: an account the portal made has no bare name.
+    const [plan, ...words] = rest;
+    if (target === undefined || !isApiKeyOwner(target) || plan === undefined || !plans.has(plan))
+      throw usage();
+    // On one line, so a quoted tab or line break can't split the row `plans` prints.
+    const note = words.join(" ").replace(/\s+/g, " ").trim();
+    return { command, owner: target, plan, ...(note.length > 0 && { note }) };
+  }
   if ((command !== "issue" && command !== "revoke") || target === undefined || rest.length > 0)
     throw usage();
   // Only the portal issues an owner of another kind (0106), so `issue` takes a name alone; a
@@ -664,20 +753,44 @@ function parseKeysCommand(argv: readonly string[]): KeysCommand {
   return { command, owner };
 }
 
+/** A plan row as `plan` and `plans` print it, one tab-separated line. */
+function planLine(row: AccountPlanRecord): string {
+  return [
+    row.owner,
+    row.plan,
+    `set ${new Date(row.setAt).toISOString()}`,
+    `by ${row.setBy}`,
+    row.note ?? "-",
+  ].join("\t");
+}
+
+/**
+ * Who sets a plan, as its row records it: `operator:$USER`, or `operator:unknown` when the login
+ * isn't a name an owner can carry. The row only records it, so no login fails the command.
+ */
+function planSetter(env: Record<string, string | undefined>): string {
+  const setter = `operator:${env.USER ?? ""}`;
+  return isApiKeyOwner(setter) ? setter : "operator:unknown";
+}
+
 /**
  * `pnpm keys`: the operator's hand on the API key registry (0105), the same one the portal
- * writes (0106). It needs only `DATABASE_URL`, of the network whose callers the key is for.
+ * writes (0106), and on each account's plan (0107). It needs only `DATABASE_URL`, of the network
+ * whose callers the key or the plan is for, and `ACCOUNT_PLANS` where the service has it set.
  *
  * `issue` prints the new key once, through `write` (stdout) and never through the logger: only
  * its SHA-256 is stored, so a lost key is replaced, not read back. `revoke` holds from the
- * caller's next request, on every instance. A mistake rejects with a {@link KeysError}.
+ * caller's next request, on every instance. `plan` takes only a plan the config names. A mistake
+ * rejects with a {@link KeysError}.
  */
 export async function keysMain(
   argv: readonly string[],
   env: Record<string, string | undefined> = process.env,
   write: (line: string) => void = (line) => void process.stdout.write(`${line}\n`),
 ): Promise<void> {
-  const parsed = parseKeysCommand(argv);
+  // Before the command: its usage names the plans. Run in the service's container, `ACCOUNT_PLANS`
+  // is the service's own.
+  const parsed = parseKeysCommand(argv, parseAccountPlansConfig(env));
   const { databaseUrl } = parseMigrateConfig(env);
   // Stdout is the operator's, so a lost connection is logged to stderr.
   const logger = jsonLogger("info", (line) => process.stderr.write(line));
@@ -701,6 +814,21 @@ export async function keysMain(
             `sha256 ${key.hash.slice(0, 12)}`,
           ].join("\t"),
         );
+      return;
+    }
+    const accountPlans = new PostgresAccountPlanStore(pool);
+    if (parsed.command === "plans") {
+      const rows = await accountPlans.listPlans();
+      if (rows.length === 0) write("no plans");
+      for (const row of rows) write(planLine(row));
+      return;
+    }
+    if (parsed.command === "plan") {
+      const { owner, plan, note } = parsed;
+      const now = Date.now();
+      const setBy = planSetter(env);
+      await accountPlans.setPlan({ owner, plan, now, setBy, note });
+      write(planLine({ owner, plan, setAt: now, setBy, note }));
       return;
     }
     const { owner } = parsed;

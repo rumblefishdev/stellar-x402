@@ -3,8 +3,9 @@
 - Status: accepted
 - Date: 2026-10-07, amended 2026-10-20 (task 0032: the `scheme` filter), 2026-10-22 (task 0053:
   resource URLs and empty fields), 2026-10-26 (task 0054: resource hosts) and 2026-10-28 (task
-  0063: listings from the seller's own 402, entry limits) and 2026-11-10 (task 0130: a wrong type
-  in an optional field) and 2026-11-20 (task 0155: the operator's seed)
+  0063: listings from the seller's own 402, entry limits), 2026-11-10 (task 0130: a wrong type
+  in an optional field), 2026-11-20 (task 0155: the operator's seed) and 2026-11-20 (task 0085:
+  the seller-fetch reasons)
 
 ## Context
 
@@ -32,9 +33,9 @@ settlement.
     host's own `/.well-known/x402` and sends every resource URL on that host the check a payment
     would start, for each Stellar account its 402 names, on either network. A seeded listing has no
     settlement, so no `ledger`, and its attempt rows no `payer`. Nothing is read from another
-    catalog. The seed follows each host's `robots.txt` (RFC 9309) for the resource URLs it asks: a
-    disallowed URL is skipped and reported, and a host whose `robots.txt` answers 5xx or not at
-    all is not asked.
+    catalog. The seed follows each host's `robots.txt` (RFC 9309) for every URL it asks, its file
+    included: a disallowed URL is skipped and reported, and a host whose `robots.txt` answers
+    neither 200 nor 4xx (a redirect included: none is followed), or not at all, is not asked.
   - Nothing else is indexed, and there is no registration endpoint: a seller is listed after its
     first paid call, its own included (task 0063), or by the seed.
 - **Who may change a listing (task 0063).**
@@ -45,8 +46,8 @@ settlement.
     payer filling it holds back only the hosts it pays for; `/settle`'s per-IP limit (task 0023)
     and the settled payment each check needs bound the rest. Over a budget the check is
     skipped; the next payment tries again. There is no retry queue. A seed's checks don't count
-    against these budgets: the operator picks the hosts, and the seed waits 3 s after each request
-    to a host, 20 a minute, below the 30 a minute the host's checks after payments may use. A URL
+    against these budgets: the operator picks the hosts, and the seed waits, after each URL, 1 s per request it cost
+    to a host, 60 a minute, beside the host's checks after payments, which peaked at 3 a minute. A URL
     costs one request to learn its listing, then a check per Stellar account its 402 names. A
     seed's check of a listing a settlement wrote keeps that settlement's `ledger`.
   - The request uses the listing's method and its example input, bounded by the 32 KiB
@@ -96,8 +97,18 @@ settlement.
     `packages/seller-fetch` guard: https only, the address checked where it connects (no
     loopback, private or special-use address), no redirects, a 10 s deadline, a 64 KiB body cap
     (256 KiB for an MCP server, above) and a 52 KiB header cap, enough for a 36 KiB listing once
-    base64-encoded in a header. Either cap passed is `response_too_large`. `CATALOG_LIST_LOCAL`
-    also opens http to this machine.
+    base64-encoded in a header. `CATALOG_LIST_LOCAL` also opens http to this machine.
+  - A seller the guard stops is `not_askable` with the guard's own cause as the reason (task
+    0085): `not_a_url`, `not_https`, `not_public` (an IP written in the URL or a name resolving
+    to one), `redirect`, `response_too_large` (either cap), `timeout` (the 10 s deadline, before
+    the response arrived in full) and `network` (any other failure to connect or to read the body,
+    or the caller giving up on the request). An MCP server that answers nothing by the deadline
+    is a `timeout` too. These are not the buyer's MCP tool codes: `apps/mcp-local` maps them to
+    its own (`unsafe_url`, …). Rows written before 0085, and the log lines that carry their
+    reason (`catalog_rejected`, the `reason` field of `catalog_attempts_total`, which is no
+    dimension), keep the old reasons for their 30 days: `unsafe_url` is now `not_a_url`,
+    `not_https`, `not_public` or `redirect`; `upstream_error` is `timeout` or `network`;
+    `response_too_large` is unchanged.
   - Resource URLs carry a scheme allowlist by listing type (task 0053): an `http` listing takes
     `https` and `http`, an `mcp` listing also `mcp` (`@x402/mcp`'s `mcp://tool/<name>`). An `mcp:`
     host must be a DNS-style name (letters, digits, hyphens; labels up to 63 characters, the host

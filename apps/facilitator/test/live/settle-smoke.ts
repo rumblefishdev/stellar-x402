@@ -26,7 +26,8 @@
  *   INCLUSION_FEE_STROOPS  passed to the facilitator (default: the fee-stats bid), to run the
  *                       hung-URL check in both bid modes
  *   DATABASE_URL        required: the facilitator's PostgreSQL, migrated (`pnpm migrate`); the
- *                       local one from `compose.yaml` is postgres://postgres:postgres@127.0.0.1:15432/postgres
+ *                       local one from `compose.yaml` is `COMPOSE_DATABASE_URL` in
+ *                       `test/compose-database.ts`
  *
  *   cd apps/facilitator && npx tsx test/live/settle-smoke.ts
  *
@@ -48,6 +49,7 @@ import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { Agent, fetch } from "undici";
 import { main } from "../../src/main.js";
 import { fakeOpenBao, signerEnv } from "../fake-openbao.js";
+import { startSearchModel } from "../search-model.js";
 
 const XLM_SAC_TESTNET = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const RPC_URL = "https://soroban-testnet.stellar.org";
@@ -119,9 +121,11 @@ if (raiseThresholds) {
 
 // The fake OpenBao holds this run's key: a testnet account funded for the run.
 const openbao = await fakeOpenBao(facilitator);
+const searchModel = await startSearchModel();
 const facilitatorServer = await main(
   {
     ...signerEnv(facilitator.publicKey(), openbao.socketPath),
+    SEARCH_MODEL_URL: searchModel.url,
     CLIENT_IP: "socket",
     CHANNELS: channelKeys.map((keypair) => keypair.publicKey()).join(","),
     PORT: "0",
@@ -242,4 +246,5 @@ try {
 } finally {
   await facilitatorServer.close();
   openbao.close();
+  await searchModel.stop();
 }

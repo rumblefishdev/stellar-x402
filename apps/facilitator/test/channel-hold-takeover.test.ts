@@ -123,6 +123,7 @@ function composed(rpc: SorobanRpc, lines: string[] = []) {
     ...signerEnv(facilitator.publicKey(), openbao.socketPath),
     DATABASE_URL: db.urlFor(db.schema),
     CLIENT_IP: "socket",
+    SEARCH_MODEL_URL: "http://127.0.0.1:9",
     CHANNELS: `${first},${second}`,
     SETTLE_BUDGET_MS: "1000",
     LEASE_TTL_MS: "1000",

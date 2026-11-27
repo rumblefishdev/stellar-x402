@@ -14,7 +14,8 @@ jobs:
     # Every facilitator test runs on PostgreSQL and fails without a reachable database.
     services:
       postgres:
-        image: postgres:18
+        # The digest production pins (deploy/production/compose.yaml): PostgreSQL 18 with pgvector.
+        image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -66,6 +67,14 @@ jobs:
       - uses: actions/checkout@v4
       - run: deploy/scripts/check-production-postgres.sh
 
+  # The search model in the facilitator's image, built for the server's amd64 and run with
+  # production's limits (ADR 0014): a model that loads on a laptop can still fail there.
+  search-model-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: deploy/scripts/check-search-model-image.sh
+
   # The monitoring VM's rule file (0139 step 6): the tests compare it with what `make rules`
   # writes, but only promtool parses its PromQL, and Prometheus refuses a whole file it can't load.
   prometheus-rules:
@@ -80,6 +89,13 @@ jobs:
           -v "$PWD/deploy/metrics/rules:/rules:ro"
           prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
           check rules /rules/x402-production.yml
+      # When the rules fire, not only whether they parse: a scenario fails when a change to the
+      # generator makes a rule fire later, earlier, for longer or not at all. Every *.test.yml.
+      - run: >-
+          docker run --rm --entrypoint sh
+          -v "$PWD/deploy/metrics/rules:/rules:ro" -w /rules
+          prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+          -c 'promtool test rules *.test.yml'
 
   # The Rust SDK (task 0136), apart from contracts/, which builds WASM with its own profile.
   sdk-rust:
