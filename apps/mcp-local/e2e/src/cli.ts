@@ -31,6 +31,7 @@ export interface Answer {
 /** What `call_paid_http` returns when it paid. */
 export interface PaidResult {
   status: number;
+  listingCheck: "passed" | "none";
   contentType: string | null;
   body: string;
   payment: { network: string; amount: string; asset: string; transaction: string | null };

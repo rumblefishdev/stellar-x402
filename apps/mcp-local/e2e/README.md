@@ -9,7 +9,7 @@ the servers write.
 The scenarios (E-01…E-23) were written from the README, the tool list and the acceptance criteria
 only, by a reviewer who had not read the code; E-09h, E-14b, E-14c and E-24 came from a second,
 independent review of what the first set left out. E-14d and E-14e came with task 0092, which also
-changed E-14's code. E-25 comes from the search tool's acceptance criteria (task 0137).
+changed E-14's code. E-25 comes from the search tool's acceptance criteria (task 0137); E-26, and the paid search result passed back as the listing in E-25, from the listing check's (task 0068).
 
 ## Run
 
@@ -38,15 +38,15 @@ a seller's `payTo`, `payto_trustline_missing`; one with a trustline and no USDC,
 
 ## Scenarios
 
-| Group                   | Scenarios          | What they prove                                                                                                                                                                            |
-| ----------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| start-up                | E-01 – E-03        | wrong settings stop the server (exit 1, the variable named); 3 tools without a key, 4 with                                                                                                 |
-| catalog                 | E-04 – E-06        | filters and paging passed on, one request per call; catalog failures; input failing a schema                                                                                               |
-| `get_resource`          | E-07 – E-09        | the real seller's terms; every seller failure's code; the address guard, and a public https name passing it                                                                                |
-| refusals before signing | E-10 – E-13a       | each refusal in the documented order, with nothing signed                                                                                                                                  |
-| after signing           | E-13b – E-20, E-24 | what was signed (from the transaction), empty wallets, every after-payment code, one deadline per call, the shared daily budget                                                            |
-| real payments           | E-21, E-22, E-25   | two payments settled on testnet, checked on Horizon; then over the budget and over the price limit; search on our facilitator finds the seller E-21 cataloged, and a third payment pays it |
-| secrets                 | E-23               | no secret in anything the servers wrote                                                                                                                                                    |
+| Group                   | Scenarios          | What they prove                                                                                                                                                                                                                 |
+| ----------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| start-up                | E-01 – E-03        | wrong settings stop the server (exit 1, the variable named); 3 tools without a key, 4 with                                                                                                                                      |
+| catalog                 | E-04 – E-06        | filters and paging passed on, one request per call; catalog failures; input failing a schema                                                                                                                                    |
+| `get_resource`          | E-07 – E-09        | the real seller's terms; every seller failure's code; the address guard, and a public https name passing it                                                                                                                     |
+| refusals before signing | E-10 – E-13a, E-26 | each refusal in the documented order, with nothing signed; a seller held to the listing the agent passes                                                                                                                        |
+| after signing           | E-13b – E-20, E-24 | what was signed (from the transaction), empty wallets, every after-payment code, one deadline per call, the shared daily budget                                                                                                 |
+| real payments           | E-21, E-22, E-25   | two payments settled on testnet, checked on Horizon; then over the budget and over the price limit; search on our facilitator finds the seller E-21 cataloged, and a third payment pays it with that search item as the listing |
+| secrets                 | E-23               | no secret in anything the servers wrote                                                                                                                                                                                         |
 
 ## What it spends
 
