@@ -169,7 +169,7 @@ export class PostgresCatalogStore implements CatalogStore {
    *
    * The rank is the words' rank times the listing's quality factor q (ADR 0014), counted here from
    * the stored settlements: 1 + 0.2 × p / (p + 2), where p is the distinct wallets that paid for
-   * the listing in the 30 days before `now`, its own `payTo` left out, and only on terms equal to
+   * the listing from 30 days before `now` on, its own `payTo` left out, and only on terms equal to
    * one of its offers; × 0.9 on a tunnel host; × 0.9 when the card's description holds nothing
    * but spaces. Counting after the matches are found keeps the planner from a nested loop over
    * all listings (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).

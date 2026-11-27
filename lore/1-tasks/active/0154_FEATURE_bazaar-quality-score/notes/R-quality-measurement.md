@@ -136,5 +136,7 @@ the cap of ADR 0008.
 - Most of the added time is reading each match's `resource->'accepts'` out of line; the join to
   the settlements took 170–230 ms at 100%.
 - With granite, a query matched a median of 5.3% of the 3,000 listings of task 0134, at most 25%
-  (0134, "Matches and the cut"). Past the 2 s timeout means nearly every listing matching one query.
+  (0134, "Matches and the cut"). With 5.9 KB listings only a query matching nearly every listing
+  passes the 2 s timeout; with 36 KiB ones, a straight line between the 10% and 100% rows crosses
+  2 s near 45% (interpolated, not measured).
 - Not shown: real vectors at this catalog size; a database with production memory settings.
