@@ -1,7 +1,7 @@
 // The off-server check (0027 decisions 7 and 27, ADR 0013): a Lambda in this account, every 5
 // minutes, so it reads the fee account while the server is down, and root on the server can't
 // stop it. It has a balance and a protocol section (decision 70), and once a day
-// an upstream section (task 0029); the theft and secret-read
+// an upstream section (task 0029) and a library section (task 0147); the theft and secret-read
 // sections follow. The alarms that read it are in the Alarms stack and find the function and the
 // metric by name.
 import { existsSync } from "node:fs";
@@ -13,6 +13,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as scheduler from "aws-cdk-lib/aws-scheduler";
 import * as targets from "aws-cdk-lib/aws-scheduler-targets";
 import type { Construct } from "constructs";
+import { HEALTH_ENV } from "../../watch/library.js";
 import { NAMESPACE } from "../../watch/metric.js";
 import { PROTOCOL_ENV, TARGETS_ENV } from "../../watch/targets.js";
 import type { EnvironmentConfig } from "../config.js";
@@ -59,6 +60,8 @@ export class WatchStack extends cdk.Stack {
       maxEventAge: cdk.Duration.seconds(60),
       environment: {
         [TARGETS_ENV]: JSON.stringify(watchTargets),
+        // The probe's /health: the library section reads the commit production runs from it.
+        [HEALTH_ENV]: config.uptime.url,
         // Every network in watch.protocol, served or not (decision 70).
         [PROTOCOL_ENV]: JSON.stringify(
           Object.entries(config.watch.protocol).map(([network, p]) => ({

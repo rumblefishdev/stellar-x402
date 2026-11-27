@@ -39,7 +39,7 @@ Since 0139's switch (2026-11-25 13:43 UTC) most checks are Prometheus rules on t
 | `protocol-changed`        | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                                                                            |
 | `protocol-upgrade-coming` | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                                                                          |
 | `upstream-changed`        | `upstream`  | 2026-11-27 09:08 UTC | 2026-11-27, `make fire-test` ([Drills](#2026-11-27-the-upstream-alarms)): ALARM 09:14:57, OK 09:16:10 UTC, both seen in Slack                                                             |
-| `upstream-silent`         | `upstream`  | 2026-11-27 09:08 UTC | 2026-11-27, `make fire-test` ([Drills](#2026-11-27-the-upstream-alarms)): ALARM 09:18:02, OK 09:39:03 UTC, both seen in Slack                                                             |
+| `upstream-library-behind` | `upstream`  | Not yet: 0026        | Not yet: 0026 fires it after the Alarms deploy                                                                                                                                            |
 | `audit-disk`              | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                                                                           |
 | `telemetry-silent`        | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                                                                          |
 | `credentials-stale`       | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                                                                           |
@@ -246,7 +246,7 @@ down.
 ## The off-server check
 
 The Watch stack's Lambda, `x402-production-watch`, runs every 5 minutes in AWS, so it works while
-the server is down (ADR 0013). It has three sections, run at once:
+the server is down (ADR 0013). It has four sections, run at once:
 
 - **balance:** each served network's fee account through RPC with `checkFacilitatorBalance`,
   published as `spendable_stroops`;
@@ -255,11 +255,17 @@ the server is down (ADR 0013). It has three sections, run at once:
 - **upstream:** once a day, the run at 08:00 UTC: the conformance gate's pin from this repo's
   `develop`, and four upstream x402 files at that pin and on upstream `main` (the x402 spec, the
   Stellar `exact` scheme, the suite's Stellar routes and the discovery spec, task 0029),
-  published as `upstream_files_changed`, the count that differ.
+  published as `upstream_files_changed`, the count that differ;
+- **library:** in the same 08:00 UTC run: the commit production's `/health` names, the
+  `@x402/stellar` range in `apps/facilitator/package.json` at that commit, and npm's `latest`
+  (task 0147), published as `upstream_library_behind`, 1 when they differ.
 
 A network a section can't read publishes nothing, so its alarms keep their state and
-`watch-errors` fires instead; the other sections still publish. The upstream section fails at most
-once a day, which `watch-errors` can't count on its own: `upstream-silent` covers it.
+`watch-errors` fires instead; the other sections still publish. The upstream and library sections
+fail at most once a day, which `watch-errors` can't count on its own: their alarms read a day with
+no point as a breach. Both read whole UTC days, so a day's result reaches the channel after
+00:00 UTC: a sliding 24 hours would lose yesterday's point before today's lands and fire every
+morning.
 
 Its log, and a run by hand:
 
@@ -270,11 +276,12 @@ aws lambda invoke --function-name x402-production-watch --payload '{}' \
 ```
 
 A run by hand with `--payload '{"scheduledTime":"<today>T08:00:00Z"}'`, after 08:00 UTC, runs the
-upstream section too. Use today's date: every point is stamped with that time, and CloudWatch
-refuses a point more than 2 hours ahead, so a later date fails all three sections.
+upstream and library sections too. Use today's date: every point is stamped with that time, and CloudWatch
+refuses a point more than 2 hours ahead, so a later date fails every section.
 
 Each run logs `watch_balance` with the spendable balance in stroops and `watch_protocol` with
-both versions, the 08:00 run `watch_upstream` with the pin and the files that differ, or
+both versions, the 08:00 run `watch_upstream` with the pin and the files that differ and
+`watch_library` with the commit and both versions, or
 `watch_section_failed` with the section, the network and the error.
 
 ### balance-low
@@ -328,10 +335,11 @@ The check hasn't run for 15 minutes, so the balance and protocol alarms see noth
 ### upstream-changed
 
 Upstream x402 `main` changed, since the gate's pin, a file the gate's suite rests on or the
-discovery spec. Nothing breaks for us: the gate still runs the pinned suite. It means a seller or
-buyer on the newest x402 libraries may no longer match what we tested.
+discovery spec; or the day's read failed. Nothing breaks for us: the gate still runs the pinned
+suite. It means a seller or buyer on the newest x402 libraries may no longer match what we tested.
 
-1. Read the 08:00 run's `watch_upstream` line: `changed` lists the files.
+1. Read the 08:00 run's `watch_upstream` line: `changed` lists the files. No such line: read
+   `watch_section_failed` with `section: upstream`, below.
 2. Read the change upstream: `https://github.com/x402-foundation/x402/commits/main/<file>`.
 3. If it changes what a payment or a listing looks like, bump `UPSTREAM_COMMIT` in
    `conformance/src/upstream.ts` and rerun the gate (`conformance/README.md`); the next 08:00 run
@@ -340,16 +348,37 @@ buyer on the newest x402 libraries may no longer match what we tested.
 While it stays in ALARM, a later upstream change sends no new message: read the daily
 `watch_upstream` line until the pin moves.
 
-### upstream-silent
+If the day's read failed, `watch_section_failed` with `section: upstream` names the file:
 
-The upstream section published nothing for two days, so `upstream-changed` sees nothing.
+- `answered 404`: upstream moved or deleted a file, a change to read like the one above; update
+  `FILES` in `infra/src/watch/upstream.ts` and deploy the Watch stack.
+- `answered 429` or `5xx`, or a timeout: GitHub refused or was slow; it usually passes by itself.
+- `expected one commit`: `conformance/src/upstream.ts` no longer holds exactly one commit hash.
 
-1. Read the 08:00 runs for `watch_section_failed` with `section: upstream`: the error names the
-   file.
-2. `answered 404`: upstream moved or deleted a file, a change to read like `upstream-changed`;
-   update `FILES` in `infra/src/watch/upstream.ts` and deploy the Watch stack.
-3. `answered 429` or `5xx`, or a timeout: GitHub refused or was slow; it usually passes by itself.
-4. `expected one commit`: `conformance/src/upstream.ts` no longer holds exactly one commit hash.
+### upstream-library-behind
+
+Production's facilitator asks for another `@x402/stellar` than the one npm calls `latest`; or the
+day's read failed. Nothing breaks at once: the facilitator keeps verifying and settling. It means
+fixes upstream has released don't run in production yet, or a raise merged on `develop` is not
+deployed. A protocol upgrade the SDK can't read has its own, earlier alarm,
+[protocol-upgrade-coming](#protocol-upgrade-coming).
+
+1. Read the 08:00 run's `watch_library` line: `production` and `latest`, and the `commit`
+   production runs.
+2. `develop` already on `latest`: deploy (`docs/runbook.md`); the next 08:00 run publishes 0.
+3. Otherwise read upstream's changes since our version, raise every `@x402` package together (AD-14
+   in `docs/architecture/m1-spine.md`), and deploy; or say in the channel why the version stays.
+
+While it stays in ALARM, a later release sends no new message: read the daily `watch_library`
+line. If the day's read failed, `watch_section_failed` with `section: library` names it:
+
+- `names no commit`: `/health` gave no `commit`, so the image was built without `GIT_COMMIT`
+  (`.github/workflows/deploy-production.yml` sets it); redeploy through the workflow.
+- `not ~X.Y.Z`: the range in `apps/facilitator/package.json` has another shape; AD-14 asks for
+  `~X.Y.Z`. Change it back, or the read in `infra/src/watch/library.ts`.
+- `answered 404`, `429` or `5xx`, or a timeout: GitHub, npm or `/health` refused or was slow.
+- `answered no JSON`: the named URL sent a page in place of JSON, such as a Cloudflare challenge in
+  front of `/health`.
 
 ## The facilitator
 
@@ -1072,7 +1101,8 @@ CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are Clo
 | `spendable_stroops`                         | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
 | `protocol_version`                          | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
 | `protocol_supported_version`                | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |
-| `upstream_files_changed`                    | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed), [upstream-silent](#upstream-silent)                                    |
+| `upstream_files_changed`                    | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed)                                                                         |
+| `upstream_library_behind`                   | `x402-watch`       | gauge, Count   | none                                                     | [upstream-library-behind](#upstream-library-behind)                                                           |
 | `account_state_mismatches`                  | `x402-watch`       | gauge, Count   | `network`                                                | `account-state` (off)                                                                                         |
 | `account_effects_unexpected`                | `x402-watch`       | counter, Count | `network`                                                | `account-effects` (off)                                                                                       |
 | `backup_secret_reads`                       | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |

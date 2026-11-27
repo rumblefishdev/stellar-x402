@@ -71,8 +71,9 @@ export const ALARM_GROUPS = [
    */
   "protocol",
   /**
-   * `upstream-changed` and `upstream-silent`, from the check's daily upstream section (task 0029),
-   * once its 08:00 UTC run has published: until then `upstream-silent` sees no point and fires.
+   * `upstream-changed` and `upstream-library-behind`, from the check's daily upstream and library
+   * sections (tasks 0029, 0147), once its 08:00 UTC run has published: both read a day with no
+   * point as a breach, so until then they fire.
    */
   "upstream",
   /**

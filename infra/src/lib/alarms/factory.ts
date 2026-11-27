@@ -106,6 +106,12 @@ export interface LevelSpec extends Common {
   readonly threshold: number;
   /** Default `ignore` (decision 19); `uptime` breaches on a missing point. */
   readonly missing?: "ignore" | "breaching" | "notBreaching";
+  /**
+   * Whole UTC days, not CloudWatch's default sliding window: a sliding 24 hours loses yesterday's
+   * 08:00 point before today's lands and would fire and clear every morning (AWS, "Alarm
+   * evaluation window"). A day's point is read once the day ends, at 00:00 UTC.
+   */
+  readonly wholeDays?: boolean;
 }
 
 export interface SilenceSpec extends Common {
@@ -196,7 +202,7 @@ export class AlarmFactory implements Alarms {
 
   /** The Level shape: past the threshold in M of M periods; keeps its state without data. */
   level(base: string, spec: LevelSpec): cloudwatch.Alarm | undefined {
-    return this.make(base, "level", spec, {
+    const alarm = this.make(base, "level", spec, {
       metric: this.metric(spec.signal, spec.statistic, spec.periodMinutes),
       comparisonOperator: COMPARISON[spec.comparison],
       threshold: spec.threshold,
@@ -204,6 +210,9 @@ export class AlarmFactory implements Alarms {
       datapointsToAlarm: spec.datapoints ?? spec.periods,
       treatMissingData: MISSING[spec.missing ?? "ignore"],
     });
+    if (alarm && spec.wholeDays)
+      (alarm.node.defaultChild as cloudwatch.CfnAlarm).evaluationWindow = { wallClockWindow: {} };
+    return alarm;
   }
 
   /**

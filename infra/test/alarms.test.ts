@@ -215,7 +215,7 @@ describe("the Alarms template", () => {
   test("puts the upstream alarms in their own group, so they go on only after the first daily run", () => {
     expect(records.filter((r) => r.group === "upstream").map((r) => r.alarmName)).toEqual([
       "x402-production-upstream-changed",
-      "x402-production-upstream-silent",
+      "x402-production-upstream-library-behind",
     ]);
   });
 
@@ -339,7 +339,7 @@ test("production as committed makes only the groups that are on, and of them wha
     "x402-production-protocol-upgrade-coming-testnet",
     "x402-production-telemetry-silent",
     "x402-production-upstream-changed",
-    "x402-production-upstream-silent",
+    "x402-production-upstream-library-behind",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
     "x402-production-watch-errors",
@@ -455,7 +455,7 @@ const LEVEL: Record<
   "protocol-changed": [">", expectedProtocol, "Maximum", 300, 2, 2],
   "protocol-upgrade-coming": [">", supportedProtocol, "Maximum", 300, 2, 2],
   "upstream-changed": [">=", 1, "Maximum", 86400, 1, 1],
-  "upstream-silent": ["<", 1, "SampleCount", 86400, 2, 2],
+  "upstream-library-behind": [">=", 1, "Maximum", 86400, 1, 1],
 };
 
 /** Each Event alarm's threshold other than 1, which the list writes as "at N or more". */
@@ -576,6 +576,29 @@ const SIX = {
   stalled: "rpc_stalled_seconds",
   balance: "balance_reading_age_seconds",
 };
+
+describe("the upstream alarms read a day with no point as a breach (0147 decisions 8, 9)", () => {
+  test.each([
+    ["upstream-changed", "upstream_files_changed"],
+    ["upstream-library-behind", "upstream_library_behind"],
+  ])("%s fills a missing point with 1", (base, metric) => {
+    expect(mathOf(all.alarms, `x402-production-${base}`)).toEqual({
+      expression: "FILL(m, 1)",
+      stats: ["Maximum"],
+      ids: { m: [metric, {}] },
+    });
+  });
+
+  // A sliding 24-hour window loses yesterday's 08:00 point before today's lands, so it would fire
+  // and clear every morning; a UTC calendar day holds exactly one run (0147 decision 10).
+  test.each(["upstream-changed", "upstream-library-behind"])(
+    "%s reads whole UTC days, not a sliding 24 hours",
+    (base) => {
+      const p = byName.get(`x402-production-${base}`)!;
+      expect(p["EvaluationWindow"]).toEqual({ WallClockWindow: {} });
+    },
+  );
+});
 
 describe("gauges-silent (decision 28)", () => {
   const on = allOn();

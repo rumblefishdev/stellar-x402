@@ -152,7 +152,8 @@ The ages are `Seconds`, the percentages `Percent`, the two counters `Count`, and
 Published with `PutMetricData` by the Lambdas: the uptime probes and the off-server check.
 `spendable_stroops`, `protocol_version`, `protocol_supported_version`, `account_state_mismatches`
 and `account_effects_unexpected` are network-scoped. `ready`, `portal_ready`, `hub_ready`,
-`backup_secret_reads` and `upstream_files_changed` are process-scoped: one probe, one AWS account.
+`backup_secret_reads`, `upstream_files_changed` and `upstream_library_behind` are
+process-scoped: one probe, one AWS account.
 The three `ready` metrics, `spendable_stroops` and the two protocol versions are `None`, the rest
 `Count`.
 
@@ -167,7 +168,8 @@ The three `ready` metrics, `spendable_stroops` and the two protocol versions are
 | `account_state_mismatches` | The check: accounts whose signers or thresholds differ from the declared set, or that are gone | `Maximum` | `account-state` |
 | `account_effects_unexpected` | The check: effects other than the allowed two, since the cursor | `Maximum` | `account-effects` |
 | `backup_secret_reads` | The check: `GetSecretValue` events not counted before | `Maximum` | `backup-secret-read` |
-| `upstream_files_changed` | The check, daily at 08:00 UTC: upstream x402 files the conformance gate rests on, and the discovery spec, that differ from its pin (task 0029) | `Maximum`, `SampleCount` | `upstream-changed`, `upstream-silent` |
+| `upstream_files_changed` | The check, daily at 08:00 UTC: upstream x402 files the conformance gate rests on, and the discovery spec, that differ from its pin (task 0029) | `Maximum` | `upstream-changed` |
+| `upstream_library_behind` | The check, daily at 08:00 UTC: 1 while production's facilitator asks for another `@x402/stellar` than npm's `latest`, 0 when it matches (task 0147) | `Maximum` | `upstream-library-behind` |
 
 The statistics are the ones a forged point can't hide a real one behind
 ([G-alarm-list](G-alarm-list.md#statistics)).
