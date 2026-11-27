@@ -694,14 +694,23 @@ so the fee budgets count low.
 
 ## The server
 
-The host probe (`x402-host-probe.timer`, every minute) writes the server's checks to
-`/var/log/x402/host/metrics.log`, shipped as the stream `host` of `/x402/production/metrics`; the
-agent adds memory and disk. A failed check, or a job that never ran, writes a value past its
-threshold, so a broken check alarms rather than reading as healthy. With the probe stopped, its
-alarms (`openbao-down`, `certificate`, `credentials-stale`, and the backups' and snapshot's)
-keep their state, and [probe-silent](#probe-silent) fires. `audit-disk` comes from the agent,
-covered by [telemetry-silent](#telemetry-silent); `facilitator-failed` and `watchdog-restart`
-are written by the units themselves.
+The host probe (`x402-host-probe.timer`, every minute) writes each check twice: as textfiles in
+`/var/lib/x402/textfile`, which node_exporter serves to the metrics agent and so to the Prometheus
+rules on the monitoring VM, and as EMF lines in `/var/log/x402/host/metrics.log`, shipped as the
+stream `host` of `/x402/production/metrics` for the alarms that stay in CloudWatch. Memory and
+disk come from node_exporter for the rules, and from the CloudWatch agent for `audit-disk`. A
+failed check, or a job that never ran, writes a value past its threshold, so a broken check alarms
+rather than reading as healthy.
+
+With the probe stopped, node_exporter keeps serving the files it last wrote, so its rules
+(`x402-openbao-down`, `x402-snapshot-age`, `x402-agent-certificate`, and the backups' once on)
+read those last values and keep their state, rather than resolving, and
+[textfile-stale](#textfile-stale) fires after 5 minutes. Seen in the 2026-11-25 drill: the file
+aged to 630 s while `openbao_up` held its value. Its CloudWatch alarms (`certificate`,
+`credentials-stale`) get no line and keep their state too: `probe-silent` became that rule at the
+switch. `audit-disk` comes from the CloudWatch agent, covered by
+[telemetry-silent](#telemetry-silent); `facilitator-failed` and `watchdog-restart` are written by
+the units themselves.
 
 ### openbao-down
 
