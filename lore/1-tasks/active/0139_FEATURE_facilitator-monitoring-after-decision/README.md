@@ -133,6 +133,16 @@ losing an alarm that protects money or a payment.
    soroban-infrastructure#20 merged before the day. CloudWatch's `facilitator-silent` posts to
    Slack after 15 minutes of it: expected, not an outage. The other half of the ADR holds: no
    period runs both the old alarms and the rules.
+5. **No combined `watch-findings` alarm (2026-11-27).** 0138's
+   [G-alarm-signals](../../archive/0138_RESEARCH_monitoring-cost-and-grafana-decision/notes/G-alarm-signals-and-triage-runbooks.md)
+   proposed folding `x402-watch`'s findings (`protocol-changed-*`, `protocol-upgrade-coming-*`,
+   `log-volume-*`, `upstream-changed`, `upstream-silent`) into one CloudWatch alarm, CW3. Not
+   built: `route()` keeps every `x402-watch` row as its own CloudWatch alarm. One alarm in ALARM
+   sends nothing for a second finding, so the fold needs the Lambda to hold findings in SSM and
+   post each new one itself, with broader IAM: our own alerting in a Lambda, to save about
+   $0.50 a month. Each alarm also keeps its own history, runbook text and silencing. Revisit if
+   `x402-watch` grows to dozens of findings or moves to Prometheus, where Alertmanager groups
+   them. Asked by Oskar before turning the `upstream` group on (0026).
 
 ## For the switch
 
