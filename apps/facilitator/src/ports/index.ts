@@ -23,7 +23,7 @@ export type {
   ListedResource,
   UpsertOutcome,
 } from "./catalog-store.js";
-export type { CurationKey, CurationRecord, CurationStore } from "./curation-store.js";
+export type { CurationStore } from "./curation-store.js";
 export type { Embedder } from "./embedder.js";
 export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
 export type { CardListing, SearchCard, SearchCardStore } from "./search-card-store.js";

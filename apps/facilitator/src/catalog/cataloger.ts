@@ -110,6 +110,8 @@ const SELLER_RESPONSE_BYTES = 64 * 1024;
  * (122,729 B, 35 tools, 2026-10-28), since the tool's schemas come with it.
  */
 const MCP_RESPONSE_BYTES = 256 * 1024;
+/** How long a check waits for a seller's answer, its 402 or its `stellar.toml` (0070). */
+export const SELLER_TIMEOUT_MS = 10_000;
 /** A library error lists every issue; the attempt's row keeps its start. */
 const DETAIL_CHARS = 1_000;
 
@@ -135,7 +137,7 @@ export function createCataloger({
   bazaar = bazaarLib,
   upsertTimeoutMs = 10_000,
   listLocal = false,
-  sellerTimeoutMs = 10_000,
+  sellerTimeoutMs = SELLER_TIMEOUT_MS,
   checksPerHost = CHECKS_PER_HOST,
   curation,
   now = Date.now,

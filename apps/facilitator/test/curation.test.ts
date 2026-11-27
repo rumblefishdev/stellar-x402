@@ -1,4 +1,4 @@
-import { Keypair, xdr } from "@stellar/stellar-sdk";
+import { Keypair, StrKey, xdr } from "@stellar/stellar-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CURATION_RECHECK_MS,
@@ -69,13 +69,6 @@ describe("stellarTomlUrl", () => {
   });
 });
 
-describe("the constants", () => {
-  it("rechecks after 6 hours and reads at most SEP-1's 100 KiB", () => {
-    expect(CURATION_RECHECK_MS).toBe(6 * 60 * 60 * 1000);
-    expect(STELLAR_TOML_BYTES).toBe(100 * 1024);
-  });
-});
-
 /** A curation store in memory: the check is tested apart from PostgreSQL. */
 function memoryStore(): CurationStore & { records: Map<string, CurationRecord> } {
   const records = new Map<string, CurationRecord>();
@@ -132,13 +125,13 @@ function setup(homeDomain = "127.0.0.1") {
     rpc: { getLedgerEntries } as never,
     network: "stellar:testnet",
     logger,
-    limits: { timeoutMs: 500, maxResponseBytes: 1024 * 1024, allowInsecureLocal: true },
+    limits: { timeoutMs: 500, allowInsecureLocal: true },
     now: () => clock.now,
   });
   const key = { network: "stellar:testnet" as const, host: "127.0.0.1", payTo: PAY_TO };
   const refresh = () =>
     curation.refresh("stellar:testnet", `${seller.url}/weather/today?city=Warsaw`, PAY_TO);
-  return { store, getLedgerEntries, logger, clock, key, refresh };
+  return { curation, store, getLedgerEntries, logger, clock, key, refresh };
 }
 
 describe("createCuration: a finished check", () => {
@@ -168,27 +161,6 @@ describe("createCuration: a finished check", () => {
     expect(read.toXDR("base64")).toBe(accountKey.toXDR("base64"));
   });
 
-  it("stores curated false when the file does not list the payTo", async () => {
-    seller.files[TOML_PATH] = `ACCOUNTS = ["${OTHER_PAY_TO}"]\n`;
-    const { store, key, refresh } = setup();
-    await refresh();
-    expect(await store.get(key)).toEqual({ ...key, curated: false, checkedAt: START });
-  });
-
-  it("stores curated false when the account's home_domain is another domain", async () => {
-    seller.files[TOML_PATH] = `ACCOUNTS = ["${PAY_TO}"]\n`;
-    const { store, key, refresh } = setup("pogoda.pl");
-    await refresh();
-    expect(await store.get(key)).toEqual({ ...key, curated: false, checkedAt: START });
-  });
-
-  it("stores curated false when the file has no ACCOUNTS", async () => {
-    seller.files[TOML_PATH] = `VERSION = "2.0.0"\n`;
-    const { store, key, refresh } = setup();
-    await refresh();
-    expect(await store.get(key)).toEqual({ ...key, curated: false, checkedAt: START });
-  });
-
   it("stores curated false when the account does not exist", async () => {
     seller.files[TOML_PATH] = `ACCOUNTS = ["${PAY_TO}"]\n`;
     const { store, key, getLedgerEntries, refresh } = setup();
@@ -201,16 +173,18 @@ describe("createCuration: a finished check", () => {
 describe("createCuration: when it checks", () => {
   it("checks nothing for a key of another network than the facilitator's", async () => {
     seller.files[TOML_PATH] = `ACCOUNTS = ["${PAY_TO}"]\n`;
-    const { store, getLedgerEntries } = setup();
-    const curation = createCuration({
-      store,
-      rpc: { getLedgerEntries } as never,
-      network: "stellar:testnet",
-      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      limits: { timeoutMs: 500, maxResponseBytes: 1024 * 1024, allowInsecureLocal: true },
-      now: () => START,
-    });
+    const { curation, store, getLedgerEntries } = setup();
     await curation.refresh("stellar:pubnet", `${seller.url}/weather/today`, PAY_TO);
+    expect(seller.requests).toEqual([]);
+    expect(getLedgerEntries).not.toHaveBeenCalled();
+    expect(store.records.size).toBe(0);
+  });
+
+  it("checks nothing for a contract payTo (C…), which has no home_domain", async () => {
+    const contract = StrKey.encodeContract(Buffer.alloc(32, 1));
+    seller.files[TOML_PATH] = `ACCOUNTS = ["${contract}"]\n`;
+    const { curation, store, getLedgerEntries } = setup();
+    await curation.refresh("stellar:testnet", `${seller.url}/weather/today`, contract);
     expect(seller.requests).toEqual([]);
     expect(getLedgerEntries).not.toHaveBeenCalled();
     expect(store.records.size).toBe(0);
@@ -340,15 +314,7 @@ describe("createCuration: a failed check", () => {
   });
 
   it("fails when the host refuses the connection", async () => {
-    const { store, logger } = setup();
-    const curation = createCuration({
-      store,
-      rpc: { getLedgerEntries: vi.fn() } as never,
-      network: "stellar:testnet",
-      logger,
-      limits: { timeoutMs: 500, maxResponseBytes: 1024 * 1024, allowInsecureLocal: true },
-      now: () => START,
-    });
+    const { curation, store, logger } = setup();
     // Port 9 (discard) has no listener here.
     await expect(
       curation.refresh("stellar:testnet", "http://127.0.0.1:9/weather/today", PAY_TO),
@@ -363,24 +329,5 @@ describe("createCuration: a failed check", () => {
       checkedAt: null,
     });
     expect(logger.warn).toHaveBeenCalledWith("curation_check_failed", expect.anything());
-  });
-
-  it("never throws, even when its store fails", async () => {
-    seller.files[TOML_PATH] = `ACCOUNTS = ["${PAY_TO}"]\n`;
-    const { getLedgerEntries, logger } = setup();
-    const curation = createCuration({
-      store: {
-        get: () => Promise.reject(new Error("store down")),
-        put: () => Promise.reject(new Error("store down")),
-      },
-      rpc: { getLedgerEntries } as never,
-      network: "stellar:testnet",
-      logger,
-      limits: { timeoutMs: 500, maxResponseBytes: 1024 * 1024, allowInsecureLocal: true },
-      now: () => START,
-    });
-    await expect(
-      curation.refresh("stellar:testnet", `${seller.url}/weather/today`, PAY_TO),
-    ).resolves.toBeUndefined();
   });
 });

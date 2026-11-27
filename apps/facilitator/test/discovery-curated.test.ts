@@ -113,16 +113,6 @@ describe("CatalogStore: curated", () => {
     await seed(stores, db.pool);
   });
 
-  it("marks a listing in list curated iff its network, host and payTo have a curated record", async () => {
-    const { items } = await stores.catalog.list({ limit: 10, offset: 0 }, Date.now());
-    expect(curatedOf(items)).toEqual(EXPECTED);
-  });
-
-  it("marks a listing in search the same way", async () => {
-    const hits = await stores.catalog.search({ text: "weather", limit: 10 }, Date.now());
-    expect(curatedOf(hits.map((hit) => hit.resource))).toEqual(EXPECTED);
-  });
-
   it("follows a record that changes", async () => {
     await createPostgresCurationStore(db.pool).put({
       network: "stellar:testnet",

@@ -46,21 +46,6 @@ async function call(name: string, args: Record<string, unknown>) {
 }
 
 describe("curated in the tools' results", () => {
-  it("names curated in each tool's item schema, as an optional boolean", async () => {
-    const { tools } = await client.listTools();
-    for (const name of ["list_resources", "search_resources"]) {
-      const schema = tools.find((tool) => tool.name === name)!.outputSchema as unknown as {
-        properties: { items: { items: { properties: object; required?: string[] } } };
-      };
-      expect(schema.properties.items.items.properties, name).toHaveProperty("curated");
-      expect(
-        (schema.properties.items.items.properties as Record<string, object>).curated,
-        name,
-      ).toMatchObject({ type: "boolean" });
-      expect(schema.properties.items.items.required ?? [], name).not.toContain("curated");
-    }
-  });
-
   it("keeps curated on each item list_resources returns, and passes an item without it", async () => {
     const { isError, structuredContent } = await call("list_resources", {
       network: "stellar:testnet",

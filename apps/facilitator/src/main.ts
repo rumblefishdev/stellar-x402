@@ -26,8 +26,8 @@ import { metricsListener, prometheusMetrics } from "./adapters/prometheus-metric
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createSearchModelClient, searchModelReady } from "./adapters/search-model.js";
-import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
-import { STELLAR_TOML_BYTES, createCuration } from "./catalog/curation.js";
+import { SELLER_TIMEOUT_MS, createCataloger, type Cataloger } from "./catalog/cataloger.js";
+import { createCuration } from "./catalog/curation.js";
 import { createSearchCardRewrite } from "./catalog/search-cards.js";
 import { createSearchVectors, type SearchVectors } from "./catalog/search-vectors.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
@@ -392,12 +392,7 @@ export function compose(
       rpc,
       network: config.network,
       logger,
-      // The seller check's deadline; the body cap is SEP-1's.
-      limits: {
-        timeoutMs: 10_000,
-        maxResponseBytes: STELLAR_TOML_BYTES,
-        allowInsecureLocal: config.catalog.listLocal,
-      },
+      limits: { timeoutMs: SELLER_TIMEOUT_MS, allowInsecureLocal: config.catalog.listLocal },
     }),
   });
   // 1 while calls are off `RPC_URLS[0]` (0027 AD-5). `active` is a plain read; `begin()` could

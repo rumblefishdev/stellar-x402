@@ -181,10 +181,10 @@ export class PostgresCatalogStore implements CatalogStore {
    * the stored settlements: 1 + 0.2 × p / (p + 2), where p is the distinct wallets that paid for
    * the listing from 30 days before `now` on, its own `payTo` left out, and only on terms equal to
    * one of its offers; × 1.1 when its host's `stellar.toml` proved its `payTo` in a check of the
-   * same 30 days (0070), with these
-   * two together at most 1.2; × 0.9 on a tunnel host; × 0.9 when the card's description holds
-   * nothing but spaces. Counting after the matches are found keeps the planner from a nested loop over
-   * all listings (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).
+   * same 30 days (0070), with these two together at most 1.2; × 0.9 on a tunnel host; × 0.9 when
+   * the card's description holds nothing but spaces. Each hit's `curated` is that same proof.
+   * Counting after the matches are found keeps the planner from a nested loop over all listings
+   * (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).
    */
   async search(query: CatalogSearch, now: number): Promise<CatalogSearchHit[]> {
     if (query.meaning !== undefined) return this.searchFused(query, query.meaning, now);
@@ -224,8 +224,12 @@ export class PostgresCatalogStore implements CatalogStore {
                   'asset', s.payment_requirements->'asset',
                   'amount', s.payment_requirements->'amount'))
           GROUP BY m.seq)
-       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
-         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url,
+       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url,
+              c.resource || jsonb_build_object('curated', EXISTS (SELECT 1 FROM catalog_curation k
+                                WHERE k.network = p.network AND k.host = p.host
+                                  AND k.pay_to = p.pay_to AND k.curated
+                                  AND k.checked_at >= $13)) AS resource
+         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url, m.host,
                       (m.base
                        * least(1.2, (1 + 0.2 * paid.payers / (paid.payers + 2.0))
                                     * CASE WHEN EXISTS (SELECT 1 FROM catalog_curation k
@@ -261,7 +265,7 @@ export class PostgresCatalogStore implements CatalogStore {
         now - CURATION_VALID_MS,
       ],
     );
-    return this.hitsOf(rows, now);
+    return rows.map(hitOf);
   }
 
   /**
@@ -293,12 +297,6 @@ export class PostgresCatalogStore implements CatalogStore {
       const key = keys[i]!;
       return { ...resource, curated: curated.has(`${key.network} ${key.host} ${key.payTo}`) };
     });
-  }
-
-  private async hitsOf(rows: HitRow[], now: number): Promise<CatalogSearchHit[]> {
-    const hits = rows.map((row) => ({ ...hitOf(row), resource: row.resource }));
-    const resources = await this.withCuration(hits, now);
-    return hits.map((hit, i) => ({ ...hit, resource: resources[i]! }));
   }
 
   async waitingForVector(query: CatalogSearch): Promise<boolean> {
@@ -378,8 +376,12 @@ export class PostgresCatalogStore implements CatalogStore {
                   'asset', s.payment_requirements->'asset',
                   'amount', s.payment_requirements->'amount'))
           GROUP BY m.seq)
-       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
-         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url,
+       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url,
+              c.resource || jsonb_build_object('curated', EXISTS (SELECT 1 FROM catalog_curation k
+                                WHERE k.network = p.network AND k.host = p.host
+                                  AND k.pay_to = p.pay_to AND k.curated
+                                  AND k.checked_at >= $15)) AS resource
+         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url, m.host,
                       m.base
                       * least(1.2, (1 + 0.2 * paid.payers / (paid.payers + 2.0))
                                    * CASE WHEN EXISTS (SELECT 1 FROM catalog_curation k
@@ -417,7 +419,7 @@ export class PostgresCatalogStore implements CatalogStore {
         now - CURATION_VALID_MS,
       ],
     );
-    return this.hitsOf(rows, now);
+    return rows.map(hitOf);
   }
 }
 
@@ -434,10 +436,10 @@ interface HitRow {
   pay_to: string;
   method: string;
   resource_url: string;
-  resource: DiscoveryResource;
+  resource: ListedResource;
 }
 
-const hitOf = (row: HitRow): Omit<CatalogSearchHit, "resource"> => ({
+const hitOf = (row: HitRow): CatalogSearchHit => ({
   rank: row.rank,
   key: {
     network: row.network,
@@ -445,6 +447,7 @@ const hitOf = (row: HitRow): Omit<CatalogSearchHit, "resource"> => ({
     method: row.method,
     resourceUrl: row.resource_url,
   },
+  resource: row.resource,
 });
 
 /**

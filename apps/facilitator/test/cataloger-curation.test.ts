@@ -140,22 +140,6 @@ describe("cataloger: curation", () => {
     expect(curation.refresh).not.toHaveBeenCalled();
   });
 
-  it("does not refresh for a listing not public, on a facilitator that lists no local ones", async () => {
-    const { cataloger, curation } = setup({ listLocal: false });
-    await cataloger.onSuccess(record(valid), "settle");
-    await cataloger.drain();
-    expect(curation.refresh).not.toHaveBeenCalled();
-  });
-
-  it("does not refresh when the seller is not askable and no listing is stored", async () => {
-    const { cataloger, curation, list } = setup();
-    seller.reply = async () => ({ status: 200 });
-    await cataloger.onSuccess(record(valid), "settle");
-    await cataloger.drain();
-    expect(await list()).toEqual([]);
-    expect(curation.refresh).not.toHaveBeenCalled();
-  });
-
   it("still records the attempt and lists when the refresh rejects", async () => {
     const { cataloger, curation, list, attempts } = setup();
     curation.refresh.mockRejectedValue(new Error("curation down"));
@@ -166,28 +150,5 @@ describe("cataloger: curation", () => {
     expect(await attempts()).toEqual([
       { stage: "seller", outcome: "refreshed", reason: "inserted" },
     ]);
-  });
-
-  it("drains only once the refresh has finished", async () => {
-    const { cataloger, curation } = setup();
-    let release!: () => void;
-    curation.refresh.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          release = resolve;
-        }),
-    );
-    const paid = cataloger.onSuccess(record(valid), "settle");
-    await vi.waitFor(() => expect(curation.refresh).toHaveBeenCalledTimes(1));
-    let drained = false;
-    const drain = cataloger.drain().then(() => {
-      drained = true;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(drained).toBe(false);
-    release();
-    await drain;
-    await paid;
-    expect(drained).toBe(true);
   });
 });

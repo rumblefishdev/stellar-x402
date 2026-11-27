@@ -25,10 +25,11 @@ export function provesPayTo(
   payTo: string,
 ): boolean {
   const accounts = parse(toml).ACCOUNTS;
-  if (!Array.isArray(accounts) || !accounts.every((account) => typeof account === "string")) {
-    return false;
-  }
-  return accounts.includes(payTo) && homeDomain?.toLowerCase() === host.toLowerCase();
+  return (
+    Array.isArray(accounts) &&
+    accounts.includes(payTo) &&
+    homeDomain?.toLowerCase() === host.toLowerCase()
+  );
 }
 
 /**
@@ -47,8 +48,8 @@ export interface CurationDeps {
   /** The facilitator's network: the only one whose accounts its RPC reads. */
   network: StellarNetwork;
   logger: Logger;
-  /** The seller checks' limits; the body cap is SEP-1's. */
-  limits: SellerLimits;
+  /** The seller checks' deadline and local rule; the body cap is SEP-1's. */
+  limits: Pick<SellerLimits, "timeoutMs" | "allowInsecureLocal">;
   /** The app clock, ms. */
   now?: () => number;
 }
@@ -58,7 +59,7 @@ export interface CurationDeps {
  * account. Any answer from the host finishes the check, a status other than 200 as no proof. A
  * check that fails (the host cannot be reached, the file is not TOML, the RPC) leaves the listing
  * without the proof until one passes, logged, and keeps the last finished check's time, so the
- * next paid call checks again. Never throws.
+ * next paid call checks again. A store that fails rejects.
  */
 export function createCuration({
   store,
@@ -87,11 +88,7 @@ export function createCuration({
       await store.put({ ...key, curated, checkedAt: started });
     } catch (error) {
       logger.warn("curation_check_failed", { ...key, reason: String(error) });
-      try {
-        await store.put({ ...key, curated: false, checkedAt });
-      } catch (putError) {
-        logger.warn("curation_store_failed", { ...key, error: putError });
-      }
+      await store.put({ ...key, curated: false, checkedAt });
     }
   }
 
@@ -113,9 +110,7 @@ export function createCuration({
       new xdr.LedgerKeyAccount({ accountId: Keypair.fromPublicKey(payTo).xdrPublicKey() }),
     );
     const { entries } = await rpc.getLedgerEntries(accountKey);
-    const [entry] = entries;
-    if (!entry) return undefined;
-    return entry.val.account().homeDomain().toString();
+    return entries[0]?.val.account().homeDomain().toString();
   }
 
   return { refresh };
