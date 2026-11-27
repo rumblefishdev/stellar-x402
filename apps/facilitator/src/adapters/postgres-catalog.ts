@@ -31,6 +31,13 @@ const CATALOG_KEY_WHERE = "network = $1 AND pay_to = $2 AND method = $3 AND reso
 const PAYERS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
+ * A `stellar.toml` proof not checked for longer no longer counts (0070): it is checked again only
+ * on a paid call, so an old one may no longer hold. The same 30 days as q's payment window
+ * (ADR 0014).
+ */
+const CURATION_VALID_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
  * Hosts that tunnel to a seller's own machine, so the listing may vanish when it sleeps (ADR 0014):
  * a host is one of them or a name under one of them.
  */
@@ -132,7 +139,7 @@ export class PostgresCatalogStore implements CatalogStore {
    * without). They read only the narrow columns; `resource` is read for the page's rows alone, so
    * padded listings can't make a query costly.
    */
-  async list(query: CatalogQuery): Promise<CatalogPage> {
+  async list(query: CatalogQuery, now: number): Promise<CatalogPage> {
     const { type, payTo, network, extensions, limit, offset } = query;
     const matches = `catalog
          WHERE ($1::text IS NULL OR type = $1)
@@ -150,7 +157,7 @@ export class PostgresCatalogStore implements CatalogStore {
       [type ?? null, payTo ?? null, network ?? null, extensions ?? null, limit, offset],
     );
     const page = rows[0]!;
-    return { items: await this.withCuration(page.items), total: Number(page.total) };
+    return { items: await this.withCuration(page.items, now), total: Number(page.total) };
   }
 
   /**
@@ -173,7 +180,8 @@ export class PostgresCatalogStore implements CatalogStore {
    * The rank is the words' rank times the listing's quality factor q (ADR 0014), counted here from
    * the stored settlements: 1 + 0.2 × p / (p + 2), where p is the distinct wallets that paid for
    * the listing from 30 days before `now` on, its own `payTo` left out, and only on terms equal to
-   * one of its offers; × 1.1 when its host's `stellar.toml` proves its `payTo` (0070), with these
+   * one of its offers; × 1.1 when its host's `stellar.toml` proved its `payTo` in a check of the
+   * same 30 days (0070), with these
    * two together at most 1.2; × 0.9 on a tunnel host; × 0.9 when the card's description holds
    * nothing but spaces. Counting after the matches are found keeps the planner from a nested loop over
    * all listings (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).
@@ -222,7 +230,8 @@ export class PostgresCatalogStore implements CatalogStore {
                        * least(1.2, (1 + 0.2 * paid.payers / (paid.payers + 2.0))
                                     * CASE WHEN EXISTS (SELECT 1 FROM catalog_curation k
                                             WHERE k.network = m.network AND k.host = m.host
-                                              AND k.pay_to = m.pay_to AND k.curated)
+                                              AND k.pay_to = m.pay_to AND k.curated
+                                              AND k.checked_at >= $13)
                               THEN 1.1 ELSE 1 END)
                        * CASE WHEN EXISTS (SELECT 1 FROM unnest($12::text[]) AS tunnel(host)
                                             WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
@@ -249,17 +258,18 @@ export class PostgresCatalogStore implements CatalogStore {
         limit,
         now - PAYERS_WINDOW_MS,
         TUNNEL_HOSTS,
+        now - CURATION_VALID_MS,
       ],
     );
-    return this.hitsOf(rows);
+    return this.hitsOf(rows, now);
   }
 
   /**
    * Each listing's resource with `curated`: whether its host's `stellar.toml` proof of its key's
-   * account passed (0070), read from `catalog_curation` in one query for the page. The host is the
-   * WHATWG URL parser's, as the check stores it.
+   * account passed (0070) within the 30 days before `now`, read from `catalog_curation` in one
+   * query for the page. The host is the WHATWG URL parser's, as the check stores it.
    */
-  private async withCuration(listings: StoredListing[]): Promise<ListedResource[]> {
+  private async withCuration(listings: StoredListing[], now: number): Promise<ListedResource[]> {
     const keys = listings.map(({ key }) => ({
       network: key.network,
       host: new URL(key.resourceUrl).hostname,
@@ -268,9 +278,15 @@ export class PostgresCatalogStore implements CatalogStore {
     const { rows } = await this.listPool.query<{ network: string; host: string; pay_to: string }>(
       `SELECT network, host, pay_to FROM catalog_curation
         WHERE curated
+          AND checked_at >= $4
           AND (network, host, pay_to) IN
               (SELECT * FROM unnest($1::text[], $2::text[], $3::text[]))`,
-      [keys.map((key) => key.network), keys.map((key) => key.host), keys.map((key) => key.payTo)],
+      [
+        keys.map((key) => key.network),
+        keys.map((key) => key.host),
+        keys.map((key) => key.payTo),
+        now - CURATION_VALID_MS,
+      ],
     );
     const curated = new Set(rows.map((row) => `${row.network} ${row.host} ${row.pay_to}`));
     return listings.map(({ resource }, i) => {
@@ -279,9 +295,9 @@ export class PostgresCatalogStore implements CatalogStore {
     });
   }
 
-  private async hitsOf(rows: HitRow[]): Promise<CatalogSearchHit[]> {
+  private async hitsOf(rows: HitRow[], now: number): Promise<CatalogSearchHit[]> {
     const hits = rows.map((row) => ({ ...hitOf(row), resource: row.resource }));
-    const resources = await this.withCuration(hits);
+    const resources = await this.withCuration(hits, now);
     return hits.map((hit, i) => ({ ...hit, resource: resources[i]! }));
   }
 
@@ -368,7 +384,8 @@ export class PostgresCatalogStore implements CatalogStore {
                       * least(1.2, (1 + 0.2 * paid.payers / (paid.payers + 2.0))
                                    * CASE WHEN EXISTS (SELECT 1 FROM catalog_curation k
                                             WHERE k.network = m.network AND k.host = m.host
-                                              AND k.pay_to = m.pay_to AND k.curated)
+                                              AND k.pay_to = m.pay_to AND k.curated
+                                              AND k.checked_at >= $15)
                               THEN 1.1 ELSE 1 END)::float8
                       * CASE WHEN EXISTS (SELECT 1 FROM unnest($14::text[]) AS tunnel(host)
                                            WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
@@ -397,9 +414,10 @@ export class PostgresCatalogStore implements CatalogStore {
         limit,
         now - PAYERS_WINDOW_MS,
         TUNNEL_HOSTS,
+        now - CURATION_VALID_MS,
       ],
     );
-    return this.hitsOf(rows);
+    return this.hitsOf(rows, now);
   }
 }
 

@@ -99,17 +99,18 @@ export interface CatalogStore {
   upsert(entry: CatalogEntry): Promise<UpsertOutcome>;
   /**
    * Matching entries in insertion order, with no ranking. An upsert of an existing key keeps its
-   * place, so offset paging doesn't shift each time a resource settles again.
+   * place, so offset paging doesn't shift each time a resource settles again. An entry is
+   * `curated` when its proof was checked in the 30 days before `now`, the app's clock, in ms.
    */
-  list(query: CatalogQuery): Promise<CatalogPage>;
+  list(query: CatalogQuery, now: number): Promise<CatalogPage>;
   /**
    * With `meaning`, entries whose vector of that model is close to it (cosine similarity 0.60 or
    * more), ranked by meaning and by words fused (ADR 0014); words never add an entry. Without it,
    * entries that hold a word of `text`, ranked by words: a word in the name counts most, then
    * tags, description and parameters, and each repeat counts again (threat model, "Ranking by
    * repeated words"). Either rank is then multiplied by the listing's quality factor q: its paying
-   * wallets from 30 days before `now` on, read from the settlements, a tunnel host and an empty
-   * description (ADR 0014); `now` is the app's clock, in ms. Equal ranks go by key, so a page that
+   * wallets from 30 days before `now` on, read from the settlements, a proof checked in the same
+   * 30 days, a tunnel host and an empty description (ADR 0014); `now` is the app's clock, in ms. Equal ranks go by key, so a page that
    * starts `after` a result goes on where the page before stopped, unless a write between the
    * pages moved the ranks.
    */

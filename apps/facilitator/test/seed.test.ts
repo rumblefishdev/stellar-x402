@@ -181,7 +181,7 @@ describe("seedHosts (0155)", () => {
       { url: `${seller.url}/a`, outcome: "refreshed" },
       { url: `${seller.url}/b`, outcome: "not_askable", reason: "not_402" },
     ]);
-    expect((await store.list({ limit: 10, offset: 0 })).total).toBe(1);
+    expect((await store.list({ limit: 10, offset: 0 }, Date.now())).total).toBe(1);
     // /a cost one request: its 402 named the listing and was the check's answer.
     expect(wait.mock.calls).toEqual([[1_000]]); // decision 12 (W237): a request a second
     expect(seller.userAgents[0]).toBe(SELLER_USER_AGENT);

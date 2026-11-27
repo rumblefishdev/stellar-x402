@@ -22,7 +22,8 @@ import { noSearchModel } from "./vectors.js";
 
 const PAY_A = Keypair.random().publicKey();
 const PAY_B = Keypair.random().publicKey();
-const CHECKED_AT = Date.parse("2026-11-27T10:00:00Z");
+// The app clock: a proof older than 30 days would not count.
+const CHECKED_AT = Date.now();
 
 /** A listing the cataloger wrote, its words holding "weather". */
 async function listing(
@@ -113,7 +114,7 @@ describe("CatalogStore: curated", () => {
   });
 
   it("marks a listing in list curated iff its network, host and payTo have a curated record", async () => {
-    const { items } = await stores.catalog.list({ limit: 10, offset: 0 });
+    const { items } = await stores.catalog.list({ limit: 10, offset: 0 }, Date.now());
     expect(curatedOf(items)).toEqual(EXPECTED);
   });
 
@@ -130,7 +131,7 @@ describe("CatalogStore: curated", () => {
       curated: false,
       checkedAt: null,
     });
-    const { items } = await stores.catalog.list({ limit: 10, offset: 0 });
+    const { items } = await stores.catalog.list({ limit: 10, offset: 0 }, Date.now());
     expect(curatedOf(items)["https://pogoda.pl/forecast"]).toBe(false);
   });
 });

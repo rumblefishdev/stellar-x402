@@ -80,7 +80,7 @@ function setup(deps: Partial<CatalogerDeps> = {}) {
     curation,
     ...deps,
   });
-  const list = async () => (await stores.catalog.list({ limit: 10, offset: 0 })).items;
+  const list = async () => (await stores.catalog.list({ limit: 10, offset: 0 }, Date.now())).items;
   const attempts = async () =>
     (
       await db.pool.query<Record<string, unknown>>(
