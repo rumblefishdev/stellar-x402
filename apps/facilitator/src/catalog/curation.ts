@@ -93,6 +93,8 @@ export function createCuration({
     }
   }
 
+  // Not the SDK's `StellarToml.Resolver`: it fetches with no deadline and no public-address guard
+  // (@stellar/stellar-sdk 16.4.1 `lib/esm/stellartoml/index.js`), and the host here is a seller's.
   async function readToml(tomlUrl: string): Promise<string> {
     const fetch = guardedFetch(
       { ...limits, maxResponseBytes: STELLAR_TOML_BYTES },
