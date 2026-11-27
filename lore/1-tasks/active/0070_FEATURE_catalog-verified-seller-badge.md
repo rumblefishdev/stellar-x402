@@ -46,16 +46,27 @@ else's account doesn't look as trusted as the real seller.
 
 ## Implementation
 
-- When a listing's 402 check passes, read the `payTo` account's `home_domain` and the resource
-  host's `stellar.toml`; mark the listing verified when both point at each other.
-- Show the mark in `/discovery/resources`; a listing without it stays listed.
-- Decide with the owner (from 0154, ADR 0014 "Curation"): a verified listing is the search's
-  curated one, so this task sets its bonus in the quality factor q and how that bonus meets q's
-  1.2 cap. Until then no listing is curated.
+- On a paid call whose listing passes its 402 check, at most once per 6 h per host, read the
+  host's `stellar.toml` and the `payTo` account's `home_domain` on the facilitator's network. The
+  listing is curated when `ACCOUNTS` lists the `payTo` and `home_domain` is the resource host.
+- Keep the result per network, host and `payTo`, with when it was checked. A failed check
+  (timeout, network error, no file) counts as no proof until a check passes, is logged, and does
+  not start the 6 h wait.
+- Show `curated: true|false` on each item of `/discovery/resources` and `/discovery/search`, and
+  in the MCP server's list and search results; a listing without the proof stays listed.
+- A curated listing's q is multiplied by 1.1, inside q's 1.2 cap (ADR 0014 "Curation"), once q
+  from 0154 is on `develop`.
+- Out of scope: a contract (`C…`) `payTo` has no `home_domain`, so it is never curated.
 
 ## Acceptance Criteria
 
 - [ ] Given a seller whose `stellar.toml` lists its `payTo` and whose account's `home_domain` is
-      the resource host, when its listing is checked, then the listing is marked verified
+      the resource host, when its listing is checked, then the listing is curated
 - [ ] Given a page that names another domain's `payTo`, when it is checked, then it is listed
-      without the mark
+      with `curated: false`
+- [ ] Given a host checked less than 6 h ago, when another paid call comes, then it is not checked
+      again
+- [ ] Given a check that fails, when the listing is read, then it is not curated and the failure
+      is logged
+- [ ] `curated` is shown in `/discovery/resources`, `/discovery/search` and the MCP results
+- [ ] A curated listing's q is multiplied by 1.1 and stays at most 1.2
