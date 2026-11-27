@@ -55,9 +55,10 @@ export interface CurationDeps {
 
 /**
  * Checks a seller's `stellar.toml` proof on a paid call (0070), at most once per 6 h per host and
- * account. A check that fails (no answer, no file, not TOML, the RPC) leaves the listing without
- * the proof until one passes, logged, and keeps the last finished check's time, so the next paid
- * call checks again. Never throws.
+ * account. Any answer from the host finishes the check, a status other than 200 as no proof. A
+ * check that fails (the host cannot be reached, the file is not TOML, the RPC) leaves the listing
+ * without the proof until one passes, logged, and keeps the last finished check's time, so the
+ * next paid call checks again. Never throws.
  */
 export function createCuration({
   store,
@@ -80,8 +81,9 @@ export function createCuration({
       if (checkedAt !== null && now() - checkedAt < CURATION_RECHECK_MS) return;
       const started = now();
       const toml = await readToml(stellarTomlUrl(url, limits.allowInsecureLocal));
-      const homeDomain = await readHomeDomain(payTo);
-      const curated = provesPayTo(toml, homeDomain, key.host, payTo);
+      // A host that answers without the file has given its answer: it proves nothing.
+      const curated =
+        toml !== undefined && provesPayTo(toml, await readHomeDomain(payTo), key.host, payTo);
       await store.put({ ...key, curated, checkedAt: started });
     } catch (error) {
       logger.warn("curation_check_failed", { ...key, reason: String(error) });
@@ -95,13 +97,14 @@ export function createCuration({
 
   // Not the SDK's `StellarToml.Resolver`: it fetches with no deadline and no public-address guard
   // (@stellar/stellar-sdk 16.4.1 `lib/esm/stellartoml/index.js`), and the host here is a seller's.
-  async function readToml(tomlUrl: string): Promise<string> {
+  /** The host's file, or `undefined` when it answers with a status other than 200. */
+  async function readToml(tomlUrl: string): Promise<string | undefined> {
     const fetch = guardedFetch(
       { ...limits, maxResponseBytes: STELLAR_TOML_BYTES },
       AbortSignal.timeout(limits.timeoutMs),
     );
     const response = await fetch(tomlUrl, { headers: { "user-agent": SELLER_USER_AGENT } });
-    if (response.status !== 200) throw new Error(`stellar.toml answered ${response.status}`);
+    if (response.status !== 200) return undefined;
     return await response.text();
   }
 

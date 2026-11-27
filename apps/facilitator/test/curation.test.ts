@@ -246,10 +246,40 @@ describe("createCuration: when it checks", () => {
   });
 });
 
-describe("createCuration: a failed check", () => {
-  it("stores curated false with no checkedAt, and warns, when the file is missing (404)", async () => {
+describe("createCuration: an answer without the file", () => {
+  it("stores curated false with checkedAt, without reading the account, when the file is missing (404)", async () => {
     seller.reply = async () => ({ status: 404 });
-    const { store, key, logger, refresh } = setup();
+    const { store, key, logger, getLedgerEntries, refresh } = setup();
+    await refresh();
+    expect(await store.get(key)).toEqual({ ...key, curated: false, checkedAt: START });
+    expect(getLedgerEntries).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("stores curated false with the new checkedAt when a recheck answers 500", async () => {
+    seller.reply = async () => ({ status: 500 });
+    const { store, key, clock, refresh } = setup();
+    await store.put({ ...key, curated: true, checkedAt: START });
+    clock.now = START + CURATION_RECHECK_MS + MINUTE;
+    await refresh();
+    expect(await store.get(key)).toEqual({ ...key, curated: false, checkedAt: clock.now });
+  });
+
+  it("does not check again within 6 hours of a 404", async () => {
+    seller.reply = async () => ({ status: 404 });
+    const { clock, refresh } = setup();
+    await refresh();
+    clock.now = START + MINUTE;
+    await refresh();
+    expect(seller.requests).toHaveLength(1);
+  });
+});
+
+describe("createCuration: a failed check", () => {
+  it("stores curated false with no checkedAt, and warns, when the RPC read fails", async () => {
+    seller.files[TOML_PATH] = `ACCOUNTS = ["${PAY_TO}"]\n`;
+    const { store, key, logger, getLedgerEntries, refresh } = setup();
+    getLedgerEntries.mockRejectedValue(new Error("rpc down"));
     await expect(refresh()).resolves.toBeUndefined();
     expect(await store.get(key)).toEqual({ ...key, curated: false, checkedAt: null });
     expect(logger.warn).toHaveBeenCalledWith(
@@ -264,8 +294,9 @@ describe("createCuration: a failed check", () => {
   });
 
   it("keeps the previous checkedAt and stores curated false when a recheck fails", async () => {
-    seller.reply = async () => ({ status: 500 });
-    const { store, key, clock, refresh } = setup();
+    seller.files[TOML_PATH] = `ACCOUNTS = ["${PAY_TO}"]\n`;
+    const { store, key, clock, getLedgerEntries, refresh } = setup();
+    getLedgerEntries.mockRejectedValue(new Error("rpc down"));
     await store.put({ ...key, curated: true, checkedAt: START });
     clock.now = START + CURATION_RECHECK_MS + MINUTE;
     await refresh();
@@ -273,10 +304,10 @@ describe("createCuration: a failed check", () => {
   });
 
   it("checks again at once on the refresh after a failure", async () => {
-    seller.reply = async () => ({ status: 404 });
-    const { store, key, clock, refresh } = setup();
-    await refresh();
     seller.files[TOML_PATH] = `ACCOUNTS = ["${PAY_TO}"]\n`;
+    const { store, key, clock, getLedgerEntries, refresh } = setup();
+    getLedgerEntries.mockRejectedValueOnce(new Error("rpc down"));
+    await refresh();
     clock.now = START + MINUTE;
     await refresh();
     expect(seller.requests).toHaveLength(2);
@@ -331,15 +362,6 @@ describe("createCuration: a failed check", () => {
       curated: false,
       checkedAt: null,
     });
-    expect(logger.warn).toHaveBeenCalledWith("curation_check_failed", expect.anything());
-  });
-
-  it("fails when the RPC read fails", async () => {
-    seller.files[TOML_PATH] = `ACCOUNTS = ["${PAY_TO}"]\n`;
-    const { store, key, logger, getLedgerEntries, refresh } = setup();
-    getLedgerEntries.mockRejectedValue(new Error("rpc down"));
-    await expect(refresh()).resolves.toBeUndefined();
-    expect(await store.get(key)).toEqual({ ...key, curated: false, checkedAt: null });
     expect(logger.warn).toHaveBeenCalledWith("curation_check_failed", expect.anything());
   });
 

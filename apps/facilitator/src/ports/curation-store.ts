@@ -12,8 +12,9 @@ export interface CurationRecord extends CurationKey {
   /** The host's `stellar.toml` lists `payTo`, and the account's `home_domain` is the host. */
   curated: boolean;
   /**
-   * App clock ms of the last check that finished; `null` when none has. A failed check leaves it,
-   * so the next paid call checks again (0070).
+   * App clock ms of the last check that finished, with any answer from the host; `null` when none
+   * has. A failed check (the host cannot be reached, the RPC) leaves it, so the next paid call
+   * checks again (0070).
    */
   checkedAt: number | null;
 }

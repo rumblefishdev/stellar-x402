@@ -194,11 +194,12 @@ The measurements are in
 - **Curation.** A listing is curated when its seller proves its `payTo` with `stellar.toml` both
   ways (task 0070): the host's file lists the `payTo` in `ACCOUNTS`, and the account's
   `home_domain` is the host. The facilitator checks it on a paid call, at most once per 6 hours
-  per host and account; a failed check counts as no proof. A curated listing's q gets × 1.1, about
-  what 3 paying wallets give, within the 1.2 cap: a curated listing with 10 wallets still has
-  1.2. On 3,000 CDP listings and 40 real queries, × 1.1 raised a curated listing a median of 3
-  places. Every listing shows `curated` in `/discovery/resources` and `/discovery/search`. A
-  contract (`C…`) `payTo` has no `home_domain`, so it is never curated.
+  per host and account. Any answer from the host finishes the check, a missing file as no proof;
+  a host that cannot be reached counts as no proof and is asked again on the next paid call. A
+  curated listing's q gets × 1.1, about what 3 paying wallets give, within the 1.2 cap: a curated
+  listing with 10 wallets still has 1.2. On 3,000 CDP listings and 40 real queries, × 1.1 raised
+  a curated listing a median of 3 places. Every listing shows `curated` in `/discovery/resources`
+  and `/discovery/search`. A contract (`C…`) `payTo` has no `home_domain`, so it is never curated.
 - **When the ranking is served.** There is no separate curation-only mode. 0135's run decides
   when search is offered on pubnet (task 0120): not before it reaches nDCG@10 ≥ 0.75, as §4
   promises.

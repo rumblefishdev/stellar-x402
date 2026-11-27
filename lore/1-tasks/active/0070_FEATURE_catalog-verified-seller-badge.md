@@ -49,9 +49,10 @@ else's account doesn't look as trusted as the real seller.
 - On a paid call whose listing passes its 402 check, at most once per 6 h per host, read the
   host's `stellar.toml` and the `payTo` account's `home_domain` on the facilitator's network. The
   listing is curated when `ACCOUNTS` lists the `payTo` and `home_domain` is the resource host.
-- Keep the result per network, host and `payTo`, with when it was checked. A failed check
-  (timeout, network error, no file) counts as no proof until a check passes, is logged, and does
-  not start the 6 h wait.
+- Keep the result per network, host and `payTo`, with when it was checked. Any answer from the
+  host finishes the check (a status other than 200 is no proof) and starts the 6 h wait. A failed
+  check (timeout, network error, the RPC) counts as no proof until a check passes, is logged, and
+  does not start the 6 h wait.
 - Show `curated: true|false` on each item of `/discovery/resources` and `/discovery/search`, and
   in the MCP server's list and search results; a listing without the proof stays listed.
 - A curated listing's q is multiplied by 1.1, inside q's 1.2 cap (ADR 0014 "Curation"), once q
