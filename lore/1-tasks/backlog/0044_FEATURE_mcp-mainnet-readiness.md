@@ -26,6 +26,12 @@ history:
     note: >
       0102 proposes to do the first step itself, in the SDK the paid round trip moves to; noted
       under "First step". Waiting for karolkow's word in PR #246.
+  - date: "2026-11-27"
+    status: backlog
+    who: bstruzyk
+    note: >
+      Noted from 0068 under "Payee allowlist": the listing check holds a seller to its listing,
+      not to a payee anyone vouched for, so the allowlist is still needed.
 ---
 
 # Prepare the MCP server for mainnet: assets, networks, payee allowlist, key storage
@@ -56,6 +62,9 @@ is decided with the owner (options and a recommendation) before it is built.
 
 - **Payee allowlist.** Today the agent may pay any `payTo` a catalog or a prompt brings
   (x402-bridge has `MCP_BRIDGE_ALLOWED_PAYTO`). Optional allowlist of payees and/or hosts.
+  Since 0068, `call_paid_http` refuses a live `payTo` other than the listing's the agent passed
+  (`payto_changed`). That holds a seller to what it listed, not to a payee anyone vouched for: a
+  listing can still name any account (ADR 0008), and a call without a listing is held to nothing.
 - **Key storage.** The secret key sits in plain text in the MCP client's config file. Options: the
   OS keychain, an external signer, a hardware wallet.
 - **Catalog guard.** The catalog request has a time limit but no address guard or size cap (0037,

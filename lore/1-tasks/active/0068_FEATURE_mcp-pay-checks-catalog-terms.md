@@ -6,7 +6,7 @@ status: active
 owner: bstruzyk
 milestone: 2
 related_adr: ["0008"]
-related_tasks: ["0063", "0037", "0137", "0044"]
+related_tasks: ["0063", "0037", "0137", "0044", "0162"]
 tags: [mcp, bazaar, security, before-pubnet, priority-medium, effort-small, dev-tools]
 links:
   - ../../../docs/adr/0008-bazaar-catalog-integrity.md
@@ -64,7 +64,52 @@ can't lure an agent into paying a price it never saw.
 
 ## Acceptance Criteria
 
-- [ ] Given a listing at price P, when the live 402 asks more than P in the same asset, then
-      nothing is signed and the tool returns an error code naming the change
-- [ ] Given a listing with payTo S, when the live 402 names another payTo, then nothing is signed
-- [ ] Given a live price at or below the listing's, when the agent calls, then it pays as today
+- [x] Given a listing at price P, when the live 402 asks more than P in the same asset, then
+      nothing is signed and the tool returns an error code naming the change (`price_raised`)
+- [x] Given a listing with payTo S, when the live 402 names another payTo, then nothing is signed
+      (`payto_changed`)
+- [x] Given a live price at or below the listing's, when the agent calls, then it pays as today
+
+## Design Decisions
+
+### From Plan
+
+1. **The agent passes the listing.** `call_paid_http` takes an optional `listing`, the
+   `list_resources` / `search_resources` item as it came. No route change, and no doubt about which
+   of a URL's listings (one per network + payTo, ADR 0008) the agent saw.
+2. **No listing pays as today** (decided with the owner, 2026-11-27). Without a listing the agent
+   saw no catalog price, so nothing lured it; the limits still hold, and refusing would make the tool
+   useless for sellers that aren't in the Bazaar. The result's `listingCheck` says `passed` or
+   `none`, so skipping the check is never silent.
+
+### Emerged
+
+3. **A listing for another call is refused** (`invalid_input`, the seller never called): another
+   URL, another HTTP method, another network than the one this server pays on, or not `http`.
+   Otherwise any cheap listing could stand in for the seller's. A listing for another network is
+   `invalid_input`, not `terms_changed`: `search_resources` gives both networks' listings of a
+   URL, and the choice is the agent's, not a change by the seller. A listing without its `type` or
+   `input.method` is refused too (the catalog's items always carry both): without the method, a
+   listing for one method could vouch for another's price, as ADR 0008 keys a listing by method.
+   The URL is compared canonically, its query and fragment dropped before it is canonicalized, so
+   a long query is not taken for another URL; a called URL the catalog could not list is refused
+   with its own message. Only a segment that is exactly `:` (what `eraseParamNames` leaves) is a
+   wildcard; `:x` in a concrete path matches itself.
+4. **The check is in the SDK** (`BuyerConfig.quoted`), first in the offer policy, so it runs before
+   the budget is counted and before signing. A seller offer is kept only with a quoted payTo for its
+   network and the same scheme, network, asset at most at the quoted amount.
+5. **A third code, `terms_changed`**, for an offer whose scheme, network or asset the listing
+   doesn't have. When offers fail for different reasons the code is the first of `payto_changed`,
+   `price_raised`, `terms_changed`. It is only seen for offers the buyer's schemes can pay: upstream's
+   `x402Client` drops the others before any policy runs, so a seller that now offers only another
+   network or scheme gets `unsupported_payment`. Mapping that failure to `terms_changed` would
+   mean telling it from other upstream failures by its message; nothing is paid either way, so the
+   docs say it instead.
+6. **The catalog tools tell the agent to pass the item.** `list_resources` and `search_resources`
+   say "pass its item to call_paid_http as listing": without that an agent wouldn't know, and the
+   check would rarely run. ADR 0008's note on the `payTo` attack now says how 0068 closes it.
+7. **A refused agent is told not to call again without the listing.** An agent refused with
+   `payto_changed`, `price_raised` or `terms_changed` would most often drop the parameter that
+   failed and pay the very terms it was refused. The MCP message (not the SDK's, which has no agent)
+   and the tool description say to choose another listing instead.
+

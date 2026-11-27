@@ -4,8 +4,8 @@
 - Date: 2026-10-07, amended 2026-10-20 (task 0032: the `scheme` filter), 2026-10-22 (task 0053:
   resource URLs and empty fields), 2026-10-26 (task 0054: resource hosts) and 2026-10-28 (task
   0063: listings from the seller's own 402, entry limits), 2026-11-10 (task 0130: a wrong type
-  in an optional field), 2026-11-20 (task 0155: the operator's seed) and 2026-11-20 (task 0085:
-  the seller-fetch reasons)
+  in an optional field), 2026-11-20 (task 0155: the operator's seed), 2026-11-20 (task 0085:
+  the seller-fetch reasons) and 2026-11-27 (task 0068: the buyer held to the listing)
 
 ## Context
 
@@ -246,8 +246,13 @@ settlement.
 - The check proves how a URL answers, not that the `payTo` belongs to the URL's owner. Whoever runs
   `eve.example/api` can answer "pay Alice", pay Alice 1 stroop and list "`eve.example/api`, paid to
   Alice": Alice's account then shows a service she doesn't run, and Eve can later change the 402 to
-  her own account. Task 0068 (the buyer's MCP refuses a live `payTo` or price the listing doesn't
-  state) closes the second part and is required before pubnet. Proof of the account is not required
+  her own account. Task 0068 closes the second part: the buyer's MCP takes the listing the agent
+  chose with `call_paid_http` and refuses, before signing, a live `payTo` other than the listing's
+  for its network (`payto_changed`), a higher price for the same scheme, network and asset
+  (`price_raised`), or terms the listing doesn't offer (`terms_changed`). A call without a listing
+  is not held to the catalog, only to the buyer's limits, and says so (`listingCheck: "none"`): it
+  found no listed price to be lured by. The listing comes from the agent, so this holds the seller to
+  what the agent saw, not the agent to the catalog. Proof of the account is not required
   for a listing: none of the 10 Stellar accounts in the largest public catalog could show one through
   `stellar.toml` (SEP-1) on 2026-10-29, so it would empty the Stellar catalog.
 - A listing keeps the path values the seller's 402 carries (`info.input.pathParams`). 173 of 198
