@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import * as bazaarLib from "@stellar-x402/bazaar";
-import { isStellarNetwork } from "@stellar-x402/config";
+import { isStellarNetwork, type StellarNetwork } from "@stellar-x402/config";
 import type { PaymentRequired } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type { Logger } from "../logger.js";
@@ -61,6 +61,10 @@ export interface CatalogerDeps {
   /** A seller slower than this to answer the check gave no usable answer. */
   sellerTimeoutMs?: number;
   checksPerHost?: number;
+  /** The `stellar.toml` proof (0070), checked on each paid call whose listing is in the catalog. */
+  curation?: {
+    refresh(network: StellarNetwork, resourceUrl: string, payTo: string): Promise<void>;
+  };
   /** The app clock, ms. */
   now?: () => number;
 }
@@ -133,6 +137,7 @@ export function createCataloger({
   listLocal = false,
   sellerTimeoutMs = 10_000,
   checksPerHost = CHECKS_PER_HOST,
+  curation,
   now = Date.now,
 }: CatalogerDeps): Cataloger {
   const inFlight = new Set<Promise<void>>();
@@ -283,7 +288,8 @@ export function createCataloger({
       stage = "compare";
       const stored = await store.get(key);
       if (stored && bazaarLib.sameListing(stored, echoed.resource)) {
-        return await finish({ ...tried, stage: "payment", outcome: "unchanged" }, fields, origin);
+        await finish({ ...tried, stage: "payment", outcome: "unchanged" }, fields, origin);
+        return await refreshCuration(key, result.resourceUrl, fields);
       }
 
       // From here the copy differs from the stored listing: kept to compare with the answer.
@@ -298,13 +304,14 @@ export function createCataloger({
         return await finish({ ...compared, ...skipped }, fields, origin);
       }
 
-      await checkSeller(fields, origin, {
+      const ended = await checkSeller(fields, origin, {
         url: result.resourceUrl,
         input: result.discovered.discoveryInfo.input,
         key,
         ledger: record.ledger,
         compared,
       });
+      if (ended.outcome === "refreshed") await refreshCuration(key, result.resourceUrl, fields);
     } catch (error) {
       internalError(stage, fields, origin, error);
       // Still an attempt (row 23), named by the step it failed at.
@@ -315,6 +322,16 @@ export function createCataloger({
         detail: String(error),
       } as const;
       await finish({ ...known, ...failed }, fields, origin);
+    }
+  }
+
+  /** The paid listing is in the catalog: check its seller's `stellar.toml` proof (0070). */
+  async function refreshCuration(key: CatalogKey, resourceUrl: string, fields: LogFields) {
+    if (!curation) return;
+    try {
+      await curation.refresh(key.network, resourceUrl, key.payTo);
+    } catch (error) {
+      report(() => logger.error("curation_refresh_failed", { ...fields, resourceUrl, error }));
     }
   }
 

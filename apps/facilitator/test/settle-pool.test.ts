@@ -727,7 +727,10 @@ describe("main()'s composition (compose)", () => {
         await cataloger.drain();
         const { items } = await deps.stores.catalog.list({ limit: 10, offset: 0 });
         expect(items).toHaveLength(listed);
-        expect(seller.requests).toHaveLength(listed);
+        // The listing's 402, then, once it is listed, its host's stellar.toml proof (0070).
+        expect(seller.requests.map((request) => request.url)).toEqual(
+          listed ? ["/users/42", "/.well-known/stellar.toml"] : [],
+        );
       } finally {
         seller.server.close();
       }
