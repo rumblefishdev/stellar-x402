@@ -131,13 +131,31 @@ exists with its actions off (decision 26).
 says "no alarm to check" for it. Its check is the topic's `NumberOfMessagesPublished`
 (docs/monitoring.md, monitoring-heartbeat, step 1), and its deploy `make deploy-production-heartbeat`.
 
-To turn one on: `make check-series GROUP=<group>` until it passes, then set the flag (and any
-threshold it needs; synth refuses a group without one), `make deploy-production-alarms`, and
-`make fire-test`. A series that exists can already be past its threshold, so a Level alarm
+Since 0139's switch a group's rows go one of two ways (`route` in `src/lib/rules.ts`): a row on
+the server's metrics is a Prometheus rule on the monitoring VM, and a row that stays in CloudWatch
+(the off-server check's, the uptime probe's, the log path's, and `audit-disk`, `certificate` and
+`credentials-stale`) is an alarm. `host` has both. `make check-series GROUP=<group>` says which:
+for a group of rules alone it lists them and stops.
+
+To turn on a group of rules: set the flag (and any threshold it needs) in `envs/production.json`
+and run `make rules`, in one pull request; the tests fail while the committed
+`deploy/metrics/rules/x402-production.yml` differs from what `make rules` writes, and
+`test/config.test.ts` pins the groups that are on. After the merge, soroban-infrastructure pins the
+new commit (`x402_rules_commit`, `x402_rules_sha256`, its `monitoring/README.md`) and runs its
+playbook. Then, on the VM: the group's rules are listed (`/api/v1/rules`), and each selector
+returns a value on the healthy side of its threshold, not only a series that exists, since the host
+probe writes a value past the threshold for a job that never ran (`snapshot_age_seconds` at 1e9).
+Fire each new rule once on purpose and record it in
+[docs/monitoring.md, As Prometheus rules](../docs/monitoring.md#as-prometheus-rules). No AWS
+deploy. `snapshots` went on this way (#268, soroban-infrastructure#26).
+
+To turn on a group of alarms: `make check-series GROUP=<group>` until it passes, then set the flag
+(and any threshold it needs; synth refuses a group without one), `make deploy-production-alarms`,
+and `make fire-test`. A series that exists can already be past its threshold, so a Level alarm
 would fire on its first evaluation. Before the deploy, read the latest values of the group's
 Level signals (`aws cloudwatch get-metric-statistics --statistics Maximum` over the last hour):
-for `facilitator` and `host`, `pool_quarantined`, `disk_used_percent` on `/`,
-`certificate_days_left` and `credentials_age_seconds`. After `make fire-test`, list what is in
+for `host`, `certificate_days_left` and `credentials_age_seconds` (`facilitator`'s
+and the disk's are rules now). After `make fire-test`, list what is in
 ALARM (`aws cloudwatch describe-alarms --state-value ALARM --alarm-name-prefix x402-production-
 --query 'MetricAlarms[].[AlarmName,StateReason]'`) and say in `#stellar-x402-bot` that those are
 the state before the deploy, not new incidents. The check lists every series the group reads, and fails on one that is written
