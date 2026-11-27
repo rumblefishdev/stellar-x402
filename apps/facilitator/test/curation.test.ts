@@ -48,10 +48,11 @@ describe("provesPayTo", () => {
     expect(provesPayTo(`ACCOUNTS = [1, 2]\n`, "pogoda.pl", "pogoda.pl", PAY_TO)).toBe(false);
   });
 
-  it("throws on a file that is not TOML", () => {
-    expect(() =>
-      provesPayTo(`ACCOUNTS = ["${PAY_TO}"`, "pogoda.pl", "pogoda.pl", PAY_TO),
-    ).toThrow();
+  it("is false on a file that is not TOML, such as a host's own HTML page", () => {
+    expect(provesPayTo(`ACCOUNTS = ["${PAY_TO}"`, "pogoda.pl", "pogoda.pl", PAY_TO)).toBe(false);
+    expect(provesPayTo("<!doctype html><html></html>", "pogoda.pl", "pogoda.pl", PAY_TO)).toBe(
+      false,
+    );
   });
 });
 
@@ -297,12 +298,12 @@ describe("createCuration: a failed check", () => {
     expect(logger.warn).toHaveBeenCalledWith("curation_check_failed", expect.anything());
   });
 
-  it("fails on a file that is not TOML", async () => {
-    seller.files[TOML_PATH] = `ACCOUNTS = ["${PAY_TO}"`;
+  it("finishes the check on a file that is not TOML, as on any answer from the host", async () => {
+    seller.files[TOML_PATH] = "<!doctype html><html></html>";
     const { store, key, logger, refresh } = setup();
-    await expect(refresh()).resolves.toBeUndefined();
-    expect(await store.get(key)).toEqual({ ...key, curated: false, checkedAt: null });
-    expect(logger.warn).toHaveBeenCalledWith("curation_check_failed", expect.anything());
+    await refresh();
+    expect(await store.get(key)).toEqual({ ...key, curated: false, checkedAt: START });
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it("fails when the host does not answer in time", async () => {

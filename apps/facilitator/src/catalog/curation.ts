@@ -16,7 +16,8 @@ export const STELLAR_TOML_BYTES = 100 * 1024;
  * Whether a seller proves its `payTo` both ways (SEP-1): the host's `stellar.toml` lists it in
  * `ACCOUNTS`, and the account's `home_domain` is the host. One way alone proves nothing: anyone
  * can list any account, and any account can name any domain. Domain names compare without case
- * (RFC 4343). Throws on a file that is not TOML.
+ * (RFC 4343). A file that is not TOML proves nothing: many hosts answer every path, this one too,
+ * with their own page.
  */
 export function provesPayTo(
   toml: string,
@@ -24,7 +25,12 @@ export function provesPayTo(
   host: string,
   payTo: string,
 ): boolean {
-  const accounts = parse(toml).ACCOUNTS;
+  let accounts: unknown;
+  try {
+    accounts = parse(toml).ACCOUNTS;
+  } catch {
+    return false;
+  }
   return (
     Array.isArray(accounts) &&
     accounts.includes(payTo) &&
