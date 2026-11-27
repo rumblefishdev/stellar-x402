@@ -287,16 +287,14 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
   `unexpected_verify_error`, which moves nothing, but the shared client's next read (the AD-22
   ledger read, a fee-stats read) fails there and moves every caller (0045 decision 21). Keeping
   traffic there needs only to keep `RPC_URLS[0]` failing.
-- **Mitigation:** Calls return to `RPC_URLS[0]` only when a probe (`getLatestLedger`, no client
-  payload) finds it healthy and at most 2 ledgers behind, so no payload can bring it back early or
-  keep traffic away once it answers. A failure of a fallback doesn't bring it back either: calls go
-  to the next fallback, or stay and probe at once (0045 decision 26). A verify call never moves the
-  shared URL on an answer, and an
+- **Mitigation:** A read moves calls only to a URL that answers first and trails the newest
+  ledger the URLs last reported by at most 2, so a fallback the client steers traffic to is one that
+  keeps up (0049). A verify call never moves the shared URL on an answer, and an
   odd payload's `unexpected_verify_error` doesn't move it either (0045 decision 22). A client's own
   verdict can't be chosen this way: a rejection is never failed over.
 - **Residual risk:** Until the rate limit (0023), anyone can spend `RPC_URLS[0]`'s quota, and
-  traffic stays on the fallback while they do. Each probe interval then costs one probe, not a
-  user request. The trustline lookup (0078) adds to that: it runs on the shared client after
+  traffic moves to the fallback. It stays there after they stop, until the fallback fails or
+  `RPC_URLS[0]` answers a read first; `rpc-on-fallback` tells the owner it moved. The trustline lookup (0078) adds to that: it runs on the shared client after
   upstream's `simulation_failed`, so a client can trigger it, and with `RPC_URLS[0]` at its quota
   its failed read moves every caller sooner. A payload needs the payer's one auth entry to reach
   it, so one without costs upstream's 1 call; one with a junk entry costs 2, and only a real `#13`
@@ -309,8 +307,9 @@ Scope: upstream verify's failover across `RPC_URLS` (spine AD-3, task 0045).
   nonce is used on chain but not yet on that RPC, a balance spent since its ledger, a revoked SAC
   authorization.
 - **Mitigation:** For `exact`, `/verify` is advisory: `/settle` simulates again through
-  `FallbackRpc` before it submits, and AD-6 refuses a nonce already used. The probe only returns to
-  `RPC_URLS[0]` when it isn't lagging, and `verified` names the URL that answered, so false answers
+  `FallbackRpc` before it submits, and AD-6 refuses a nonce already used. A read moves calls only to a URL
+  at most 2 ledgers behind; a verify failure moves them to the next URL without that check, and
+  `verified` names the URL that answered, so false answers
   can be traced to it.
 - **Residual risk:** A seller that serves on `/verify`'s answer alone, without `/settle`, can serve
   a payment that never settles. For `upto` (0015) `/verify` carries more weight, so its rules must

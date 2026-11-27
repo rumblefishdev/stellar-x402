@@ -491,17 +491,20 @@ The latest ledger read through the facilitator's RPC hasn't moved for over 120 s
 the active endpoint is frozen or unreachable, and verify and settle read stale state. `ready`
 doesn't show this.
 
-1. The `rpc_failover` and `rpc_failback` events say which endpoint is in use. The endpoints are
+1. The `rpc_failover` events say which endpoint is in use. The endpoints are
    named `RPC_URLS[i]#fingerprint`, never by URL.
 2. Fix the endpoint, or reorder `RPC_URLS` ([runbook, Credentials](runbook.md#credentials)).
 
 ### rpc-on-fallback
 
-The facilitator has run on a fallback RPC endpoint for 15 minutes, every sample: a fallback that
-lags answers valid payments with rejections. Its return to OK is the recovery.
+The facilitator has run on an endpoint other than `RPC_URLS[0]` for 15 minutes, every sample:
+another endpoint answered a read first and took the calls over, at most 2 ledgers behind. Calls
+stay on the fastest endpoint that keeps up, so this is not a failure by itself; its return to OK
+means `RPC_URLS[0]` answered first again.
 
-1. The `rpc_failover` event says why endpoint 0 failed.
-2. Fix it, or reorder `RPC_URLS` so a healthy one comes first.
+1. The `rpc_failover` event says why the calls moved (`by`, `reason`).
+2. Check that the endpoint in use keeps up with the network. One that falls behind answers valid
+   payments with rejections: fix it, or take it out of `RPC_URLS`.
 
 ### balance-stale
 

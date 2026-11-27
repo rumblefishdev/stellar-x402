@@ -93,7 +93,7 @@ export function addAvailabilityAlarms(f: Alarms, c: EnvironmentConfig): void {
       threshold: t.rpcStalledSeconds,
       description: {
         what: `The latest ledger on ${network}, read through the facilitator's RPC, has not moved for over ${t.rpcStalledSeconds} s for 5 minutes: the active endpoint is frozen or unreachable, and verify and settle read stale state. ready does not show this.`,
-        next: "Read rpc_failover and rpc_failback in the app logs and check the endpoints in RPC_URLS by their RPC_URLS[i]#fingerprint names; fix or reorder them.",
+        next: "Read rpc_failover in the app logs and check the endpoints in RPC_URLS by their RPC_URLS[i]#fingerprint names; fix or reorder them.",
         noData: FACILITATOR_SILENT,
       },
     });
