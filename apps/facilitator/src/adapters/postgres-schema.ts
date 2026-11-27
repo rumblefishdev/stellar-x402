@@ -416,6 +416,23 @@ ALTER TABLE catalog_search
 ALTER TABLE catalog_search ALTER COLUMN embedding SET STORAGE PLAIN;
 `,
   },
+  {
+    // 0070: each host's `stellar.toml` proof of the account it is paid to, which a paid call
+    // checks at most once per 6 h. A table of its own: the proof is about a host and an account,
+    // which many listings share. A new table, so the release before keeps working: it never
+    // reads it.
+    name: "0022_catalog_curation",
+    sql: `
+CREATE TABLE catalog_curation (
+  network text NOT NULL,
+  host text NOT NULL,
+  pay_to text NOT NULL,
+  curated boolean NOT NULL,
+  checked_at bigint CHECK (checked_at >= 0),
+  PRIMARY KEY (network, host, pay_to)
+);
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

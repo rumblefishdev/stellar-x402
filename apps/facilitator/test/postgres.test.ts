@@ -1488,6 +1488,7 @@ describe("PostgreSQL stores", () => {
           "0018_account_plans",
           "0019_settlement_listing",
           "0020_catalog_search_vector",
+          "0022_catalog_curation",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1527,6 +1528,7 @@ describe("PostgreSQL stores", () => {
         "0018_account_plans",
         "0019_settlement_listing",
         "0020_catalog_search_vector",
+        "0022_catalog_curation",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",
