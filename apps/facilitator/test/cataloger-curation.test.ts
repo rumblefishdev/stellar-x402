@@ -122,14 +122,24 @@ describe("cataloger: curation", () => {
     expect(curation.refresh).toHaveBeenCalledTimes(2);
   });
 
-  it("does not refresh for a payment over the check budget", async () => {
+  it("refreshes for a payment over the check budget, apart from the seller check", async () => {
     const { cataloger, curation } = setup();
     await cataloger.onSuccess(record(valid), "settle");
     // Within the minute: the per-key budget refuses the check of a changed copy.
     await cataloger.onSuccess(record(valid, { description: "Changed" }), "settle");
     await cataloger.drain();
     expect(seller.requests).toHaveLength(1);
-    expect(curation.refresh).toHaveBeenCalledTimes(1);
+    expect(curation.refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not refresh for a listing that is not in the catalog", async () => {
+    const { cataloger, curation, list } = setup();
+    // The seller answers without terms: nothing is listed.
+    seller.reply = async () => ({ status: 200 });
+    await cataloger.onSuccess(record(valid), "settle");
+    await cataloger.drain();
+    expect(await list()).toEqual([]);
+    expect(curation.refresh).not.toHaveBeenCalled();
   });
 
   it("does not refresh for a payment whose listing is rejected", async () => {

@@ -290,8 +290,7 @@ export function createCataloger({
       stage = "compare";
       const stored = await store.get(key);
       if (stored && bazaarLib.sameListing(stored, echoed.resource)) {
-        await finish({ ...tried, stage: "payment", outcome: "unchanged" }, fields, origin);
-        return await refreshCuration(key, result.resourceUrl, fields);
+        return await finish({ ...tried, stage: "payment", outcome: "unchanged" }, fields, origin);
       }
 
       // From here the copy differs from the stored listing: kept to compare with the answer.
@@ -306,14 +305,13 @@ export function createCataloger({
         return await finish({ ...compared, ...skipped }, fields, origin);
       }
 
-      const ended = await checkSeller(fields, origin, {
+      await checkSeller(fields, origin, {
         url: result.resourceUrl,
         input: result.discovered.discoveryInfo.input,
         key,
         ledger: record.ledger,
         compared,
       });
-      if (ended.outcome === "refreshed") await refreshCuration(key, result.resourceUrl, fields);
     } catch (error) {
       internalError(stage, fields, origin, error);
       // Still an attempt (row 23), named by the step it failed at.
@@ -324,13 +322,18 @@ export function createCataloger({
         detail: String(error),
       } as const;
       await finish({ ...known, ...failed }, fields, origin);
+    } finally {
+      // Apart from the seller check (0070): however it ended, a paid listing that is in the
+      // catalog has its seller's `stellar.toml` proof checked.
+      if (known.key && known.url) await refreshCuration(known.key, known.url, fields);
     }
   }
 
-  /** The paid listing is in the catalog: check its seller's `stellar.toml` proof (0070). */
+  /** A paid listing: check its seller's `stellar.toml` proof when it is in the catalog (0070). */
   async function refreshCuration(key: CatalogKey, resourceUrl: string, fields: LogFields) {
     if (!curation) return;
     try {
+      if (!(await store.get(key))) return;
       await curation.refresh(key.network, resourceUrl, key.payTo);
     } catch (error) {
       report(() => logger.error("curation_refresh_failed", { ...fields, resourceUrl, error }));
