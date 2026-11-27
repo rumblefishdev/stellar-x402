@@ -59,3 +59,39 @@ for the facilitator.
       route, then it gets 502 within seconds, the route doesn't run, and a later request is
       served once the facilitator answers
 - [ ] `PaymentGate::connect` and every answer of a connected gate are unchanged
+
+## Implementation Notes
+
+- `src/bazaar.rs`: `template(pattern, path)` turns axum's pattern into the template and the
+  parameters, by the catalog's own rules; `Listing::extension` adds them to the block.
+- `src/axum.rs`: `PaidRoute::required` reads `MatchedPath`; the gate keeps `/supported` in an
+  `Arc<OnceLock<Supported>>`, filled by `connect` or by the first request of `lazy`; a route keeps
+  its terms as `charge` built them and each request completes them.
+- `tests/fixtures/bazaar-route-template.json` is the output of `@x402/extensions` 2.31.0's
+  `declareDiscoveryExtension` and `bazaarResourceServerExtension.enrichDeclaration` for the test
+  seller's listing, not written by hand. The crate's test and `packages/bazaar`'s read the same
+  file.
+
+## Design Decisions
+
+### From Plan
+
+1. **The template is read from axum's `MatchedPath`**, so no seller code changes, and a pattern
+   the catalog would drop gets no template.
+2. **A lazy gate reads on the first request, keeps a success, forgets a failure**, as
+   `prepareHttpServer` does upstream. The read is given at most 5 s.
+
+### Emerged
+
+3. **No `Listing::path_schema`.** The plan had it. Without it the block says
+   `pathParams: {"type": "object"}`, which is what upstream writes by default and the catalog
+   takes; the request's own value is the example. Add it when a seller asks.
+4. **No public `with_route_listing`.** The plan had it. Only the axum layer knows a pattern, so
+   it is `pub(crate)` (`PaymentRequired::listed`); a seller without axum has `with_listing`.
+5. **A failed first read answers what upstream answers, not 502 for everything.** The plan said
+   502 with a message in every case. `@x402/express` 2.31.0 answers 502 with the message only for
+   a `FacilitatorResponseError` (late, or not readable) and 500 `Internal Server Error` for the
+   rest, a network the facilitator does not settle included. The crate's rule is to answer as
+   upstream (0136 decision 23), so it does; the cause goes to `on_event`.
+6. **A failed read is not remembered.** Every request during an outage waits up to 5 s for
+   `/supported`. A seller's own request limit bounds that; marked `shortcut:` in the code.
