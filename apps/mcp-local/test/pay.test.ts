@@ -623,3 +623,147 @@ describe("without payment config", () => {
     expect(seller.payments).toHaveLength(0);
   });
 });
+
+describe("call_paid_http with the listing the agent chose", () => {
+  const OTHER = "GOTHERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+  /** A search_resources item for the fake seller's forecast, as the catalog would list it. */
+  function listing(offer: Partial<{ amount: string; payTo: string; asset: string }> = {}) {
+    return {
+      resource: `${seller.url}/forecast`,
+      type: "http",
+      description: "Forecast",
+      accepts: [
+        {
+          scheme: "exact",
+          network: "stellar:testnet",
+          amount: "10000",
+          asset: USDC,
+          payTo: PAY_TO,
+          maxTimeoutSeconds: 60,
+          extra: { areFeesSponsored: true },
+          ...offer,
+        },
+      ],
+      input: { type: "http", method: "GET", queryParams: { city: "Warsaw" } },
+    };
+  }
+
+  async function payWith(
+    chosen: unknown,
+    path = "/forecast?city=Warsaw",
+    method = "GET",
+  ): Promise<Paid & { isError?: boolean; listingCheck?: string }> {
+    const result = await client.callTool({
+      name: "call_paid_http",
+      arguments: { url: `${seller.url}${path}`, method, listing: chosen },
+    });
+    return { isError: result.isError as boolean | undefined, ...payload(result) };
+  }
+
+  it("refuses, before signing, a live price above the listing's", async () => {
+    seller.price = "10001";
+    const result = await payWith(listing());
+    expect(result.error.code).toBe("price_raised");
+    expect(result.error.message).toContain("do not call again without this one");
+    expect(seller.payments).toHaveLength(0);
+  });
+
+  it("refuses, before signing, a live payTo other than the listing's", async () => {
+    const result = await payWith(listing({ payTo: OTHER }));
+    expect(result.error.code).toBe("payto_changed");
+    expect(seller.payments).toHaveLength(0);
+  });
+
+  it("refuses an asset the listing does not offer", async () => {
+    const result = await payWith(listing({ asset: "CBOTHERASSET" }));
+    expect(result.error.code).toBe("terms_changed");
+    expect(seller.payments).toHaveLength(0);
+  });
+
+  it.each(["10000", "9999"])(
+    "pays a live price of %s against a listing of 10000",
+    async (price) => {
+      seller.price = price;
+      const result = await payWith(listing());
+      expect(result.isError).toBeFalsy();
+      expect(result.listingCheck).toBe("passed");
+      expect(result.payment?.amount).toBe(price);
+      expect(seller.payments).toHaveLength(1);
+    },
+  );
+
+  it("names a raised price before terms the listing lacks, whatever the offers' order", async () => {
+    seller.otherOffers = [{ asset: "CBOTHERASSET", amount: "1" }];
+    seller.price = "10001";
+    const result = await payWith(listing());
+    expect(result.error.code).toBe("price_raised");
+    expect(seller.payments).toHaveLength(0);
+  });
+
+  it("pays the listed offer when the seller also offers it at a raised price", async () => {
+    seller.otherOffers = [{ asset: USDC, amount: "15000" }];
+    const result = await payWith(listing());
+    expect(result.payment?.amount).toBe("10000");
+  });
+
+  it("says none when no listing came with the call, and pays as without one", async () => {
+    const result = await pay();
+    expect((result as { listingCheck?: string }).listingCheck).toBe("none");
+    expect(result.payment).toBeDefined();
+  });
+
+  it("takes a listing whose resource is a route template", async () => {
+    const templated = { ...listing(), resource: `${seller.url}/:` };
+    expect((await payWith(templated)).listingCheck).toBe("passed");
+  });
+
+  it("takes a segment named like a parameter only as itself", async () => {
+    const named = { ...listing(), resource: `${seller.url}/:city` };
+    const result = await payWith(named);
+    expect(result.error.code).toBe("invalid_input");
+    expect(seller.bodies).toHaveLength(0);
+  });
+
+  it("drops a query longer than a catalog URL before comparing", async () => {
+    const result = await payWith(listing(), `/forecast?city=Warsaw&pad=${"x".repeat(3000)}`);
+    expect(result.isError).toBeFalsy();
+    expect(result.listingCheck).toBe("passed");
+  });
+
+  it.each([
+    ["another URL", { resource: "https://elsewhere.example.com/forecast" }],
+    ["another method", { input: { type: "http", method: "POST" } }],
+    ["an MCP tool", { type: "mcp" }],
+    ["no type", { type: undefined }],
+    ["no method", { input: { type: "http" } }],
+    ["no input", { input: undefined }],
+  ])("refuses a listing for %s without calling the seller", async (_, change) => {
+    const result = await payWith({ ...listing(), ...change });
+    expect(result.error.code).toBe("invalid_input");
+    expect(seller.bodies).toHaveLength(0);
+  });
+
+  it("refuses a listing for another network without calling the seller", async () => {
+    const chosen = listing();
+    chosen.accepts[0]!.network = "stellar:pubnet";
+    const result = await payWith(chosen);
+    expect(result.error.code).toBe("invalid_input");
+    expect(result.error.message).toContain("another network");
+    expect(seller.bodies).toHaveLength(0);
+  });
+
+  it("refuses a listed price that is not a whole number of atomic units", async () => {
+    const result = await client.callTool({
+      name: "call_paid_http",
+      arguments: {
+        url: `${seller.url}/forecast`,
+        method: "GET",
+        listing: listing({ amount: "1e9" }),
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("whole number");
+    expect(seller.bodies).toHaveLength(0);
+  });
+});
