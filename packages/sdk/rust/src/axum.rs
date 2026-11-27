@@ -39,7 +39,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use ::axum::body::Body;
-use ::axum::extract::{OriginalUri, Request};
+use ::axum::extract::{MatchedPath, OriginalUri, Request};
 use ::axum::http::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE, HOST, USER_AGENT};
 use ::axum::http::{HeaderValue, StatusCode};
 use ::axum::response::Response;
@@ -218,8 +218,10 @@ impl PaidRoute {
             resource = resource.mime_type(mime_type);
         }
         let required = PaymentRequired::new(resource, vec![self.terms.clone()]);
+        let route = request.extensions().get::<MatchedPath>();
+        let route = route.map(|pattern| (pattern.as_str(), uri.path()));
         match &self.listing {
-            Some(listing) => required.with_listing(listing, request.method().as_str()),
+            Some(listing) => required.listed(listing, request.method().as_str(), route),
             None => required,
         }
     }

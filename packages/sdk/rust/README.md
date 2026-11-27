@@ -120,6 +120,12 @@ as our facilitator's `reason`), the cause of each failure, and the catalog's ans
 A mistyped `payTo` or token contract, and a network the facilitator does not settle on, stop the
 seller at start.
 
+A listed route with a path parameter, such as `/assets/{id}/price`, is one listing and not one per
+asset: its 402 names the template (`routeTemplate: "/assets/:id/price"`) and the request's value
+(`pathParams`), as upstream's middleware does. A wildcard (`{*rest}`) and a segment that mixes
+text and a parameter (`{id}.json`) get no template, since the catalog would drop it: such a route
+is listed by each URL that is paid.
+
 ## Without axum
 
 ```toml
