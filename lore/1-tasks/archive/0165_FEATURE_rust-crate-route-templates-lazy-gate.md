@@ -2,7 +2,7 @@
 id: "0165"
 title: "Rust crate: route templates in a listing and a gate that connects on the first request"
 type: FEATURE
-status: active
+status: completed
 owner: akot
 milestone: 2
 related_adr: []
@@ -17,6 +17,14 @@ history:
       Spawned from 0041 and started: its two sellers (Prices API, SorobanScan) are Lambdas with
       path parameters in their paid routes, and the crate serves neither yet. The route template
       is 0140's item, done now.
+  - date: "2026-11-27"
+    status: completed
+    who: akot
+    note: >
+      PR #276 merged (ff5933c2): the crate names a route's template in its 402 and has
+      `PaymentGate::lazy`. 117 tests with the layer (+9), 68 without (+1), one new test in
+      `packages/bazaar`; an unpaid run against the testnet facilitator. 0041's sellers pin
+      ff5933c2b8648b327fe09f7c0369df88efea37d3. Three decisions emerged, none spawned a task.
 ---
 
 # Rust crate: route templates in a listing and a gate that connects on the first request
@@ -48,17 +56,17 @@ for the facilitator.
 
 ## Acceptance Criteria
 
-- [ ] Given a paid route `/assets/{id}/price`, when it answers 402, then the `bazaar` block names
+- [x] Given a paid route `/assets/{id}/price`, when it answers 402, then the `bazaar` block names
       `/assets/:id/price` and the request's value, and this repository's catalog keys it by the
       template
-- [ ] Given a pattern the catalog would drop (a wildcard, a mixed segment), when the route
+- [x] Given a pattern the catalog would drop (a wildcard, a mixed segment), when the route
       answers 402, then the block is as it is today
-- [ ] Given a lazy gate, when the seller starts, then the facilitator gets no call; the first
+- [x] Given a lazy gate, when the seller starts, then the facilitator gets no call; the first
       request reads `/supported` once, and its 402 equals a connected gate's
-- [ ] Given a facilitator that fails or doesn't answer, when a request reaches a lazy gate's
+- [x] Given a facilitator that fails or doesn't answer, when a request reaches a lazy gate's
       route, then it gets 502 within seconds, the route doesn't run, and a later request is
       served once the facilitator answers
-- [ ] `PaymentGate::connect` and every answer of a connected gate are unchanged
+- [x] `PaymentGate::connect` and every answer of a connected gate are unchanged
 
 ## Implementation Notes
 
