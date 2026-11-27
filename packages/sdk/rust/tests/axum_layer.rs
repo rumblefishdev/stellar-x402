@@ -20,7 +20,8 @@ use stellar_x402::{Facilitator, FacilitatorError, Listing, Network, Price};
 use support::{header_of, FakeFacilitator, Reply, HASH, PAYER, PAY_TO};
 
 /// A seller with one paid route, `GET /weather?city=`, that answers 400 without a city and 500
-/// when asked to `fail`. The same route is nested under `/v1`.
+/// when asked to `fail`. The same route is nested under `/v1`, and both are also served with a
+/// path parameter, as `/assets/{id}/price`.
 struct Seller {
     url: String,
     /// How many times the route itself ran.
@@ -109,11 +110,15 @@ async fn seller_on(
             ),
         }
     };
+    let priced = get(weather.clone()).route_layer(paid.clone());
     let app = Router::new()
         .route("/weather", get(weather.clone()).route_layer(paid.clone()))
+        .route("/assets/{id}/price", priced.clone())
         .nest(
             "/v1",
-            Router::new().route("/weather", get(weather).route_layer(paid)),
+            Router::new()
+                .route("/weather", get(weather).route_layer(paid))
+                .route("/assets/{id}/price", priced),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -201,10 +206,10 @@ async fn a_request_without_a_payment_gets_the_terms_and_the_route_does_not_run()
             "extra": { "areFeesSponsored": true }
         }])
     );
-    assert_eq!(
-        required["extensions"]["bazaar"]["info"]["input"]["method"],
-        "GET"
-    );
+    let bazaar = &required["extensions"]["bazaar"];
+    assert_eq!(bazaar["info"]["input"]["method"], "GET");
+    // A route without a path parameter is listed by its URL.
+    assert_eq!(bazaar.get("routeTemplate"), None);
     // `@x402/core` 2.31: a 402 with an `error` repeats it in the body.
     assert_eq!(
         response.json::<Value>().await.unwrap(),
@@ -225,6 +230,48 @@ async fn without_a_base_url_the_resource_is_named_by_the_requests_host() {
         required["resource"]["url"],
         format!("{}/weather?city=Warsaw", seller.url)
     );
+}
+
+#[tokio::test]
+async fn a_route_with_a_path_parameter_names_its_template_as_upstream_does() {
+    let seller = seller().await;
+
+    let response = seller.get("/assets/native/price?city=Warsaw").await;
+
+    let required = decoded(&response, "payment-required").unwrap();
+    // The block `bazaarResourceServerExtension` of `@x402/extensions` 2.31.0 builds for the
+    // route pattern `/assets/[id]/price`; `packages/bazaar` reads the same file.
+    assert_eq!(
+        required["extensions"]["bazaar"],
+        support::fixture("bazaar-route-template.json")
+    );
+    assert_eq!(
+        required["resource"]["url"],
+        "https://api.example.com/assets/native/price?city=Warsaw"
+    );
+}
+
+#[tokio::test]
+async fn a_path_value_is_named_as_the_request_wrote_it() {
+    let seller = seller().await;
+
+    for id in ["USDC:GA5Z", "USDC%3AGA5Z"] {
+        let response = seller.get(&format!("/assets/{id}/price")).await;
+
+        let bazaar = &decoded(&response, "payment-required").unwrap()["extensions"]["bazaar"];
+        assert_eq!(bazaar["routeTemplate"], "/assets/:id/price");
+        assert_eq!(bazaar["info"]["input"]["pathParams"], json!({ "id": id }));
+    }
+}
+
+#[tokio::test]
+async fn a_nested_route_names_its_template_with_the_prefix() {
+    let seller = seller().await;
+
+    let response = seller.get("/v1/assets/native/price").await;
+
+    let bazaar = &decoded(&response, "payment-required").unwrap()["extensions"]["bazaar"];
+    assert_eq!(bazaar["routeTemplate"], "/v1/assets/:id/price");
 }
 
 #[tokio::test]

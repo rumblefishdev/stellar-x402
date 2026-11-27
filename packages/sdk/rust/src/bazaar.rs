@@ -76,8 +76,9 @@ impl Listing {
         }
     }
 
-    /// The `bazaar` block for a request made with `method`.
-    pub(crate) fn extension(&self, method: &str) -> Value {
+    /// The `bazaar` block for a request made with `method`. `route` is the router's pattern and
+    /// the request's path: a route with a path parameter is listed once, by its template.
+    pub(crate) fn extension(&self, method: &str, route: Option<(&str, &str)>) -> Value {
         let method = self.declared_method(method);
         let mut input = json!({ "type": "http", "method": method });
         let mut properties = json!({
@@ -121,7 +122,7 @@ impl Listing {
                 "required": ["type"],
             });
         }
-        json!({
+        let mut block = json!({
             "info": info,
             "schema": {
                 "$schema": JSON_SCHEMA,
@@ -129,6 +130,91 @@ impl Listing {
                 "properties": schema_properties,
                 "required": ["input"],
             }
-        })
+        });
+        // As `bazaarResourceServerExtension` adds them for a route with a parameter.
+        if let Some((template, params)) = route.and_then(|(pattern, path)| template(pattern, path))
+        {
+            block["routeTemplate"] = json!(template);
+            block["info"]["input"]["pathParams"] = Value::Object(params);
+            block["schema"]["properties"]["input"]["properties"]["pathParams"] =
+                json!({ "type": "object" });
+        }
+        block
+    }
+}
+
+/// axum's `pattern` as a route template (`/assets/{id}/price` is `/assets/:id/price`) and the
+/// parameters' values as `path` wrote them, not percent-decoded.
+///
+/// `None` wherever our catalog would drop the template (`packages/bazaar/src/url.ts`,
+/// `matchRouteTemplate`): no parameter, a wildcard, a segment that mixes text and a parameter, a
+/// name or a static segment outside its grammar. The route is then listed by its URL, as before.
+fn template(pattern: &str, path: &str) -> Option<(String, Map<String, Value>)> {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let (wanted, actual): (Vec<_>, Vec<_>) =
+        (pattern.split('/').collect(), path.split('/').collect());
+    if wanted.len() != actual.len() || !pattern.starts_with('/') {
+        return None;
+    }
+    let mut template = String::new();
+    let mut params = Map::new();
+    let mut has_static = false;
+    for (wanted, actual) in wanted.into_iter().zip(actual).skip(1) {
+        template.push('/');
+        match wanted
+            .strip_prefix('{')
+            .and_then(|name| name.strip_suffix('}'))
+        {
+            Some(name) => {
+                let named = name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                    && name.chars().all(word);
+                if !named || actual.is_empty() {
+                    return None;
+                }
+                template.push(':');
+                template.push_str(name);
+                params.insert(name.to_owned(), json!(actual));
+            }
+            None => {
+                let plain = !wanted.is_empty()
+                    && wanted
+                        .chars()
+                        .all(|c| word(c) || matches!(c, '.' | '~' | '-'));
+                if !plain || wanted == "." || wanted == ".." {
+                    return None;
+                }
+                template.push_str(wanted);
+                has_static = true;
+            }
+        }
+    }
+    (has_static && !params.is_empty()).then_some((template, params))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::template;
+
+    #[test]
+    fn a_pattern_becomes_a_template_only_when_the_catalog_would_keep_it() {
+        let named = |pattern, path| template(pattern, path).map(|(template, _)| template);
+        assert_eq!(
+            named("/x402/v1/assets/{id}/price", "/x402/v1/assets/native/price").as_deref(),
+            Some("/x402/v1/assets/:id/price")
+        );
+        for (pattern, path) in [
+            ("/weather", "/weather"),
+            ("/{id}", "/1"),
+            ("/files/{*rest}", "/files/a/b"),
+            ("/a/{id}.json", "/a/1.json"),
+            ("/a/{id}", "/a/1/2"),
+            ("/a/{id}/b", "/a//b"),
+            ("/a/{my-id}", "/a/1"),
+            ("/a b/{id}", "/a b/1"),
+            ("/../{id}", "/../1"),
+            ("/a/{id}/", "/a/1/"),
+        ] {
+            assert_eq!(named(pattern, path), None, "{pattern}");
+        }
     }
 }
