@@ -5,6 +5,7 @@ import {
   STELLAR_TOML_BYTES,
   createCuration,
   provesPayTo,
+  stellarTomlUrl,
 } from "../src/catalog/curation.js";
 import type { Logger } from "../src/logger.js";
 import type { CurationKey, CurationRecord, CurationStore } from "../src/ports/curation-store.js";
@@ -51,6 +52,20 @@ describe("provesPayTo", () => {
     expect(() =>
       provesPayTo(`ACCOUNTS = ["${PAY_TO}"`, "pogoda.pl", "pogoda.pl", PAY_TO),
     ).toThrow();
+  });
+});
+
+describe("stellarTomlUrl", () => {
+  it("asks the domain itself over https, without the resource's port or path (SEP-1)", () => {
+    expect(stellarTomlUrl(new URL("https://pogoda.pl:8443/api/today?x=1"), false)).toBe(
+      "https://pogoda.pl/.well-known/stellar.toml",
+    );
+  });
+
+  it("asks a seller run on this machine at its own origin", () => {
+    expect(stellarTomlUrl(new URL("http://127.0.0.1:4021/weather"), true)).toBe(
+      "http://127.0.0.1:4021/.well-known/stellar.toml",
+    );
   });
 });
 

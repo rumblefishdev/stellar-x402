@@ -31,6 +31,16 @@ export function provesPayTo(
   return accounts.includes(payTo) && homeDomain?.toLowerCase() === host.toLowerCase();
 }
 
+/**
+ * Where SEP-1 puts the host's file: `https://<domain>/.well-known/stellar.toml`, with no port,
+ * whatever port the resource uses. A seller run on this machine (`allowInsecureLocal`, in
+ * development and tests) is asked at its own origin instead.
+ */
+export function stellarTomlUrl(resourceUrl: URL, allowInsecureLocal: boolean): string {
+  const base = allowInsecureLocal ? resourceUrl.origin : `https://${resourceUrl.hostname}`;
+  return `${base}/.well-known/stellar.toml`;
+}
+
 export interface CurationDeps {
   store: CurationStore;
   rpc: Pick<SorobanRpc, "getLedgerEntries">;
@@ -69,9 +79,7 @@ export function createCuration({
       checkedAt = stored?.checkedAt ?? null;
       if (checkedAt !== null && now() - checkedAt < CURATION_RECHECK_MS) return;
       const started = now();
-      // From the resource's own origin: none of the 1,292 Stellar listings in CDP's catalog names
-      // a port (measured 2026-11-27), so for them it is SEP-1's `https://<domain>`.
-      const toml = await readToml(`${url.origin}/.well-known/stellar.toml`);
+      const toml = await readToml(stellarTomlUrl(url, limits.allowInsecureLocal));
       const homeDomain = await readHomeDomain(payTo);
       const curated = provesPayTo(toml, homeDomain, key.host, payTo);
       await store.put({ ...key, curated, checkedAt: started });
