@@ -55,6 +55,8 @@ curated order.
 - A script that loads the seed, runs each query through `/discovery/search` and prints nDCG@10
   per query and overall.
 - The result for the Tranche #2 boundary, recorded for 0132.
+- The same run with and without 0070's curation bonus (a proof counts as 3 paying wallets in q),
+  so a fall in nDCG@10 from the bonus is seen before mainnet.
 
 ## Acceptance Criteria
 
@@ -65,3 +67,4 @@ curated order.
       query and overall, with one command
 - [ ] The Tranche #2 result is recorded with the commit of the query set and of the ranking
 - [ ] Given a result under 0.75, when search ships, then it uses curated order, and the task says so
+- [ ] nDCG@10 is recorded with and without the curation bonus of 0070
