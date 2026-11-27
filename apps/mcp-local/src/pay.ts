@@ -5,6 +5,7 @@ import { z } from "zod";
 import { checkUrl, guardedFetch, type SellerLimits } from "@stellar-x402/seller-fetch";
 import { asToolError, ToolError } from "./results.js";
 import { countDaily, refundDaily } from "./daily.js";
+import { LISTING, quotedOffers, type Listing } from "./listing.js";
 
 /** The call_paid_http tool's input and output, as server.ts registers it. */
 export const CALL_PAID_HTTP_INPUT = z
@@ -14,11 +15,18 @@ export const CALL_PAID_HTTP_INPUT = z
       .describe("Resource URL with its query, e.g. https://api.example.com/x?city=Warsaw"),
     method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
     body: z.string().optional().describe("JSON request body"),
+    listing: LISTING.optional(),
   })
   .strict();
 
 export const CALL_PAID_HTTP_OUTPUT = {
   status: z.number(),
+  listingCheck: z
+    .enum(["passed", "none"])
+    .describe(
+      "passed: the listing was for this call, and any payment was held to it; none: no " +
+        "listing, so only the limits held",
+    ),
   contentType: z.string().nullable(),
   body: z.string(),
   payment: z
@@ -52,6 +60,12 @@ export interface PaymentConfig {
 
 export interface PaidResponse {
   status: number;
+  /**
+   * `passed`: the listing was for this call, and a payment, if the seller asked for one, was held
+   * to it (a seller that answers without a 402 is paid nothing, so nothing was compared);
+   * `none`: no listing came with the call.
+   */
+  listingCheck: "passed" | "none";
   contentType: string | null;
   body: string;
   /**
@@ -100,6 +114,21 @@ function dailyBudget(dir: string, log: (message: string) => void): BudgetStore {
   };
 }
 
+/** The refusals of a seller whose live terms are not the listing's the agent passed. */
+const LISTING_REFUSALS: ReadonlySet<string> = new Set([
+  "payto_changed",
+  "price_raised",
+  "terms_changed",
+]);
+
+/**
+ * An agent told no by the listing would most often call again without it, and pay the very terms
+ * it was refused: the message says not to.
+ */
+const NOT_WITHOUT_LISTING =
+  "Nothing was signed. Choose another listing; do not call again without this one, which would " +
+  "pay the seller's new terms.";
+
 /**
  * The tool error for what the SDK's paying fetch threw, or `undefined` when it is not the SDK's: a
  * seller-fetch refusal before any payment passes through it unchanged. The code and the message
@@ -115,6 +144,9 @@ function paymentToolError(error: unknown, deadline: AbortSignal): ToolError | un
     );
   }
   if (!(error instanceof PaymentError)) return undefined;
+  if (LISTING_REFUSALS.has(error.code)) {
+    return new ToolError(error.code, `${error.message} ${NOT_WITHOUT_LISTING}`);
+  }
   const { cause } = error;
   if (cause instanceof DailyDatabaseError) return dailyDatabaseFailed(cause.cause);
   if (cause === undefined) return new ToolError(error.code, error.message);
@@ -129,7 +161,13 @@ function paymentToolError(error: unknown, deadline: AbortSignal): ToolError | un
 }
 
 export async function callPaidHttp(
-  request: { url: string; method: string; headers?: Record<string, string>; body?: string },
+  request: {
+    url: string;
+    method: string;
+    headers?: Record<string, string>;
+    body?: string;
+    listing?: Listing;
+  },
   config: PaymentConfig,
   limits: SellerLimits,
   log: (message: string) => void,
@@ -139,6 +177,8 @@ export async function callPaidHttp(
   if (request.method === "GET" && request.body !== undefined) {
     throw new ToolError("invalid_input", "A GET request cannot carry a body.");
   }
+  const quoted = request.listing && quotedOffers(request.listing, url.href, request.method);
+  const listingCheck = quoted ? "passed" : "none";
 
   // One deadline for the call's requests, the unpaid one and the paid retry. Signing is not cut off:
   // a signature that comes after the deadline is never sent, and the amount goes back.
@@ -151,6 +191,7 @@ export async function callPaidHttp(
     assets: config.assets,
     budget: dailyBudget(config.dailyDir, log),
     now: config.now,
+    quoted,
     fetch: guardedFetch(limits, deadline),
   });
   let response;
@@ -169,7 +210,7 @@ export async function callPaidHttp(
   const contentType = response.headers.get("content-type")?.slice(0, LIMITS.mimeTypeChars) ?? null;
   const { payment } = response;
   if (!payment) {
-    if (response.ok) return { status: response.status, contentType, body };
+    if (response.ok) return { status: response.status, listingCheck, contentType, body };
     if (response.status === 404) {
       throw new ToolError("resource_not_found", "The seller has no resource at this URL.");
     }
@@ -188,5 +229,5 @@ export async function callPaidHttp(
     }
     log(`call_paid_http: paid ${url} but the seller sent no settlement it could show`);
   }
-  return { status: response.status, contentType, body, payment };
+  return { status: response.status, listingCheck, contentType, body, payment };
 }

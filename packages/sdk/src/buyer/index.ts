@@ -1,5 +1,5 @@
 export { memoryBudget, type BudgetEntry, type BudgetStore } from "./budget.js";
-export type { AssetLimits } from "./call.js";
+export type { AssetLimits, QuotedOffer } from "./call.js";
 export { PaymentError, type Paid, type PaymentErrorCode } from "./errors.js";
 export {
   createPayingFetch,

@@ -27,15 +27,23 @@ describe("real payments on testnet (0.003 USDC)", () => {
     id: string,
     env: Record<string, string>,
     url = weather(),
+    listing?: unknown,
   ): Promise<void> {
     const buyerBefore = await usdcBalance(keys.buyerPublic);
     const sellerBefore = await usdcBalance(keys.sellerPublic);
     const xlmBefore = await xlmBalance(keys.buyerPublic);
     const server = await startServer(env);
-    const answer = await server.call("call_paid_http", httpArgs(url));
+    const answer = await server.call("call_paid_http", httpArgs(url, listing ? { listing } : {}));
     await server.close();
     const value = answer.value as Partial<PaidResult>;
     const hash = value.payment?.transaction ?? undefined;
+    row(
+      id,
+      "listingCheck: passed with the listing the agent chose, none without one",
+      listing ? "passed" : "none",
+      value.listingCheck,
+      hash,
+    );
     row(
       id,
       "paid result: the weather, on testnet, 10000 in USDC, a hash",
@@ -146,7 +154,8 @@ describe("real payments on testnet (0.003 USDC)", () => {
       ],
     );
     if (hit === undefined) return;
-    await payAndCheck("E-25", env, `${hit.resource}?city=Warsaw`);
+    // The item goes back as the search gave it, so the payment is held to the listed terms (0068).
+    await payAndCheck("E-25", env, `${hit.resource}?city=Warsaw`, hit);
   });
 
   /** The example seller's weather listing among a search answer's items. */

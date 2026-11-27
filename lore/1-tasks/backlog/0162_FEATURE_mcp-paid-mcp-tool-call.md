@@ -20,6 +20,12 @@ history:
     note: >
       Noted under "Context" what 0102 and 0163 change for this tool: the limits move to the SDK,
       and the client it needs is exported with this task.
+  - date: "2026-11-27"
+    status: backlog
+    who: bstruzyk
+    note: >
+      Noted from 0068: call_paid_http holds the seller to the listing the agent passes; this tool
+      should take the same listing and the SDK's `quoted` terms.
 ---
 
 # Pay for a seller's MCP tool from the MCP server: `call_paid_mcp_tool`
@@ -53,6 +59,10 @@ search result of type `mcp` is as usable as an HTTP one.
   agent's arguments, and pays through upstream's client within the same limits as
   `call_paid_http` (per call, daily budget, allowed assets).
 - The same closed error codes as `call_paid_http`, and the same address guard for the server URL.
+- The same listing check as `call_paid_http` (0068): take the `search_resources` item the agent
+  chose as `listing`, refuse one for another server or tool, and pass its `accepts` to the SDK as
+  `quoted`, so a tool asking more than its listing or naming another `payTo` is refused before
+  signing (`price_raised`, `payto_changed`, `terms_changed`).
 - A test seller with one paid MCP tool, for the tests and the e2e.
 
 ## Acceptance Criteria
