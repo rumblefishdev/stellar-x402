@@ -162,6 +162,9 @@ The measurements are in
   - p's bonus grows quickly at first and then flattens: 1 wallet gives q = 1.07, 10 give 1.17,
     50 give 1.19.
   - A wallet paying its own `payTo` is not counted. Wallets the seller funded are counted.
+    Addresses are compared as text, so a seller paying a muxed `payTo` (`M…`) from its own base
+    account counts; no Stellar offer in the CDP catalog of 2026-11-27 had a muxed `payTo` (0 of
+    1,250), and a fresh wallet buys the seller the same.
   - Only distinct wallets count, not the number of payments.
   - The 30-day window is the recency: a listing last paid 31 days ago has p = 0.
   - Each network counts its own payments, testnet the same way as pubnet.
@@ -183,7 +186,8 @@ The measurements are in
   asset and amount equal one of the offers the catalog stored for the listing, which come from the
   seller's own 402. A payment's terms come from its caller, not from the seller: anyone can call
   `/settle` with terms of their own, so without this check one stroop to the seller would count
-  a payer. Every claim names its listing, so the count reads only `success` settlements, of the
+  a payer. A listing whose price depends on the request never gains payers this way: the catalog
+  stores the price of its unpaid 402, and buyers pay other amounts. Every claim names its listing, so the count reads only `success` settlements, of the
   last 30 days; settlements are kept. Settlements from before the release name no listing, so the count
   starts empty.
 - **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
