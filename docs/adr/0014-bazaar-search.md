@@ -7,7 +7,8 @@
   vector on the card, the model's own server in the facilitator's image, when vectors are written,
   the timeout, and no words-only window for a model change), 2026-11-25 (task 0154: a payment's
   listing on its settlement's row) and 2026-11-26 (task 0154: a payment counts only on the
-  listing's own terms; q is counted inside the search query)
+  listing's own terms; q is counted inside the search query) and 2026-11-27 (task 0070: the
+  curation bonus)
 
 ## Context
 
@@ -153,9 +154,9 @@ The measurements are in
   answers partial. No words-only window: anything more is decided when a change comes.
 - **Quality score.** A listing's score is its fused score times a quality factor q (task 0154), in
   the fused ranking and in words alone:
-  - q = (1 + 0.2 × p / (p + 2)) × 0.9 on a tunnel host × 0.9 with an empty description, where p is
-    the number of distinct wallets that paid for the listing through this facilitator in the last
-    30 days. q is at most 1.2, so it moves a listing only a few places: with 10 paying wallets
+  - q = min(1.2, (1 + 0.2 × p / (p + 2)) × 1.1 when curated) × 0.9 on a tunnel host × 0.9 with an
+    empty description, where p is the number of distinct wallets that paid for the listing through
+    this facilitator in the last 30 days. q is at most 1.2, so it moves a listing only a few places: with 10 paying wallets
     the 4th match by meaning passes the 1st.
   - A listing with no payments, on its own host and with a description, gets q = 1: it is neither
     hidden nor raised, as §4.3 asks for new listings.
@@ -190,8 +191,14 @@ The measurements are in
   stores the price of its unpaid 402, and buyers pay other amounts. Every claim names its listing, so the count reads only `success` settlements, of the
   last 30 days; settlements are kept. Settlements from before the release name no listing, so the count
   starts empty.
-- **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
-  0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
+- **Curation.** A listing is curated when its seller proves its `payTo` with `stellar.toml` both
+  ways (task 0070): the host's file lists the `payTo` in `ACCOUNTS`, and the account's
+  `home_domain` is the host. The facilitator checks it on a paid call, at most once per 6 hours
+  per host and account; a failed check counts as no proof. A curated listing's q gets × 1.1, about
+  what 3 paying wallets give, within the 1.2 cap: a curated listing with 10 wallets still has
+  1.2. On 3,000 CDP listings and 40 real queries, × 1.1 raised a curated listing a median of 3
+  places. Every listing shows `curated` in `/discovery/resources` and `/discovery/search`. A
+  contract (`C…`) `payTo` has no `home_domain`, so it is never curated.
 - **When the ranking is served.** There is no separate curation-only mode. 0135's run decides
   when search is offered on pubnet (task 0120): not before it reaches nDCG@10 ≥ 0.75, as §4
   promises.
