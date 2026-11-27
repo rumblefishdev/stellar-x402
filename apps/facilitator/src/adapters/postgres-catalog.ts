@@ -139,9 +139,11 @@ export class PostgresCatalogStore implements CatalogStore {
            AND ($2::text IS NULL OR pay_to = $2)
            AND ($3::text IS NULL OR network = $3)
            AND ($4::text IS NULL OR extension_keys @> ARRAY[$4::text])`;
-    const { rows } = await this.listPool.query<{ total: string; items: DiscoveryResource[] }>(
+    const { rows } = await this.listPool.query<{ total: string; items: StoredListing[] }>(
       `SELECT (SELECT count(*) FROM ${matches}) AS total,
-              coalesce((SELECT jsonb_agg(c.resource ORDER BY c.seq)
+              coalesce((SELECT jsonb_agg(jsonb_build_object('key', jsonb_build_object(
+                                 'network', c.network, 'payTo', c.pay_to, 'resourceUrl', c.resource_url),
+                               'resource', c.resource) ORDER BY c.seq)
                         FROM (SELECT seq FROM ${matches} ORDER BY seq LIMIT $5 OFFSET $6) p
                         JOIN catalog c USING (seq)),
                        '[]') AS items`,
@@ -248,16 +250,15 @@ export class PostgresCatalogStore implements CatalogStore {
   }
 
   /**
-   * Each resource with `curated`: whether its host's `stellar.toml` proof of its account passed
-   * (0070), read from `catalog_curation` in one query for the page. Every offer in `accepts` is to
-   * the listing key's network and `payTo`, so the first names them; the host is the WHATWG URL
-   * parser's, as the check stores it.
+   * Each listing's resource with `curated`: whether its host's `stellar.toml` proof of its key's
+   * account passed (0070), read from `catalog_curation` in one query for the page. The host is the
+   * WHATWG URL parser's, as the check stores it.
    */
-  private async withCuration(resources: DiscoveryResource[]): Promise<ListedResource[]> {
-    const keys = resources.map((resource) => ({
-      network: resource.accepts[0]!.network,
-      host: new URL(resource.resource).hostname,
-      payTo: resource.accepts[0]!.payTo,
+  private async withCuration(listings: StoredListing[]): Promise<ListedResource[]> {
+    const keys = listings.map(({ key }) => ({
+      network: key.network,
+      host: new URL(key.resourceUrl).hostname,
+      payTo: key.payTo,
     }));
     const { rows } = await this.listPool.query<{ network: string; host: string; pay_to: string }>(
       `SELECT network, host, pay_to FROM catalog_curation
@@ -267,15 +268,16 @@ export class PostgresCatalogStore implements CatalogStore {
       [keys.map((key) => key.network), keys.map((key) => key.host), keys.map((key) => key.payTo)],
     );
     const curated = new Set(rows.map((row) => `${row.network} ${row.host} ${row.pay_to}`));
-    return resources.map((resource, i) => {
+    return listings.map(({ resource }, i) => {
       const key = keys[i]!;
       return { ...resource, curated: curated.has(`${key.network} ${key.host} ${key.payTo}`) };
     });
   }
 
   private async hitsOf(rows: HitRow[]): Promise<CatalogSearchHit[]> {
-    const resources = await this.withCuration(rows.map((row) => row.resource));
-    return rows.map((row, i) => ({ ...hitOf(row), resource: resources[i]! }));
+    const hits = rows.map((row) => ({ ...hitOf(row), resource: row.resource }));
+    const resources = await this.withCuration(hits);
+    return hits.map((hit, i) => ({ ...hit, resource: resources[i]! }));
   }
 
   async waitingForVector(query: CatalogSearch): Promise<boolean> {
@@ -390,6 +392,12 @@ export class PostgresCatalogStore implements CatalogStore {
     );
     return this.hitsOf(rows);
   }
+}
+
+/** A listing's key and its stored resource, as `withCuration` reads them. */
+interface StoredListing {
+  key: Pick<CatalogKey, "network" | "payTo" | "resourceUrl">;
+  resource: DiscoveryResource;
 }
 
 /** A search result as both rankings' queries return it. */
