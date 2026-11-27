@@ -61,7 +61,7 @@
     "watch": true,
     "watchSecurity": false,
     "protocol": true,
-    "upstream": false,
+    "upstream": true,
     "heartbeat": true
   },
   "thresholds": {

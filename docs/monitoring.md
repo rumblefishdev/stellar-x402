@@ -38,6 +38,8 @@ Since 0139's switch (2026-11-25 13:43 UTC) most checks are Prometheus rules on t
 | `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                                                                                          |
 | `protocol-changed`        | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                                                                            |
 | `protocol-upgrade-coming` | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                                                                          |
+| `upstream-changed`        | `upstream`  | Not yet: 0026        | Not yet: 0026 fires it after the Alarms deploy                                                                                                                                            |
+| `upstream-silent`         | `upstream`  | Not yet: 0026        | Not yet: 0026 fires it after the Alarms deploy                                                                                                                                            |
 | `audit-disk`              | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                                                                           |
 | `telemetry-silent`        | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                                                                          |
 | `credentials-stale`       | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                                                                           |
@@ -95,8 +97,6 @@ once, by the task that turns it on.
 | `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
 | `hub-uptime`         | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
 | `portal-uptime`      | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
-| `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
-| `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
 | `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
 | `wal-stale`          | `backups`       | 0026, as above                                                                         |
 
@@ -1072,7 +1072,7 @@ CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are Clo
 | `spendable_stroops`                         | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
 | `protocol_version`                          | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
 | `protocol_supported_version`                | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |
-| `upstream_files_changed`                    | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed), [upstream-silent](#upstream-silent) (off)                              |
+| `upstream_files_changed`                    | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed), [upstream-silent](#upstream-silent)                                    |
 | `account_state_mismatches`                  | `x402-watch`       | gauge, Count   | `network`                                                | `account-state` (off)                                                                                         |
 | `account_effects_unexpected`                | `x402-watch`       | counter, Count | `network`                                                | `account-effects` (off)                                                                                       |
 | `backup_secret_reads`                       | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |

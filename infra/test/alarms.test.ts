@@ -338,6 +338,8 @@ test("production as committed makes only the groups that are on, and of them wha
     "x402-production-protocol-upgrade-coming-pubnet",
     "x402-production-protocol-upgrade-coming-testnet",
     "x402-production-telemetry-silent",
+    "x402-production-upstream-changed",
+    "x402-production-upstream-silent",
     "x402-production-uptime",
     "x402-production-uptime-flapping",
     "x402-production-watch-errors",
