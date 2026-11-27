@@ -13,6 +13,7 @@ import {
   type LeaseFence,
   type CatalogEntry,
   type CatalogStore,
+  type CurationStore,
   type NewSettlement,
   type RateLimitStore,
   type CardListing,
@@ -2659,6 +2660,8 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
 /** What the quality contract needs: the catalog, its vectors, and the settlements of one database. */
 export interface QualityFixture extends MeaningFixture {
   settlements: SettlementStore;
+  /** The stellar.toml proofs (0070), whose curated listings get ×1.1. */
+  curation: CurationStore;
 }
 
 const DAY_MS = 86_400_000;
@@ -2698,11 +2701,21 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
   describe("CatalogStore search quality factor (0154, ADR 0014; fused cases need pgvector)", () => {
     let catalog: CatalogStore;
     let settlements: SettlementStore;
+    let curation: CurationStore;
     let setVector: MeaningFixture["setVector"];
     let nonce = 0;
     beforeEach(async () => {
-      ({ catalog, settlements, setVector } = await make());
+      ({ catalog, settlements, curation, setVector } = await make());
     });
+    /** `k`'s host and payTo proved, or disproved, by stellar.toml (0070). */
+    const curate = (k: CatalogKey, curated = true) =>
+      curation.put({
+        network: k.network,
+        host: new URL(k.resourceUrl).hostname,
+        payTo: k.payTo,
+        curated,
+        checkedAt: QUALITY_NOW,
+      });
     type Search = Parameters<CatalogStore["search"]>[0];
     type Hit = Awaited<ReturnType<CatalogStore["search"]>>[number];
 
@@ -3179,6 +3192,52 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
           after = { rank: last.rank, key: last.key };
         }
         expect(seen).toEqual(all);
+      });
+    });
+
+    describe("curated (0070)", () => {
+      it("multiplies a curated listing's q by 1.1, within q's cap of 1.2", async () => {
+        const urls = ["curated", "one", "ten", "disproved"].map(
+          (name) => `https://${name}.example/x`,
+        );
+        await listing(key(BASE), WEATHER);
+        for (const url of urls) await listing(key(url), WEATHER);
+        const tunnel = key("https://x.ts.net/x");
+        await listing(tunnel, WEATHER);
+        for (const url of ["curated", "one", "ten"]) await curate(key(`https://${url}.example/x`));
+        await curate(tunnel);
+        await curate(key("https://disproved.example/x"), false);
+        await payByWallets(key("https://one.example/x"), 1);
+        await payByWallets(key("https://ten.example/x"), 10);
+        expect(ratios(await words("weather"), BASE)).toEqual({
+          [BASE]: 1,
+          "https://curated.example/x": 1.1,
+          "https://one.example/x": round6(qualityFactor(1) * 1.1),
+          // 1.1667 × 1.1 = 1.2833, held at the cap.
+          "https://ten.example/x": 1.2,
+          "https://disproved.example/x": 1,
+          "https://x.ts.net/x": round6(1.1 * 0.9),
+        });
+      });
+
+      it("multiplies the fused score by 1.1 too", async () => {
+        await listing(key("https://a.example/x"), { description: "Tides" }, 0.95);
+        await listing(key("https://b.example/x"), { description: "Tides" }, 0.9);
+        await curate(key("https://b.example/x"));
+        const hits = await fused("zebra");
+        expect(urlsOf(hits)).toEqual(["https://b.example/x", "https://a.example/x"]);
+        expect(hits.map((hit) => Number(hit.rank))).toEqual([
+          expect.closeTo(score(2) * 1.1, 6),
+          expect.closeTo(score(1), 6),
+        ]);
+      });
+
+      it("gives no bonus on another network's record", async () => {
+        await listing(key(BASE), WEATHER);
+        const k = key("https://curated.example/x");
+        await listing(k, WEATHER);
+        await curate({ ...k, network: "stellar:pubnet" });
+        expect(ratios(await words("weather"), BASE)["https://curated.example/x"]).toBe(1);
       });
     });
 

@@ -219,6 +219,7 @@ describe("PostgreSQL stores", () => {
     return {
       catalog: all.catalog,
       settlements: all.settlements,
+      curation: all.curation,
       setVector: (key, model, vector) => setVector(pool, key, model, vector),
     };
   });

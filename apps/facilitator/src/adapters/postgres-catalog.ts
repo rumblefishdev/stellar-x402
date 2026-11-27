@@ -173,8 +173,9 @@ export class PostgresCatalogStore implements CatalogStore {
    * The rank is the words' rank times the listing's quality factor q (ADR 0014), counted here from
    * the stored settlements: 1 + 0.2 × p / (p + 2), where p is the distinct wallets that paid for
    * the listing from 30 days before `now` on, its own `payTo` left out, and only on terms equal to
-   * one of its offers; × 0.9 on a tunnel host; × 0.9 when the card's description holds nothing
-   * but spaces. Counting after the matches are found keeps the planner from a nested loop over
+   * one of its offers; × 1.1 when its host's `stellar.toml` proves its `payTo` (0070), with these
+   * two together at most 1.2; × 0.9 on a tunnel host; × 0.9 when the card's description holds
+   * nothing but spaces. Counting after the matches are found keeps the planner from a nested loop over
    * all listings (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).
    */
   async search(query: CatalogSearch, now: number): Promise<CatalogSearchHit[]> {
@@ -218,7 +219,11 @@ export class PostgresCatalogStore implements CatalogStore {
        SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
          FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url,
                       (m.base
-                       * (1 + 0.2 * paid.payers / (paid.payers + 2.0))
+                       * least(1.2, (1 + 0.2 * paid.payers / (paid.payers + 2.0))
+                                    * CASE WHEN EXISTS (SELECT 1 FROM catalog_curation k
+                                            WHERE k.network = m.network AND k.host = m.host
+                                              AND k.pay_to = m.pay_to AND k.curated)
+                              THEN 1.1 ELSE 1 END)
                        * CASE WHEN EXISTS (SELECT 1 FROM unnest($12::text[]) AS tunnel(host)
                                             WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
                               THEN 0.9 ELSE 1 END
@@ -360,7 +365,11 @@ export class PostgresCatalogStore implements CatalogStore {
        SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
          FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url,
                       m.base
-                      * (1 + 0.2 * paid.payers / (paid.payers + 2.0))::float8
+                      * least(1.2, (1 + 0.2 * paid.payers / (paid.payers + 2.0))
+                                   * CASE WHEN EXISTS (SELECT 1 FROM catalog_curation k
+                                            WHERE k.network = m.network AND k.host = m.host
+                                              AND k.pay_to = m.pay_to AND k.curated)
+                              THEN 1.1 ELSE 1 END)::float8
                       * CASE WHEN EXISTS (SELECT 1 FROM unnest($14::text[]) AS tunnel(host)
                                            WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
                              THEN 0.9 ELSE 1 END
