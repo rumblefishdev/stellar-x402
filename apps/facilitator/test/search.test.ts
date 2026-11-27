@@ -389,10 +389,10 @@ describe("GET /discovery/search's clock (0154)", () => {
       { query: "weather" },
     );
     expect(status).toBe(200);
-    expect(catalog.search).toHaveBeenCalledWith(expect.objectContaining({ now: 1_234 }));
+    expect(catalog.search).toHaveBeenCalledWith(expect.anything(), 1_234);
   });
 
-  it("hands the store its clock's value by meaning too, and to waitingForVector", async () => {
+  it("hands the store its clock's value by meaning too", async () => {
     const catalog = recordingCatalog();
     await callRoute(
       route(catalog as unknown as CatalogStore, model, () => 5_678),
@@ -401,9 +401,9 @@ describe("GET /discovery/search's clock (0154)", () => {
       },
     );
     expect(catalog.search).toHaveBeenCalledWith(
-      expect.objectContaining({ now: 5_678, meaning: expect.any(Array) }),
+      expect.objectContaining({ meaning: expect.any(Array) }),
+      5_678,
     );
-    expect(catalog.waitingForVector).toHaveBeenCalledWith(expect.objectContaining({ now: 5_678 }));
   });
 
   it("reads the clock on each request, Date.now when none is given", async () => {
@@ -415,9 +415,7 @@ describe("GET /discovery/search's clock (0154)", () => {
       await callRoute(handler, { query: "weather" });
       vi.setSystemTime(2_000_000);
       await callRoute(handler, { query: "weather" });
-      expect(catalog.search.mock.calls.map(([search]) => search.now)).toEqual([
-        1_000_000, 2_000_000,
-      ]);
+      expect(catalog.search.mock.calls.map(([, now]) => now)).toEqual([1_000_000, 2_000_000]);
     } finally {
       vi.useRealTimers();
     }

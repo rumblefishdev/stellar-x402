@@ -1305,9 +1305,8 @@ describe("PostgreSQL stores", () => {
         resource: { ...entry.resource, resource: url, description: "weather" },
       });
     }
-    const now = Date.now();
     const ratio = async () => {
-      const hits = await catalog.search({ text: "weather", limit: 10, now });
+      const hits = await catalog.search({ text: "weather", limit: 10 }, Date.now());
       const rank = (url: string) => Number(hits.find((hit) => hit.key.resourceUrl === url)!.rank);
       return Math.round((rank(tunnel) / rank(base)) * 1e6) / 1e6;
     };
@@ -1378,10 +1377,10 @@ describe("PostgreSQL stores", () => {
     const entry = catalogEntry();
     await catalog.upsert(entry);
     await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
-    expect(await catalog.waitingForVector({ text: "x", limit: 10, now: Date.now() })).toBe(false);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
     // As after a rewrite that could not read the listings: the listing stands, its card is gone.
     await pool.query("DELETE FROM catalog_search");
-    expect(await catalog.waitingForVector({ text: "x", limit: 10, now: Date.now() })).toBe(true);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
   });
 
   it("refuses a write of a card's model: only the database says which vector is current", async () => {
@@ -1397,24 +1396,26 @@ describe("PostgreSQL stores", () => {
     const entry = catalogEntry();
     await catalog.upsert(entry);
     await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
-    expect(await catalog.waitingForVector({ text: "x", limit: 10, now: Date.now() })).toBe(false);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(false);
     // As the release before this one writes a card: the text only, its vector untouched.
     await pool.query("UPDATE catalog_search SET description = 'Currency rates'");
     expect((await readCards(pool)).map((card) => [card.model, card.embedding])).toEqual([
       [null, null],
     ]);
-    expect(await catalog.waitingForVector({ text: "x", limit: 10, now: Date.now() })).toBe(true);
+    expect(await catalog.waitingForVector({ text: "x", limit: 10 })).toBe(true);
     // The start's pass reads it again, and the search by meaning leaves it out meanwhile.
     expect((await searchCards.cards("0", 10)).map((card) => card.description)).toEqual([
       "Currency rates",
     ]);
     expect(
-      await catalog.search({
-        text: "x",
-        limit: 10,
-        now: Date.now(),
-        meaning: unitVector(0.8),
-      }),
+      await catalog.search(
+        {
+          text: "x",
+          limit: 10,
+          meaning: unitVector(0.8),
+        },
+        Date.now(),
+      ),
     ).toEqual([]);
   });
 

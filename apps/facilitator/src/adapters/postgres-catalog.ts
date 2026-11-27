@@ -174,9 +174,9 @@ export class PostgresCatalogStore implements CatalogStore {
    * but spaces. Counting after the matches are found keeps the planner from a nested loop over
    * all listings (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).
    */
-  async search(query: CatalogSearch): Promise<CatalogSearchHit[]> {
-    if (query.meaning !== undefined) return this.searchFused(query, query.meaning);
-    const { text, type, payTo, network, limit, after, now } = query;
+  async search(query: CatalogSearch, now: number): Promise<CatalogSearchHit[]> {
+    if (query.meaning !== undefined) return this.searchFused(query, query.meaning, now);
+    const { text, type, payTo, network, limit, after } = query;
     const { rows } = await this.listPool.query<HitRow>(
       `WITH m AS MATERIALIZED (
                SELECT seq, network, pay_to, method, resource_url, description, resource->'accepts' AS accepts, host,
@@ -272,8 +272,12 @@ export class PostgresCatalogStore implements CatalogStore {
    * does. The score is then times the listing's quality factor q, counted as in `search`; the
    * positions are counted before it.
    */
-  private async searchFused(query: CatalogSearch, meaning: number[]): Promise<CatalogSearchHit[]> {
-    const { text, type, payTo, network, limit, after, now } = query;
+  private async searchFused(
+    query: CatalogSearch,
+    meaning: number[],
+    now: number,
+  ): Promise<CatalogSearchHit[]> {
+    const { text, type, payTo, network, limit, after } = query;
     const { rows } = await this.listPool.query<HitRow>(
       `WITH m AS MATERIALIZED (
                SELECT seq, network, pay_to, method, resource_url, description, accepts, host,

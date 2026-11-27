@@ -60,8 +60,6 @@ export interface CatalogSearch {
   after?: CatalogSearchPosition;
   /** The query's vector, of the store's model; without it, search ranks by words alone. */
   meaning?: number[];
-  /** The app's clock, in ms: the payments of the 30 days before it raise a listing (ADR 0014). */
-  now: number;
 }
 
 /**
@@ -105,10 +103,10 @@ export interface CatalogStore {
    * tags, description and parameters, and each repeat counts again (threat model, "Ranking by
    * repeated words"). Either rank is then multiplied by the listing's quality factor q: its paying
    * wallets of the 30 days before `now`, read from the settlements, a tunnel host and an empty
-   * description (ADR 0014). Equal ranks go by key, so a page that starts `after` a result goes on
+   * description (ADR 0014); `now` is the app's clock, in ms. Equal ranks go by key, so a page that starts `after` a result goes on
    * where the page before stopped, unless a write between the pages moved the ranks.
    */
-  search(query: CatalogSearch): Promise<CatalogSearchHit[]>;
+  search(query: CatalogSearch, now: number): Promise<CatalogSearchHit[]>;
   /**
    * Whether a listing that passes `query`'s filters has no vector of the store's model yet, or no
    * card at all (ADR 0014): search by meaning can't find it, so an answer by meaning is partial.

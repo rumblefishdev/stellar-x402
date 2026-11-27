@@ -2170,7 +2170,7 @@ export function catalogSearchContract(make: Make<CatalogStore>) {
   describe("CatalogStore search by words (0120, ADR 0014)", () => {
     type Search = Parameters<CatalogStore["search"]>[0];
     const search = (text: string, query: Partial<Search> = {}) =>
-      store.search({ text, limit: 10, now: Date.now(), ...query });
+      store.search({ text, limit: 10, ...query }, Date.now());
     const urls = async (text: string, query: Partial<Search> = {}) =>
       (await search(text, query)).map((hit) => hit.resource.resource);
     const listing = (url: string, overrides: Partial<DiscoveryResource>) =>
@@ -2481,13 +2481,15 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
       if (cos !== null) await setVector(k, model, unitVector(cos));
     };
     const fused = (text: string, query: Partial<Search> = {}) =>
-      catalog.search({
-        text,
-        limit: 100,
-        now: Date.now(),
-        meaning: QUERY_VECTOR,
-        ...query,
-      } as Search);
+      catalog.search(
+        {
+          text,
+          limit: 100,
+          meaning: QUERY_VECTOR,
+          ...query,
+        } as Search,
+        Date.now(),
+      );
     const hosts = (hits: { resource: DiscoveryResource }[]) =>
       hits.map((hit) => new URL(hit.resource.resource).hostname.split(".")[0]);
     /** The fused score of 0120 point G; a missing rank adds no term. */
@@ -2623,7 +2625,7 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
 
     it("says a listing that passes the filters waits for a vector of the model (ADR 0014)", async () => {
       const waiting = (network?: string) =>
-        catalog.waitingForVector({ text: "x", limit: 10, now: Date.now(), network });
+        catalog.waitingForVector({ text: "x", limit: 10, network });
       await listing(key("a"), { description: "Tides" }, 0.9);
       expect(await waiting()).toBe(false);
       await listing(key("b"), { description: "Waves" }, null);
@@ -2644,7 +2646,7 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
 
     it("ranks by words alone without a query vector, listings without a vector included (H)", async () => {
       await listing(key("n"), { description: "weather" }, null);
-      expect(hosts(await catalog.search({ text: "weather", limit: 10, now: Date.now() }))).toEqual([
+      expect(hosts(await catalog.search({ text: "weather", limit: 10 }, Date.now()))).toEqual([
         "n",
       ]);
     });
@@ -2790,10 +2792,10 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
       for (let i = 0; i < count; i++) await pay(k);
     };
 
-    const words = (text: string, query: Partial<Search> = {}) =>
-      catalog.search({ text, limit: 100, now: QUALITY_NOW, ...query });
+    const words = (text: string, query: Partial<Search> = {}, now = QUALITY_NOW) =>
+      catalog.search({ text, limit: 100, ...query }, now);
     const fused = (text: string, query: Partial<Search> = {}) =>
-      catalog.search({ text, limit: 100, now: QUALITY_NOW, meaning: QUERY_VECTOR, ...query });
+      catalog.search({ text, limit: 100, meaning: QUERY_VECTOR, ...query }, QUALITY_NOW);
     const urlsOf = (hits: Hit[]) => hits.map((hit) => hit.resource.resource);
     const hitOf = (hits: Hit[], url: string) => {
       const hit = hits.find((h) => h.key.resourceUrl === url);
@@ -2898,7 +2900,7 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
           [k.resourceUrl]: round6(qualityFactor(1)),
         });
         // One ms later the payment of exactly 30 days is out too: the window moves with `now`.
-        expect(ratios(await words("weather", { now: QUALITY_NOW + 1 }), BASE)).toMatchObject({
+        expect(ratios(await words("weather", {}, QUALITY_NOW + 1), BASE)).toMatchObject({
           [k.resourceUrl]: 1,
         });
       });

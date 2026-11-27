@@ -113,13 +113,7 @@ function writeCursor({ rank, key }: CatalogSearchPosition, ranked: Ranking): str
  * was ranked, when the request sent one.
  */
 export type SearchQuery =
-  | {
-      kind: "query";
-      search: Omit<CatalogSearch, "now">;
-      limit: number;
-      ignored: string[];
-      cursor?: Ranking;
-    }
+  | { kind: "query"; search: CatalogSearch; limit: number; ignored: string[]; cursor?: Ranking }
   | { kind: "empty"; ignored: string[] }
   | { kind: "invalid"; param: string };
 
@@ -146,7 +140,7 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
     (extensions !== undefined && !CATALOGED_EXTENSIONS.includes(extensions))
   )
     return { kind: "empty", ignored };
-  const search: Omit<CatalogSearch, "now"> = { text: query, ...filters, limit: limit + 1 };
+  const search: CatalogSearch = { text: query, ...filters, limit: limit + 1 };
   if (after === undefined) return { kind: "query", search, limit, ignored };
   search.after = { rank: after.rank, key: after.key };
   const { ranking, model } = after;
@@ -219,9 +213,11 @@ export function discoverySearch(
       res.status(400).json({ error: "bad_request", param: "cursor" });
       return;
     }
-    const search: CatalogSearch = { ...parsed.search, now: now() };
     const startedAt = performance.now();
-    const hits = await catalog.search(meaning === undefined ? search : { ...search, meaning });
+    const hits = await catalog.search(
+      meaning === undefined ? parsed.search : { ...parsed.search, meaning },
+      now(),
+    );
     const ms = Math.round(performance.now() - startedAt);
     if (meaning !== undefined && ms > SEARCH_SLOW_MS) {
       logger.warn("search_slow", { ms, hits: hits.length });
@@ -234,7 +230,7 @@ export function discoverySearch(
       resources: page.map((hit) => hit.resource),
       // Partial too while a listing that passes the filters has no vector yet: search by meaning
       // can't find it (ADR 0014).
-      partialResults: meaning === undefined || (await catalog.waitingForVector(search)),
+      partialResults: meaning === undefined || (await catalog.waitingForVector(parsed.search)),
       pagination: {
         limit: page.length,
         cursor: more ? writeCursor(page.at(-1)!, ranked) : null,
