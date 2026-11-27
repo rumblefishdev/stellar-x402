@@ -404,6 +404,8 @@ describe("GET /discovery/search's clock (0154)", () => {
       expect.objectContaining({ meaning: expect.any(Array) }),
       5_678,
     );
+    // waitingForVector reads no clock: the query alone.
+    expect(catalog.waitingForVector.mock.calls[0]).toHaveLength(1);
   });
 
   it("reads the clock on each request, Date.now when none is given", async () => {

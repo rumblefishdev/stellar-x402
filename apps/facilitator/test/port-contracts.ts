@@ -2961,6 +2961,40 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
         });
       });
 
+      it("stops counting payments on terms the listing no longer offers, and counts them again when it offers them again", async () => {
+        const k = key("https://paid.example/x");
+        await listing(key(BASE), WEATHER);
+        const offerAt = (amount: string, checkedAt: number) =>
+          catalog.upsert({
+            keyVersion: CATALOG_KEY_VERSION,
+            ledger: 1,
+            checkedAt,
+            key: k,
+            resource: {
+              resource: k.resourceUrl,
+              type: "http",
+              x402Version: 2,
+              accepts: [requirements({ network: k.network, payTo: k.payTo, amount })],
+              lastUpdated: "2026-11-26T00:00:00.000Z",
+              ...WEATHER,
+            },
+          });
+        expect(await offerAt("1000", 1)).toBe("inserted");
+        await pay(k, { terms: { amount: "1000" } });
+        await pay(k, { terms: { amount: "1000" } });
+        expect(ratios(await words("weather"), BASE)).toMatchObject({
+          [k.resourceUrl]: round6(qualityFactor(2)),
+        });
+        // The seller raises the price: the two payments match no offer now.
+        expect(await offerAt("2000", 2)).toBe("updated");
+        expect(ratios(await words("weather"), BASE)).toMatchObject({ [k.resourceUrl]: 1 });
+        // The old price returns: nothing was erased, they count again.
+        expect(await offerAt("1000", 3)).toBe("updated");
+        expect(ratios(await words("weather"), BASE)).toMatchObject({
+          [k.resourceUrl]: round6(qualityFactor(2)),
+        });
+      });
+
       it("lowers a listing on a tunnel host ×0.9: each of the 13, a subdomain of one, with a port", async () => {
         await listing(key(BASE), WEATHER);
         const urls = [
