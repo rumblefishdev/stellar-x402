@@ -2667,7 +2667,7 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
 /** What the quality contract needs: the catalog, its vectors, and the settlements of one database. */
 export interface QualityFixture extends MeaningFixture {
   settlements: SettlementStore;
-  /** The stellar.toml proofs (0070), whose curated listings get ×1.1. */
+  /** The stellar.toml proofs (0070), each counted as 3 paying wallets. */
   curation: CurationStore;
 }
 
@@ -3203,7 +3203,7 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
     });
 
     describe("curated (0070)", () => {
-      it("multiplies a curated listing's q by 1.1, within q's cap of 1.2", async () => {
+      it("counts a curated listing's proof as 3 paying wallets: none ×1.12, 1 ×1.1333, 10 ×1.1733", async () => {
         const urls = ["curated", "one", "ten", "disproved"].map(
           (name) => `https://${name}.example/x`,
         );
@@ -3218,23 +3218,22 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
         await payByWallets(key("https://ten.example/x"), 10);
         expect(ratios(await words("weather"), BASE)).toEqual({
           [BASE]: 1,
-          "https://curated.example/x": 1.1,
-          "https://one.example/x": round6(qualityFactor(1) * 1.1),
-          // 1.1667 × 1.1 = 1.2833, held at the cap.
-          "https://ten.example/x": 1.2,
+          "https://curated.example/x": round6(qualityFactor(3)),
+          "https://one.example/x": round6(qualityFactor(1 + 3)),
+          "https://ten.example/x": round6(qualityFactor(10 + 3)),
           "https://disproved.example/x": 1,
-          "https://x.ts.net/x": round6(1.1 * 0.9),
+          "https://x.ts.net/x": round6(qualityFactor(3, true)),
         });
       });
 
-      it("multiplies the fused score by 1.1 too", async () => {
+      it("counts the proof as 3 wallets in the fused score too", async () => {
         await listing(key("https://a.example/x"), { description: "Tides" }, 0.95);
         await listing(key("https://b.example/x"), { description: "Tides" }, 0.9);
         await curate(key("https://b.example/x"));
         const hits = await fused("zebra");
         expect(urlsOf(hits)).toEqual(["https://b.example/x", "https://a.example/x"]);
         expect(hits.map((hit) => Number(hit.rank))).toEqual([
-          expect.closeTo(score(2) * 1.1, 6),
+          expect.closeTo(score(2) * qualityFactor(3), 6),
           expect.closeTo(score(1), 6),
         ]);
       });
@@ -3249,14 +3248,14 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
         await curate(old, true, QUALITY_NOW - 31 * DAY_MS);
         expect(ratios(await words("weather"), BASE)).toEqual({
           [BASE]: 1,
-          [recent.resourceUrl]: 1.1,
+          [recent.resourceUrl]: round6(qualityFactor(3)),
           [old.resourceUrl]: 1,
         });
         // Equal by meaning and by words, the fused positions go by key: base, old, recent.
         expect(
           (await fused("weather")).map((hit) => [hit.key.resourceUrl, Number(hit.rank)]),
         ).toEqual([
-          [recent.resourceUrl, expect.closeTo(score(3, 3) * 1.1, 6)],
+          [recent.resourceUrl, expect.closeTo(score(3, 3) * qualityFactor(3), 6)],
           [BASE, expect.closeTo(score(1, 1), 6)],
           [old.resourceUrl, expect.closeTo(score(2, 2), 6)],
         ]);

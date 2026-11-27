@@ -180,9 +180,9 @@ export class PostgresCatalogStore implements CatalogStore {
    * The rank is the words' rank times the listing's quality factor q (ADR 0014), counted here from
    * the stored settlements: 1 + 0.2 × p / (p + 2), where p is the distinct wallets that paid for
    * the listing from 30 days before `now` on, its own `payTo` left out, and only on terms equal to
-   * one of its offers; × 1.1 when its host's `stellar.toml` proved its `payTo` in a check of the
-   * same 30 days (0070), with these two together at most 1.2; × 0.9 on a tunnel host; × 0.9 when
-   * the card's description holds nothing but spaces. Each hit's `curated` is that same proof.
+   * one of its offers, plus 3 when its host's `stellar.toml` proved its `payTo` in a check of the
+   * same 30 days (0070); × 0.9 on a tunnel host; × 0.9 when the card's description holds nothing
+   * but spaces. Each hit's `curated` is that same proof.
    * Counting after the matches are found keeps the planner from a nested loop over all listings
    * (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).
    */
@@ -231,17 +231,21 @@ export class PostgresCatalogStore implements CatalogStore {
                                   AND k.checked_at >= $13)) AS resource
          FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url, m.host,
                       (m.base
-                       * least(1.2, (1 + 0.2 * paid.payers / (paid.payers + 2.0))
-                                    * CASE WHEN EXISTS (SELECT 1 FROM catalog_curation k
-                                            WHERE k.network = m.network AND k.host = m.host
-                                              AND k.pay_to = m.pay_to AND k.curated
-                                              AND k.checked_at >= $13)
-                              THEN 1.1 ELSE 1 END)
+                       * (1 + 0.2 * w.wallets / (w.wallets + 2.0))
                        * CASE WHEN EXISTS (SELECT 1 FROM unnest($12::text[]) AS tunnel(host)
                                             WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
                               THEN 0.9 ELSE 1 END
                        * CASE WHEN m.description !~ '\\S' THEN 0.9 ELSE 1 END)::real AS rank
-                 FROM m JOIN paid USING (seq)) p
+                 FROM m JOIN paid USING (seq)
+                      -- A stellar.toml proof checked in the last 30 days counts as 3 paying wallets
+                      -- (0070): about the x1.1 measured on CDP's catalog, and q stays below 1.2.
+                      CROSS JOIN LATERAL (
+                        SELECT paid.payers + CASE WHEN EXISTS (
+                                 SELECT 1 FROM catalog_curation k
+                                  WHERE k.network = m.network AND k.host = m.host
+                                    AND k.pay_to = m.pay_to AND k.curated
+                                    AND k.checked_at >= $13)
+                               THEN 3 ELSE 0 END AS wallets) w) p
          JOIN catalog c USING (seq)
         WHERE $5::real IS NULL
            OR p.rank < $5::real
@@ -383,17 +387,21 @@ export class PostgresCatalogStore implements CatalogStore {
                                   AND k.checked_at >= $15)) AS resource
          FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url, m.host,
                       m.base
-                      * least(1.2, (1 + 0.2 * paid.payers / (paid.payers + 2.0))
-                                   * CASE WHEN EXISTS (SELECT 1 FROM catalog_curation k
-                                            WHERE k.network = m.network AND k.host = m.host
-                                              AND k.pay_to = m.pay_to AND k.curated
-                                              AND k.checked_at >= $15)
-                              THEN 1.1 ELSE 1 END)::float8
+                      * (1 + 0.2 * w.wallets / (w.wallets + 2.0))::float8
                       * CASE WHEN EXISTS (SELECT 1 FROM unnest($14::text[]) AS tunnel(host)
                                            WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
                              THEN 0.9 ELSE 1 END
                       * CASE WHEN m.description !~ '\\S' THEN 0.9 ELSE 1 END AS rank
-                 FROM m JOIN paid USING (seq)) p
+                 FROM m JOIN paid USING (seq)
+                      -- A stellar.toml proof checked in the last 30 days counts as 3 paying wallets
+                      -- (0070): about the x1.1 measured on CDP's catalog, and q stays below 1.2.
+                      CROSS JOIN LATERAL (
+                        SELECT paid.payers + CASE WHEN EXISTS (
+                                 SELECT 1 FROM catalog_curation k
+                                  WHERE k.network = m.network AND k.host = m.host
+                                    AND k.pay_to = m.pay_to AND k.curated
+                                    AND k.checked_at >= $15)
+                               THEN 3 ELSE 0 END AS wallets) w) p
          JOIN catalog c USING (seq)
         WHERE $7::float8 IS NULL
            OR p.rank < $7::float8
