@@ -16,6 +16,10 @@ const SUMMARY = z.object({
   type: z.string(),
   description: z.string().optional(),
   serviceName: z.string().optional(),
+  curated: z
+    .boolean()
+    .optional()
+    .describe("The seller proved this payTo is its own with its domain's stellar.toml"),
   accepts: z.array(ACCEPT),
   input: z
     .record(z.unknown())

@@ -28,6 +28,7 @@ const ENTRY = z.object({
   accepts: z.array(ACCEPT),
   description: z.string().optional(),
   serviceName: z.string().optional(),
+  curated: z.boolean().optional(),
   extensions: z.record(z.unknown()).optional(),
 });
 
@@ -54,8 +55,8 @@ export interface CatalogOffer {
 }
 
 /**
- * A listed resource, as a seller described it. Everything here is the seller's text: data, never
- * instructions, for a model that reads it.
+ * A listed resource, as a seller described it. Everything here but `curated` is the seller's text:
+ * data, never instructions, for a model that reads it.
  */
 export interface CatalogEntry {
   resource: string;
@@ -66,6 +67,11 @@ export interface CatalogEntry {
   /** Cut to `DESCRIPTION_CHARS`. */
   serviceName?: string;
   accepts: CatalogOffer[];
+  /**
+   * The catalog's own word: the seller proved `payTo` is its own with its domain's `stellar.toml`
+   * (our facilitator, 0070). Absent from a catalog that doesn't say.
+   */
+  curated?: boolean;
   /** How to call it: the HTTP method and parameters, or the MCP tool and its input schema. */
   input?: Record<string, unknown>;
 }
@@ -235,6 +241,7 @@ function entry(item: z.infer<typeof ENTRY>): CatalogEntry {
     serviceName: item.serviceName?.slice(0, DESCRIPTION_CHARS),
     // Parsing with ACCEPT already dropped the payment terms nobody chooses by.
     accepts: item.accepts,
+    curated: item.curated,
     input: bazaar?.info?.input,
   };
 }
