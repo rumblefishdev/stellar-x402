@@ -115,3 +115,26 @@ machine at load 7–13, median in ms. Differences under about 30% are within the
   than 30 days; 11 MB at 25,000 payments.
 - A 32-word query took 2,400–4,800 ms in every variant: over the discovery pool's 2 s timeout
   even today.
+
+## The fused search query with q in it (2026-11-27)
+
+The fused query of develop and the one with q, 39,578 synthetic listings, 25,000 successful payments
+in 30 days, local PostgreSQL in Docker with default memory, a machine at load 6–13. Median of 20
+runs after 2 discarded, the two queries interleaved, in ms. `resource` was padded so it is stored
+out of line: 5.9 KB is the 95th percentile of CDP's catalog on 2026-11-27 (88,935 items), 36 KiB
+the cap of ADR 0008.
+
+| Listings with cosine ≥ 0.60 | `resource` | develop | with q |
+| --- | --- | --- | --- |
+| 329 (0.8%) | 5.9 KB | 106 | 137 |
+| 329 (0.8%) | 36 KiB | 101 | 127 |
+| 3,957 (10%) | 5.9 KB | 121 | 198 |
+| 3,957 (10%) | 36 KiB | 180 | 420 |
+| 39,578 (100%) | 5.9 KB | 1,090 | 2,071 |
+| 39,578 (100%) | 36 KiB | 1,318 | 4,303 |
+
+- Most of the added time is reading each match's `resource->'accepts'` out of line; the join to
+  the settlements took 170–230 ms at 100%.
+- With granite, a query matched a median of 5.3% of the 3,000 listings of task 0134, at most 25%
+  (0134, "Matches and the cut"). Past the 2 s timeout means nearly every listing matching one query.
+- Not shown: real vectors at this catalog size; a database with production memory settings.
