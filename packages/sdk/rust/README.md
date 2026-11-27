@@ -56,6 +56,20 @@ SELLER_ADDRESS=G... cargo run --example weather
 curl -i "http://localhost:4020/weather?city=Warsaw"   # 402 with the PAYMENT-REQUIRED header
 ```
 
+## Connect at start, or on the first request
+
+`PaymentGate::connect(facilitator).await?` reads the facilitator's `/supported` at start: a seller
+with a wrong facilitator URL, or a route on a network the facilitator does not settle, does not
+start. Use it for a server that runs for long.
+
+`PaymentGate::lazy(facilitator)` makes no call. The first request to a paid route, with or without
+a payment, reads `/supported`, and the answer is kept for the gate's life. Use it where a start
+must not wait for the facilitator, as on AWS Lambda, where it would also happen on every cold
+start. Until a read succeeds, a paid route answers 502 or 500 as upstream's middleware answers a
+facilitator it could not read at start, the route does not run, and the next request reads again.
+That read is given at most 5 seconds. A route on a network the facilitator does not settle
+answers 500 on every request and reports `PaymentEvent::Unsupported`: watch for it in `on_event`.
+
 ## What a request gets
 
 The same answer, for the same request and the same facilitator answer, as `@x402/express` 2.31.0
@@ -73,6 +87,7 @@ messages word for word. A 402 with an `error` repeats it in the body, `{"error":
 | A valid payment, and the route answers 400 or above                        | the route's answer; nothing is settled, so the buyer pays nothing                                                                                                                           |
 | The route answered, and the facilitator won't settle or can't              | 402, an empty body, `PAYMENT-RESPONSE` with the reason (for an error status, upstream's message); the route's answer is not sent                                                            |
 | The facilitator answers `settlement_pending` with a transaction hash       | `/settle` is asked once more, as upstream does, and that answer counts. A second `settlement_pending` is 402 while the transaction may still land: the buyer can pay and get nothing        |
+| A lazy gate's first read of `/supported` fails                             | 502 and upstream's message when the answer is late or can't be read, else 500 `{"error": "Internal Server Error"}`; the route does not run                                                  |
 | A facilitator answer that is not JSON, not what the route returns, or late | 502, `{"error": "Facilitator verify returned invalid JSON: …"}` or `… request timed out after 90000ms`                                                                                      |
 
 The facilitator's answers are read as upstream's client reads them: at most 1 MiB (a longer one is
@@ -118,7 +133,7 @@ as our facilitator's `reason`), the cause of each failure, and the catalog's ans
 | `Extension<Payer>` in a handler         | the account that paid, as `/verify` named it; the only way a handler learns who paid                                                                                                                                                             |
 
 A mistyped `payTo` or token contract, and a network the facilitator does not settle on, stop the
-seller at start.
+seller at start; a lazy gate finds the network on its first request.
 
 A listed route with a path parameter, such as `/assets/{id}/price`, is one listing and not one per
 asset: its 402 names the template (`routeTemplate: "/assets/:id/price"`) and the request's value

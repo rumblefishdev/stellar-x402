@@ -49,39 +49,52 @@ async fn seller_on(
     base_url: Option<&str>,
     facilitator: Facilitator,
 ) -> Seller {
+    let gate = PaymentGate::connect(facilitator).await.unwrap();
+    seller_behind(fake, base_url, gate, Network::Testnet).await
+}
+
+/// A seller whose gate reads `/supported` on its first request, at `https://api.example.com`.
+async fn lazy_seller(fake: FakeFacilitator, facilitator: Facilitator, network: Network) -> Seller {
+    let gate = PaymentGate::lazy(facilitator);
+    seller_behind(fake, Some("https://api.example.com"), gate, network).await
+}
+
+async fn seller_behind(
+    fake: FakeFacilitator,
+    base_url: Option<&str>,
+    gate: PaymentGate,
+    network: Network,
+) -> Seller {
     let served = Arc::new(AtomicUsize::new(0));
     let events = Arc::new(Mutex::new(Vec::new()));
     let seen = events.clone();
-    let mut gate = PaymentGate::connect(facilitator)
-        .await
-        .unwrap()
-        .on_event(move |event| {
-            let line = match event {
-                PaymentEvent::Settled(settled) => format!(
-                    "settled {} bazaar={}",
-                    settled.transaction,
-                    settled
-                        .extension_responses
-                        .as_ref()
-                        .and_then(|answers| answers.get("bazaar"))
-                        .map_or("none".to_owned(), Value::to_string)
-                ),
-                PaymentEvent::SettleRefused(settled) => {
-                    format!("settle refused {:?}", settled.error_reason)
-                }
-                PaymentEvent::VerifyRefused(verified) => {
-                    format!("verify refused {:?}", verified.invalid_reason)
-                }
-                PaymentEvent::FacilitatorFailed(error) => format!("facilitator failed: {error}"),
-                other => format!("{other:?}"),
-            };
-            seen.lock().unwrap().push(line);
-        });
+    let mut gate = gate.on_event(move |event| {
+        let line = match event {
+            PaymentEvent::Settled(settled) => format!(
+                "settled {} bazaar={}",
+                settled.transaction,
+                settled
+                    .extension_responses
+                    .as_ref()
+                    .and_then(|answers| answers.get("bazaar"))
+                    .map_or("none".to_owned(), Value::to_string)
+            ),
+            PaymentEvent::SettleRefused(settled) => {
+                format!("settle refused {:?}", settled.error_reason)
+            }
+            PaymentEvent::VerifyRefused(verified) => {
+                format!("verify refused {:?}", verified.invalid_reason)
+            }
+            PaymentEvent::FacilitatorFailed(error) => format!("facilitator failed: {error}"),
+            other => format!("{other:?}"),
+        };
+        seen.lock().unwrap().push(line);
+    });
     if let Some(base_url) = base_url {
         gate = gate.base_url(base_url);
     }
     let paid = gate
-        .charge(Network::Testnet, PAY_TO, Price::usdc("0.001").unwrap())
+        .charge(network, PAY_TO, Price::usdc("0.001").unwrap())
         .unwrap()
         .description("Current temperature for a city")
         .mime_type("application/json")
@@ -880,6 +893,119 @@ async fn a_route_on_a_network_the_facilitator_does_not_support_is_refused_at_sta
         ),
         "{error:?}"
     );
+}
+
+#[tokio::test]
+async fn a_lazy_gate_asks_the_facilitator_on_the_first_request_and_once() {
+    let fake = FakeFacilitator::start().await;
+    let facilitator = Facilitator::new(&fake.url).unwrap();
+    let seller = lazy_seller(fake, facilitator, Network::Testnet).await;
+    assert_eq!(seller.fake.paths(), Vec::<String>::new());
+
+    let first = seller.get("/weather?city=Warsaw").await;
+    let second = seller.get("/v1/weather?city=Warsaw").await;
+
+    assert_eq!(first.status(), 402);
+    assert_eq!(second.status(), 402);
+    assert_eq!(seller.fake.paths(), ["/supported"]);
+}
+
+#[tokio::test]
+async fn a_lazy_gate_answers_the_402_of_a_connected_one() {
+    let fake = FakeFacilitator::start().await;
+    let facilitator = Facilitator::new(&fake.url).unwrap();
+    let connected = seller_with(fake.clone(), Some("https://api.example.com")).await;
+    let lazy = lazy_seller(fake, facilitator, Network::Testnet).await;
+
+    let path = "/assets/native/price?city=Warsaw";
+    let wanted = decoded(&connected.get(path).await, "payment-required").unwrap();
+
+    assert_eq!(
+        decoded(&lazy.get(path).await, "payment-required").unwrap(),
+        wanted
+    );
+    assert_eq!(lazy.pay("/weather?city=Warsaw").await.status(), 200);
+}
+
+/// A payment for the seller's testnet terms, made without asking for them first.
+fn a_payment() -> Value {
+    json!({ "x402Version": 2, "accepted": support::terms(), "payload": {} })
+}
+
+#[tokio::test]
+async fn a_lazy_gate_answers_500_while_the_facilitator_fails_and_then_serves() {
+    let fake = FakeFacilitator::start().await;
+    fake.supported_replies(Reply::json(503, json!({ "error": "shutting_down" })));
+    let facilitator = Facilitator::new(&fake.url).unwrap();
+    let seller = lazy_seller(fake, facilitator, Network::Testnet).await;
+
+    let response = seller.pay_with("/weather?city=Warsaw", &a_payment()).await;
+
+    // `@x402/express` 2.31.0 answers a failed `initialize()` that is no
+    // `FacilitatorResponseError` with `sendInternalError`, and reads again on the next request
+    // (`prepareHttpServer`: `initPromise = null`).
+    assert_eq!(response.status(), 500);
+    assert!(response.headers().get("payment-required").is_none());
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "error": "Internal Server Error" })
+    );
+    assert_eq!(seller.served(), 0);
+    assert_eq!(seller.fake.paths(), ["/supported"]);
+    assert_eq!(seller.events().len(), 1);
+    assert!(seller.events()[0]
+        .starts_with("facilitator failed: the facilitator answered 503 on /supported"));
+
+    seller
+        .fake
+        .supported_replies(Reply::json(200, support::fixture("supported.json")));
+    let response = seller.pay_with("/weather?city=Warsaw", &a_payment()).await;
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(seller.served(), 1);
+}
+
+#[tokio::test]
+async fn a_facilitator_that_does_not_answer_ends_a_lazy_gates_request_at_its_timeout() {
+    let fake = FakeFacilitator::start().await;
+    let slow = Reply::json(200, support::fixture("supported.json")).after(Duration::from_secs(2));
+    fake.supported_replies(slow);
+    let facilitator = Facilitator::new(&fake.url)
+        .unwrap()
+        .with_timeout(Duration::from_millis(200));
+    let seller = lazy_seller(fake, facilitator, Network::Testnet).await;
+
+    let started = std::time::Instant::now();
+    let response = seller.get("/weather?city=Warsaw").await;
+
+    // Upstream's `sendFacilitatorError`, for a `FacilitatorResponseError` of `initialize()`.
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(response.status(), 502);
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "error": "Facilitator supported request timed out after 200ms" })
+    );
+    assert_eq!(seller.served(), 0);
+}
+
+#[tokio::test]
+async fn a_lazy_gate_refuses_a_network_the_facilitator_does_not_settle() {
+    // The fake supports testnet only. Upstream's `initialize()` throws a
+    // `RouteConfigurationError` here, which its middleware answers with `sendInternalError`.
+    let fake = FakeFacilitator::start().await;
+    let facilitator = Facilitator::new(&fake.url).unwrap();
+    let seller = lazy_seller(fake, facilitator, Network::Pubnet).await;
+
+    let response = seller.pay_with("/weather?city=Warsaw", &a_payment()).await;
+
+    assert_eq!(response.status(), 500);
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "error": "Internal Server Error" })
+    );
+    assert_eq!(seller.served(), 0);
+    assert_eq!(seller.fake.paths(), ["/supported"]);
+    assert_eq!(seller.events(), ["Unsupported(Pubnet)"]);
 }
 
 #[tokio::test]
