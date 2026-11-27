@@ -20,6 +20,7 @@ export type {
   CatalogSearchHit,
   CatalogSearchPosition,
   CatalogStore,
+  ListedResource,
   UpsertOutcome,
 } from "./catalog-store.js";
 export type { CurationKey, CurationRecord, CurationStore } from "./curation-store.js";

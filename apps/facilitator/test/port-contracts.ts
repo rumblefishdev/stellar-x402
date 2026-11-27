@@ -2015,7 +2015,10 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
         lastUpdated: "2026-10-09T00:00:00.000Z",
       });
       expect(page.items[0]?.accepts.map((a) => a.asset)).toEqual(["COTHER"]);
-      expect(await store.get(key(url))).toEqual(page.items[0]);
+      // `get` gives the stored entry; `list` adds `curated` to it (0070).
+      const { curated, ...stored } = page.items[0]!;
+      expect(curated).toBe(false);
+      expect(await store.get(key(url))).toEqual(stored);
       expect(await store.get(key("https://seller.example.com/none"))).toBeUndefined();
     });
 

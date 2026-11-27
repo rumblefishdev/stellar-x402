@@ -41,8 +41,14 @@ export interface CatalogQuery {
   offset: number;
 }
 
+/**
+ * A listing as `list` and `search` return it: the upstream shape and `curated`, whether its host's
+ * `stellar.toml` proof of its account passed (0070). Upstream has no such field.
+ */
+export type ListedResource = DiscoveryResource & { curated: boolean };
+
 export interface CatalogPage {
-  items: DiscoveryResource[];
+  items: ListedResource[];
   /** Matches before `limit` and `offset`. */
   total: number;
 }
@@ -72,7 +78,7 @@ export interface CatalogSearchPosition {
 }
 
 export interface CatalogSearchHit extends CatalogSearchPosition {
-  resource: DiscoveryResource;
+  resource: ListedResource;
 }
 
 /** `stale`: the stored entry came from a check that started later; nothing was written. */
@@ -82,7 +88,7 @@ export type UpsertOutcome = "inserted" | "updated" | "stale";
 export interface CatalogStore {
   /** The model the cards' vectors and the query's are of (ADR 0014); a cursor names it. */
   readonly searchModel: string;
-  /** The stored entry of `key`, as `list` returns it. */
+  /** The stored entry of `key`, as `list` returns it without `curated`. */
   get(key: CatalogKey): Promise<DiscoveryResource | undefined>;
   /**
    * Idempotent by key. Replaces the stored entry, `accepts` included, unless the stored one came

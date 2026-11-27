@@ -13,6 +13,7 @@ import type {
   CatalogSearch,
   CatalogSearchHit,
   CatalogStore,
+  ListedResource,
   UpsertOutcome,
 } from "../ports/index.js";
 import { assertCount, extensionKeys } from "./rules.js";
@@ -122,7 +123,7 @@ export class PostgresCatalogStore implements CatalogStore {
       [type ?? null, payTo ?? null, network ?? null, extensions ?? null, limit, offset],
     );
     const page = rows[0]!;
-    return { items: page.items, total: Number(page.total) };
+    return { items: await this.withCuration(page.items), total: Number(page.total) };
   }
 
   /**
@@ -181,7 +182,38 @@ export class PostgresCatalogStore implements CatalogStore {
         limit,
       ],
     );
-    return rows.map(hitOf);
+    return this.hitsOf(rows);
+  }
+
+  /**
+   * Each resource with `curated`: whether its host's `stellar.toml` proof of its account passed
+   * (0070), read from `catalog_curation` in one query for the page. Every offer in `accepts` is to
+   * the listing key's network and `payTo`, so the first names them; the host is the WHATWG URL
+   * parser's, as the check stores it.
+   */
+  private async withCuration(resources: DiscoveryResource[]): Promise<ListedResource[]> {
+    const keys = resources.map((resource) => ({
+      network: resource.accepts[0]!.network,
+      host: new URL(resource.resource).hostname,
+      payTo: resource.accepts[0]!.payTo,
+    }));
+    const { rows } = await this.listPool.query<{ network: string; host: string; pay_to: string }>(
+      `SELECT network, host, pay_to FROM catalog_curation
+        WHERE curated
+          AND (network, host, pay_to) IN
+              (SELECT * FROM unnest($1::text[], $2::text[], $3::text[]))`,
+      [keys.map((key) => key.network), keys.map((key) => key.host), keys.map((key) => key.payTo)],
+    );
+    const curated = new Set(rows.map((row) => `${row.network} ${row.host} ${row.pay_to}`));
+    return resources.map((resource, i) => {
+      const key = keys[i]!;
+      return { ...resource, curated: curated.has(`${key.network} ${key.host} ${key.payTo}`) };
+    });
+  }
+
+  private async hitsOf(rows: HitRow[]): Promise<CatalogSearchHit[]> {
+    const resources = await this.withCuration(rows.map((row) => row.resource));
+    return rows.map((row, i) => ({ ...hitOf(row), resource: resources[i]! }));
   }
 
   async waitingForVector(query: CatalogSearch): Promise<boolean> {
@@ -259,7 +291,7 @@ export class PostgresCatalogStore implements CatalogStore {
         limit,
       ],
     );
-    return rows.map(hitOf);
+    return this.hitsOf(rows);
   }
 }
 
@@ -273,7 +305,7 @@ interface HitRow {
   resource: DiscoveryResource;
 }
 
-const hitOf = (row: HitRow): CatalogSearchHit => ({
+const hitOf = (row: HitRow): Omit<CatalogSearchHit, "resource"> => ({
   rank: row.rank,
   key: {
     network: row.network,
@@ -281,7 +313,6 @@ const hitOf = (row: HitRow): CatalogSearchHit => ({
     method: row.method,
     resourceUrl: row.resource_url,
   },
-  resource: row.resource,
 });
 
 /**
