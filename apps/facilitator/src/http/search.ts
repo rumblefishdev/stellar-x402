@@ -155,13 +155,14 @@ export function parseSearchQuery(raw: Record<string, unknown>): SearchQuery {
  * matches by meaning were not looked for. A fused cursor while it ranks by words gets a 503 to
  * retry; a cursor of another ranking or model, a 400. A fused query slower than `SEARCH_SLOW_MS`
  * is logged and counted. A store failure rejects, and the shared error handler answers it with a
- * 500.
+ * 500. `now` is the clock the payments' 30-day window ends at.
  */
 export function discoverySearch(
   catalog: CatalogStore,
   embedder: Embedder,
   logger: Logger,
   metrics: ProcessMetrics,
+  now: () => number = Date.now,
 ): RequestHandler {
   return async (req, res) => {
     const parsed = parseSearchQuery(req.query);
@@ -215,6 +216,7 @@ export function discoverySearch(
     const startedAt = performance.now();
     const hits = await catalog.search(
       meaning === undefined ? parsed.search : { ...parsed.search, meaning },
+      now(),
     );
     const ms = Math.round(performance.now() - startedAt);
     if (meaning !== undefined && ms > SEARCH_SLOW_MS) {

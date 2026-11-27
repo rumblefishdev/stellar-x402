@@ -416,6 +416,16 @@ ALTER TABLE catalog_search
 ALTER TABLE catalog_search ALTER COLUMN embedding SET STORAGE PLAIN;
 `,
   },
+  {
+    // 0154: the listing's host on its card, which the search's quality factor reads for a tunnel
+    // (ADR 0014); the card's writers take it from the WHATWG URL parser. A column with a constant
+    // default changes only the table's metadata. A card written before it, or by the release
+    // before, holds '' and gets no tunnel penalty until the card rewrite at start writes it.
+    name: "0021_catalog_search_host",
+    sql: `
+ALTER TABLE catalog_search ADD COLUMN host text NOT NULL DEFAULT '';
+`,
+  },
 ];
 
 /** Runs in one transaction with the transactional migrations next to it, as before 0067. */

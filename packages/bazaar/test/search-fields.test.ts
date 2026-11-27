@@ -37,6 +37,7 @@ describe("searchFields", () => {
       tags: "",
       description: "Current temperature for a city",
       parameters: "city",
+      host: "back-pvc-missions-bench.trycloudflare.com",
     });
   });
 
@@ -68,6 +69,7 @@ describe("searchFields", () => {
       tags: "ocean tides",
       description: "Tide tables High and low water for a port A port and a day",
       parameters: "day port UN/LOCODE of the port",
+      host: "sea.example",
     });
   });
 
@@ -176,6 +178,7 @@ describe("searchFields", () => {
       tags: "",
       description: "weather",
       parameters: "",
+      host: "",
     });
   });
 
@@ -205,6 +208,28 @@ describe("searchFields", () => {
       tags: "weather",
       description: "Daily forecast",
       parameters: "city City name",
+      host: "a.example",
     });
+  });
+
+  it("reads the listing's host as the WHATWG URL parser does: lower case, no port, empty when it is no URL", () => {
+    const hostOf = (resource: unknown) =>
+      searchFields({ ...listing({}), resource } as unknown as DiscoveryResource).host;
+    expect(hostOf("https://x.ngrok.io:8443/a")).toBe("x.ngrok.io");
+    expect(hostOf("https://Seller.Example.com/a")).toBe("seller.example.com");
+    expect(hostOf("not a url")).toBe("");
+    expect(hostOf(undefined)).toBe("");
+    expect(hostOf({ href: "https://seller.example/x" })).toBe("");
+  });
+
+  it("reads an MCP listing's host from its URL; the host changes none of the other four fields", () => {
+    const tool = (resource: string) =>
+      listing({ resource, type: "mcp", serviceName: "Sea levels", description: "Tide tables" });
+    const { host, ...others } = searchFields(tool("https://Tools.Example:9000/mcp"));
+    expect(host).toBe("tools.example");
+    const { host: elsewhere, ...same } = searchFields(tool("https://other.example/mcp"));
+    expect(elsewhere).toBe("other.example");
+    expect(others).toEqual(same);
+    expect(Object.keys(others).sort()).toEqual(["description", "name", "parameters", "tags"]);
   });
 });

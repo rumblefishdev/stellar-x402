@@ -26,6 +26,29 @@ const resourceColumns = (resource: DiscoveryResource) => [
 
 const CATALOG_KEY_WHERE = "network = $1 AND pay_to = $2 AND method = $3 AND resource_url = $4";
 
+/** The payments that raise a listing are those of the last 30 days (ADR 0014, quality score). */
+const PAYERS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Hosts that tunnel to a seller's own machine, so the listing may vanish when it sleeps (ADR 0014):
+ * a host is one of them or a name under one of them.
+ */
+const TUNNEL_HOSTS = [
+  "trycloudflare.com",
+  "ts.net",
+  "serveo.net",
+  "serveousercontent.com",
+  "ngrok.io",
+  "ngrok.app",
+  "ngrok-free.app",
+  "ngrok-free.dev",
+  "loca.lt",
+  "lhr.life",
+  "lhr.rocks",
+  "pinggy.link",
+  "pinggy-free.link",
+];
+
 export class PostgresCatalogStore implements CatalogStore {
   /** `searchModel`: the model the cards' vectors are of, and the query's (`SEARCH_MODEL_ID`). */
   constructor(
@@ -69,6 +92,7 @@ export class PostgresCatalogStore implements CatalogStore {
       card.tags,
       card.description,
       card.parameters,
+      card.host,
     ];
     const inserted = await this.pool.query(
       `WITH listing AS (
@@ -77,8 +101,8 @@ export class PostgresCatalogStore implements CatalogStore {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (network, pay_to, method, resource_url) DO NOTHING
          RETURNING seq)
-       INSERT INTO catalog_search (seq, name, tags, description, parameters)
-       SELECT seq, $11, $12, $13, $14 FROM listing`,
+       INSERT INTO catalog_search (seq, name, tags, description, parameters, host)
+       SELECT seq, $11, $12, $13, $14, $15 FROM listing`,
       values,
     );
     if (inserted.rowCount === 1) return "inserted";
@@ -90,9 +114,10 @@ export class PostgresCatalogStore implements CatalogStore {
            extension_keys = $10
          WHERE ${CATALOG_KEY_WHERE} AND coalesce(checked_at, 0) <= $7
          RETURNING seq)
-       INSERT INTO catalog_search (seq, name, tags, description, parameters)
-       SELECT seq, $11, $12, $13, $14 FROM listing
-       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14`,
+       INSERT INTO catalog_search (seq, name, tags, description, parameters, host)
+       SELECT seq, $11, $12, $13, $14, $15 FROM listing
+       ON CONFLICT (seq) DO UPDATE SET name = $11, tags = $12, description = $13, parameters = $14,
+         host = $15`,
       values,
     );
     return updated.rowCount === 1 ? "updated" : "stale";
@@ -139,15 +164,23 @@ export class PostgresCatalogStore implements CatalogStore {
    * cards existed is found once the rewrite at start writes its card. The rank goes out and
    * comes back as PostgreSQL's text for the `real` it is, so the next page compares the same
    * number; that text holds every digit while `extra_float_digits` is at least 1, the default
-   * since PostgreSQL 12. Only the page's rows read `resource`, as in `list`.
+   * since PostgreSQL 12. Only the page's rows read the whole `resource`, as in `list`; each match
+   * reads its `accepts`.
+   *
+   * The rank is the words' rank times the listing's quality factor q (ADR 0014), counted here from
+   * the stored settlements: 1 + 0.2 × p / (p + 2), where p is the distinct wallets that paid for
+   * the listing from 30 days before `now` on, its own `payTo` left out, and only on terms equal to
+   * one of its offers; × 0.9 on a tunnel host; × 0.9 when the card's description holds nothing
+   * but spaces. Counting after the matches are found keeps the planner from a nested loop over
+   * all listings (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).
    */
-  async search(query: CatalogSearch): Promise<CatalogSearchHit[]> {
-    if (query.meaning !== undefined) return this.searchFused(query, query.meaning);
+  async search(query: CatalogSearch, now: number): Promise<CatalogSearchHit[]> {
+    if (query.meaning !== undefined) return this.searchFused(query, query.meaning, now);
     const { text, type, payTo, network, limit, after } = query;
     const { rows } = await this.listPool.query<HitRow>(
-      `SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
-         FROM (SELECT seq, network, pay_to, method, resource_url,
-                      ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query) AS rank
+      `WITH m AS MATERIALIZED (
+               SELECT seq, network, pay_to, method, resource_url, description, resource->'accepts' AS accepts, host,
+                      ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query) AS base
                  FROM catalog
                  JOIN catalog_search USING (seq),
                       (SELECT string_agg(term, ' | ' ORDER BY first)::tsquery AS words_query
@@ -160,7 +193,34 @@ export class PostgresCatalogStore implements CatalogStore {
                 WHERE words @@ words_query
                   AND ($2::text IS NULL OR type = $2)
                   AND ($3::text IS NULL OR pay_to = $3)
-                  AND ($4::text IS NULL OR network = $4)) p
+                  AND ($4::text IS NULL OR network = $4)),
+       paid AS (
+         SELECT m.seq, count(DISTINCT s.payer) AS payers
+           FROM m
+           LEFT JOIN settlements s
+             ON s.network = m.network
+            AND s.listing_method = m.method
+            AND s.listing_url = m.resource_url
+            AND s.payment_requirements->>'payTo' = m.pay_to
+            AND s.state = 'success'
+            AND s.created_at >= $11
+            AND s.payer <> m.pay_to
+            AND m.accepts @> jsonb_build_array(jsonb_build_object(
+                  'scheme', s.payment_requirements->'scheme',
+                  'network', s.payment_requirements->'network',
+                  'payTo', s.payment_requirements->'payTo',
+                  'asset', s.payment_requirements->'asset',
+                  'amount', s.payment_requirements->'amount'))
+          GROUP BY m.seq)
+       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
+         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url,
+                      (m.base
+                       * (1 + 0.2 * paid.payers / (paid.payers + 2.0))
+                       * CASE WHEN EXISTS (SELECT 1 FROM unnest($12::text[]) AS tunnel(host)
+                                            WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
+                              THEN 0.9 ELSE 1 END
+                       * CASE WHEN m.description !~ '\\S' THEN 0.9 ELSE 1 END)::real AS rank
+                 FROM m JOIN paid USING (seq)) p
          JOIN catalog c USING (seq)
         WHERE $5::real IS NULL
            OR p.rank < $5::real
@@ -179,6 +239,8 @@ export class PostgresCatalogStore implements CatalogStore {
         after?.key.method ?? null,
         after?.key.resourceUrl ?? null,
         limit,
+        now - PAYERS_WINDOW_MS,
+        TUNNEL_HOSTS,
       ],
     );
     return rows.map(hitOf);
@@ -207,18 +269,24 @@ export class PostgresCatalogStore implements CatalogStore {
    * so ranks count among the listings that pass. Every match is ranked, with an exact scan and no
    * vector index, and nothing is cut, so paging reaches the last one. The score goes out and comes
    * back as PostgreSQL's text for the `float8` it is, which holds every digit, as the words rank's
-   * does.
+   * does. The score is then times the listing's quality factor q, counted as in `search`; the
+   * positions are counted before it.
    */
-  private async searchFused(query: CatalogSearch, meaning: number[]): Promise<CatalogSearchHit[]> {
+  private async searchFused(
+    query: CatalogSearch,
+    meaning: number[],
+    now: number,
+  ): Promise<CatalogSearchHit[]> {
     const { text, type, payTo, network, limit, after } = query;
     const { rows } = await this.listPool.query<HitRow>(
-      `SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
-         FROM (SELECT seq, network, pay_to, method, resource_url,
+      `WITH m AS MATERIALIZED (
+               SELECT seq, network, pay_to, method, resource_url, description, accepts, host,
                       4 / (20 + row_number() OVER (ORDER BY similarity DESC, network, pay_to, method, resource_url))::float8
                         + CASE WHEN words_rank IS NULL THEN 0
                                ELSE 1 / (20 + row_number() OVER (ORDER BY words_rank DESC NULLS LAST, network, pay_to, method, resource_url))::float8
-                          END AS rank
-                 FROM (SELECT seq, network, pay_to, method, resource_url,
+                          END AS base
+                 FROM (SELECT seq, network, pay_to, method, resource_url, description,
+                              resource->'accepts' AS accepts, host,
                               1 - public.cosine_distance(embedding, $5::public.vector) AS similarity,
                               CASE WHEN words @@ words_query
                                    THEN ts_rank_cd('{0.33,0.5,0.67,1.0}', words, words_query)
@@ -235,8 +303,35 @@ export class PostgresCatalogStore implements CatalogStore {
                         WHERE model = $6
                           AND ($2::text IS NULL OR type = $2)
                           AND ($3::text IS NULL OR pay_to = $3)
-                          AND ($4::text IS NULL OR network = $4)) m
-                WHERE similarity >= 0.60) p
+                          AND ($4::text IS NULL OR network = $4)) scored
+                WHERE similarity >= 0.60),
+       paid AS (
+         SELECT m.seq, count(DISTINCT s.payer) AS payers
+           FROM m
+           LEFT JOIN settlements s
+             ON s.network = m.network
+            AND s.listing_method = m.method
+            AND s.listing_url = m.resource_url
+            AND s.payment_requirements->>'payTo' = m.pay_to
+            AND s.state = 'success'
+            AND s.created_at >= $13
+            AND s.payer <> m.pay_to
+            AND m.accepts @> jsonb_build_array(jsonb_build_object(
+                  'scheme', s.payment_requirements->'scheme',
+                  'network', s.payment_requirements->'network',
+                  'payTo', s.payment_requirements->'payTo',
+                  'asset', s.payment_requirements->'asset',
+                  'amount', s.payment_requirements->'amount'))
+          GROUP BY m.seq)
+       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
+         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url,
+                      m.base
+                      * (1 + 0.2 * paid.payers / (paid.payers + 2.0))::float8
+                      * CASE WHEN EXISTS (SELECT 1 FROM unnest($14::text[]) AS tunnel(host)
+                                           WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
+                             THEN 0.9 ELSE 1 END
+                      * CASE WHEN m.description !~ '\\S' THEN 0.9 ELSE 1 END AS rank
+                 FROM m JOIN paid USING (seq)) p
          JOIN catalog c USING (seq)
         WHERE $7::float8 IS NULL
            OR p.rank < $7::float8
@@ -257,6 +352,8 @@ export class PostgresCatalogStore implements CatalogStore {
         after?.key.method ?? null,
         after?.key.resourceUrl ?? null,
         limit,
+        now - PAYERS_WINDOW_MS,
+        TUNNEL_HOSTS,
       ],
     );
     return rows.map(hitOf);
