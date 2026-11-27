@@ -26,7 +26,8 @@ import { metricsListener, prometheusMetrics } from "./adapters/prometheus-metric
 import { MIGRATIONS, migrate, pendingMigrations } from "./adapters/postgres-schema.js";
 import { createPool, postgresStores } from "./adapters/postgres.js";
 import { createSearchModelClient, searchModelReady } from "./adapters/search-model.js";
-import { createCataloger, type Cataloger } from "./catalog/cataloger.js";
+import { SELLER_TIMEOUT_MS, createCataloger, type Cataloger } from "./catalog/cataloger.js";
+import { createCuration } from "./catalog/curation.js";
 import { createSearchCardRewrite } from "./catalog/search-cards.js";
 import { createSearchVectors, type SearchVectors } from "./catalog/search-vectors.js";
 import { reportLines, parseHosts, seedHosts } from "./catalog/seed.js";
@@ -374,6 +375,9 @@ export function compose(
   // The model's health whether anyone searches or not (ADR 0014): each run of the vectors' loop
   // asks it, every 30 s at least. The model serves every network.
   root.registerGauge("search_model_up", () => ({ value: vectors.up() }));
+  // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
+  // A test's `rpc` serves every URL.
+  const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
   // Cataloging plugs into `/settle` through `extensionResponses` and `onSuccess` (AD-8). The
   // catalog's rows serve every network, so it writes through the root.
   const cataloger = createCataloger({
@@ -383,10 +387,14 @@ export function compose(
     logger,
     metrics: root,
     listLocal: config.catalog.listLocal,
+    curation: createCuration({
+      store: stores.curation,
+      rpc,
+      network: config.network,
+      logger,
+      limits: { timeoutMs: SELLER_TIMEOUT_MS, allowInsecureLocal: config.catalog.listLocal },
+    }),
   });
-  // One client for every RPC_URLS read and send, whose active URL upstream verify shares (AD-3).
-  // A test's `rpc` serves every URL.
-  const rpc = buildRpc(config, logger, opts.rpc && (() => opts.rpc!));
   // 1 while calls are off `RPC_URLS[0]` (0027 AD-5). `active` is a plain read; `begin()` could
   // start a probe. The label is the endpoint's name, as `buildRpc` names it, never its URL.
   const primary = rpcEndpointName(config.rpcUrls[0]!, 0);

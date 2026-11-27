@@ -13,6 +13,7 @@ import type {
   CatalogSearch,
   CatalogSearchHit,
   CatalogStore,
+  ListedResource,
   UpsertOutcome,
 } from "../ports/index.js";
 import { assertCount, extensionKeys } from "./rules.js";
@@ -28,6 +29,13 @@ const CATALOG_KEY_WHERE = "network = $1 AND pay_to = $2 AND method = $3 AND reso
 
 /** The payments that raise a listing are those of the last 30 days (ADR 0014, quality score). */
 const PAYERS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * A `stellar.toml` proof not checked for longer no longer counts (0070): it is checked again only
+ * on a paid call, so an old one may no longer hold. The same 30 days as q's payment window
+ * (ADR 0014).
+ */
+const CURATION_VALID_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Hosts that tunnel to a seller's own machine, so the listing may vanish when it sleeps (ADR 0014):
@@ -131,23 +139,25 @@ export class PostgresCatalogStore implements CatalogStore {
    * without). They read only the narrow columns; `resource` is read for the page's rows alone, so
    * padded listings can't make a query costly.
    */
-  async list(query: CatalogQuery): Promise<CatalogPage> {
+  async list(query: CatalogQuery, now: number): Promise<CatalogPage> {
     const { type, payTo, network, extensions, limit, offset } = query;
     const matches = `catalog
          WHERE ($1::text IS NULL OR type = $1)
            AND ($2::text IS NULL OR pay_to = $2)
            AND ($3::text IS NULL OR network = $3)
            AND ($4::text IS NULL OR extension_keys @> ARRAY[$4::text])`;
-    const { rows } = await this.listPool.query<{ total: string; items: DiscoveryResource[] }>(
+    const { rows } = await this.listPool.query<{ total: string; items: StoredListing[] }>(
       `SELECT (SELECT count(*) FROM ${matches}) AS total,
-              coalesce((SELECT jsonb_agg(c.resource ORDER BY c.seq)
+              coalesce((SELECT jsonb_agg(jsonb_build_object('key', jsonb_build_object(
+                                 'network', c.network, 'payTo', c.pay_to, 'resourceUrl', c.resource_url),
+                               'resource', c.resource) ORDER BY c.seq)
                         FROM (SELECT seq FROM ${matches} ORDER BY seq LIMIT $5 OFFSET $6) p
                         JOIN catalog c USING (seq)),
                        '[]') AS items`,
       [type ?? null, payTo ?? null, network ?? null, extensions ?? null, limit, offset],
     );
     const page = rows[0]!;
-    return { items: page.items, total: Number(page.total) };
+    return { items: await this.withCuration(page.items, now), total: Number(page.total) };
   }
 
   /**
@@ -170,9 +180,11 @@ export class PostgresCatalogStore implements CatalogStore {
    * The rank is the words' rank times the listing's quality factor q (ADR 0014), counted here from
    * the stored settlements: 1 + 0.2 × p / (p + 2), where p is the distinct wallets that paid for
    * the listing from 30 days before `now` on, its own `payTo` left out, and only on terms equal to
-   * one of its offers; × 0.9 on a tunnel host; × 0.9 when the card's description holds nothing
-   * but spaces. Counting after the matches are found keeps the planner from a nested loop over
-   * all listings (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).
+   * one of its offers, plus 3 when its host's `stellar.toml` proved its `payTo` in a check of the
+   * same 30 days (0070); × 0.9 on a tunnel host; × 0.9 when the card's description holds nothing
+   * but spaces. Each hit's `curated` is that same proof.
+   * Counting after the matches are found keeps the planner from a nested loop over all listings
+   * (measured: 324–392 ms at 4 words against 1.2–2.4 s for the other shapes).
    */
   async search(query: CatalogSearch, now: number): Promise<CatalogSearchHit[]> {
     if (query.meaning !== undefined) return this.searchFused(query, query.meaning, now);
@@ -212,15 +224,28 @@ export class PostgresCatalogStore implements CatalogStore {
                   'asset', s.payment_requirements->'asset',
                   'amount', s.payment_requirements->'amount'))
           GROUP BY m.seq)
-       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
-         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url,
+       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url,
+              c.resource || jsonb_build_object('curated', EXISTS (SELECT 1 FROM catalog_curation k
+                                WHERE k.network = p.network AND k.host = p.host
+                                  AND k.pay_to = p.pay_to AND k.curated
+                                  AND k.checked_at >= $13)) AS resource
+         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url, m.host,
                       (m.base
-                       * (1 + 0.2 * paid.payers / (paid.payers + 2.0))
+                       * (1 + 0.2 * w.wallets / (w.wallets + 2.0))
                        * CASE WHEN EXISTS (SELECT 1 FROM unnest($12::text[]) AS tunnel(host)
                                             WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
                               THEN 0.9 ELSE 1 END
                        * CASE WHEN m.description !~ '\\S' THEN 0.9 ELSE 1 END)::real AS rank
-                 FROM m JOIN paid USING (seq)) p
+                 FROM m JOIN paid USING (seq)
+                      -- A stellar.toml proof checked in the last 30 days counts as 3 paying wallets
+                      -- (0070): about the x1.1 measured on CDP's catalog, and q stays below 1.2.
+                      CROSS JOIN LATERAL (
+                        SELECT paid.payers + CASE WHEN EXISTS (
+                                 SELECT 1 FROM catalog_curation k
+                                  WHERE k.network = m.network AND k.host = m.host
+                                    AND k.pay_to = m.pay_to AND k.curated
+                                    AND k.checked_at >= $13)
+                               THEN 3 ELSE 0 END AS wallets) w) p
          JOIN catalog c USING (seq)
         WHERE $5::real IS NULL
            OR p.rank < $5::real
@@ -241,9 +266,41 @@ export class PostgresCatalogStore implements CatalogStore {
         limit,
         now - PAYERS_WINDOW_MS,
         TUNNEL_HOSTS,
+        now - CURATION_VALID_MS,
       ],
     );
     return rows.map(hitOf);
+  }
+
+  /**
+   * Each listing's resource with `curated`: whether its host's `stellar.toml` proof of its key's
+   * account passed (0070) within the 30 days before `now`, read from `catalog_curation` in one
+   * query for the page. The host is the WHATWG URL parser's, as the check stores it.
+   */
+  private async withCuration(listings: StoredListing[], now: number): Promise<ListedResource[]> {
+    const keys = listings.map(({ key }) => ({
+      network: key.network,
+      host: new URL(key.resourceUrl).hostname,
+      payTo: key.payTo,
+    }));
+    const { rows } = await this.listPool.query<{ network: string; host: string; pay_to: string }>(
+      `SELECT network, host, pay_to FROM catalog_curation
+        WHERE curated
+          AND checked_at >= $4
+          AND (network, host, pay_to) IN
+              (SELECT * FROM unnest($1::text[], $2::text[], $3::text[]))`,
+      [
+        keys.map((key) => key.network),
+        keys.map((key) => key.host),
+        keys.map((key) => key.payTo),
+        now - CURATION_VALID_MS,
+      ],
+    );
+    const curated = new Set(rows.map((row) => `${row.network} ${row.host} ${row.pay_to}`));
+    return listings.map(({ resource }, i) => {
+      const key = keys[i]!;
+      return { ...resource, curated: curated.has(`${key.network} ${key.host} ${key.payTo}`) };
+    });
   }
 
   async waitingForVector(query: CatalogSearch): Promise<boolean> {
@@ -323,15 +380,28 @@ export class PostgresCatalogStore implements CatalogStore {
                   'asset', s.payment_requirements->'asset',
                   'amount', s.payment_requirements->'amount'))
           GROUP BY m.seq)
-       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url, c.resource
-         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url,
+       SELECT p.rank::text AS rank, c.network, c.pay_to, c.method, c.resource_url,
+              c.resource || jsonb_build_object('curated', EXISTS (SELECT 1 FROM catalog_curation k
+                                WHERE k.network = p.network AND k.host = p.host
+                                  AND k.pay_to = p.pay_to AND k.curated
+                                  AND k.checked_at >= $15)) AS resource
+         FROM (SELECT m.seq, m.network, m.pay_to, m.method, m.resource_url, m.host,
                       m.base
-                      * (1 + 0.2 * paid.payers / (paid.payers + 2.0))::float8
+                      * (1 + 0.2 * w.wallets / (w.wallets + 2.0))::float8
                       * CASE WHEN EXISTS (SELECT 1 FROM unnest($14::text[]) AS tunnel(host)
                                            WHERE m.host = tunnel.host OR m.host LIKE '%.' || tunnel.host)
                              THEN 0.9 ELSE 1 END
                       * CASE WHEN m.description !~ '\\S' THEN 0.9 ELSE 1 END AS rank
-                 FROM m JOIN paid USING (seq)) p
+                 FROM m JOIN paid USING (seq)
+                      -- A stellar.toml proof checked in the last 30 days counts as 3 paying wallets
+                      -- (0070): about the x1.1 measured on CDP's catalog, and q stays below 1.2.
+                      CROSS JOIN LATERAL (
+                        SELECT paid.payers + CASE WHEN EXISTS (
+                                 SELECT 1 FROM catalog_curation k
+                                  WHERE k.network = m.network AND k.host = m.host
+                                    AND k.pay_to = m.pay_to AND k.curated
+                                    AND k.checked_at >= $15)
+                               THEN 3 ELSE 0 END AS wallets) w) p
          JOIN catalog c USING (seq)
         WHERE $7::float8 IS NULL
            OR p.rank < $7::float8
@@ -354,10 +424,17 @@ export class PostgresCatalogStore implements CatalogStore {
         limit,
         now - PAYERS_WINDOW_MS,
         TUNNEL_HOSTS,
+        now - CURATION_VALID_MS,
       ],
     );
     return rows.map(hitOf);
   }
+}
+
+/** A listing's key and its stored resource, as `withCuration` reads them. */
+interface StoredListing {
+  key: Pick<CatalogKey, "network" | "payTo" | "resourceUrl">;
+  resource: DiscoveryResource;
 }
 
 /** A search result as both rankings' queries return it. */
@@ -367,7 +444,7 @@ interface HitRow {
   pay_to: string;
   method: string;
   resource_url: string;
-  resource: DiscoveryResource;
+  resource: ListedResource;
 }
 
 const hitOf = (row: HitRow): CatalogSearchHit => ({

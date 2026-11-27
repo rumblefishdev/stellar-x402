@@ -108,12 +108,13 @@ export function parseDiscoveryQuery(raw: Record<string, unknown>): DiscoveryQuer
 
 /**
  * `GET /discovery/resources` (AD-20) with upstream's list types. A store failure rejects, and the
- * shared error handler answers it with a 500.
+ * shared error handler answers it with a 500. `now` is the clock a proof's 30 days end at.
  */
 export function discoveryResources(
   catalog: CatalogStore,
   logger: Logger,
   metrics: ProcessMetrics,
+  now: () => number = Date.now,
 ): RequestHandler {
   return async (req, res) => {
     const parsed = parseDiscoveryQuery(req.query);
@@ -129,7 +130,7 @@ export function discoveryResources(
     }
     const { limit, offset } = parsed;
     const page =
-      parsed.kind === "empty" ? { items: [], total: 0 } : await catalog.list(parsed.query);
+      parsed.kind === "empty" ? { items: [], total: 0 } : await catalog.list(parsed.query, now());
     const body: DiscoveryResourcesResponse = {
       x402Version: 2,
       items: page.items,

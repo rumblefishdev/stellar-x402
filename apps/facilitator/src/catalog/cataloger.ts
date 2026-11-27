@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import * as bazaarLib from "@stellar-x402/bazaar";
-import { isStellarNetwork } from "@stellar-x402/config";
+import { isStellarNetwork, type StellarNetwork } from "@stellar-x402/config";
 import type { PaymentRequired } from "@x402/core/types";
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 import type { Logger } from "../logger.js";
@@ -61,6 +61,10 @@ export interface CatalogerDeps {
   /** A seller slower than this to answer the check gave no usable answer. */
   sellerTimeoutMs?: number;
   checksPerHost?: number;
+  /** The `stellar.toml` proof (0070), checked on each paid call whose listing is in the catalog. */
+  curation?: {
+    refresh(network: StellarNetwork, resourceUrl: string, payTo: string): Promise<void>;
+  };
   /** The app clock, ms. */
   now?: () => number;
 }
@@ -106,6 +110,8 @@ const SELLER_RESPONSE_BYTES = 64 * 1024;
  * (122,729 B, 35 tools, 2026-10-28), since the tool's schemas come with it.
  */
 const MCP_RESPONSE_BYTES = 256 * 1024;
+/** How long a check waits for a seller's answer, its 402 or its `stellar.toml` (0070). */
+export const SELLER_TIMEOUT_MS = 10_000;
 /** A library error lists every issue; the attempt's row keeps its start. */
 const DETAIL_CHARS = 1_000;
 
@@ -131,8 +137,9 @@ export function createCataloger({
   bazaar = bazaarLib,
   upsertTimeoutMs = 10_000,
   listLocal = false,
-  sellerTimeoutMs = 10_000,
+  sellerTimeoutMs = SELLER_TIMEOUT_MS,
   checksPerHost = CHECKS_PER_HOST,
+  curation,
   now = Date.now,
 }: CatalogerDeps): Cataloger {
   const inFlight = new Set<Promise<void>>();
@@ -315,6 +322,21 @@ export function createCataloger({
         detail: String(error),
       } as const;
       await finish({ ...known, ...failed }, fields, origin);
+    } finally {
+      // Apart from the seller check (0070): however it ended, a paid listing that is in the
+      // catalog has its seller's `stellar.toml` proof checked.
+      if (known.key && known.url) await refreshCuration(known.key, known.url, fields);
+    }
+  }
+
+  /** A paid listing: check its seller's `stellar.toml` proof when it is in the catalog (0070). */
+  async function refreshCuration(key: CatalogKey, resourceUrl: string, fields: LogFields) {
+    if (!curation) return;
+    try {
+      if (!(await store.get(key))) return;
+      await curation.refresh(key.network, resourceUrl, key.payTo);
+    } catch (error) {
+      report(() => logger.error("curation_refresh_failed", { ...fields, resourceUrl, error }));
     }
   }
 

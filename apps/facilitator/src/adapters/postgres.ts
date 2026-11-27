@@ -39,6 +39,7 @@ import {
   windowEnd,
 } from "./rules.js";
 import { PostgresCatalogAttemptStore, PostgresCatalogStore } from "./postgres-catalog.js";
+import { createPostgresCurationStore } from "./postgres-curation.js";
 import { PostgresSearchCardStore } from "./postgres-search-cards.js";
 
 /**
@@ -83,6 +84,7 @@ export function postgresStores(
     settlements: new PostgresSettlementStore(pool),
     catalog: new PostgresCatalogStore(pool, pools.discovery ?? pool, searchModel),
     catalogAttempts: new PostgresCatalogAttemptStore(pool),
+    curation: createPostgresCurationStore(pool),
     searchCards: new PostgresSearchCardStore(pool, searchModel),
     rateLimits: new PostgresRateLimitStore(pools.rateLimits ?? pool, pool),
     spend: new PostgresSpendStore(pool, pools.reserve ?? pool),

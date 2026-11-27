@@ -1,5 +1,6 @@
 import type { AccountPlanStore, ApiKeyStore } from "@stellar-x402/api-keys";
 import type { CatalogAttemptStore, CatalogStore } from "./catalog-store.js";
+import type { CurationStore } from "./curation-store.js";
 import type { RateLimitStore } from "./rate-limit-store.js";
 import type { SearchCardStore } from "./search-card-store.js";
 import type { SettlementStore } from "./settlement-store.js";
@@ -19,8 +20,10 @@ export type {
   CatalogSearchHit,
   CatalogSearchPosition,
   CatalogStore,
+  ListedResource,
   UpsertOutcome,
 } from "./catalog-store.js";
+export type { CurationStore } from "./curation-store.js";
 export type { Embedder } from "./embedder.js";
 export type { RateLimitHit, RateLimitStore } from "./rate-limit-store.js";
 export type { CardListing, SearchCard, SearchCardStore } from "./search-card-store.js";
@@ -61,6 +64,8 @@ export interface Stores {
   settlements: SettlementStore;
   catalog: CatalogStore;
   catalogAttempts: CatalogAttemptStore;
+  /** Each host's `stellar.toml` proof of its account (0070). */
+  curation: CurationStore;
   /** One table: the card rewrite writes its fields, the vectors its vector. */
   searchCards: SearchCardStore;
   rateLimits: RateLimitStore;

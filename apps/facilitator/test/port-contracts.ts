@@ -13,6 +13,8 @@ import {
   type LeaseFence,
   type CatalogEntry,
   type CatalogStore,
+  type CurationStore,
+  type ListedResource,
   type NewSettlement,
   type RateLimitStore,
   type CardListing,
@@ -2008,14 +2010,17 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
         },
         2,
       );
-      const page = await store.list({ limit: 10, offset: 0 });
+      const page = await store.list({ limit: 10, offset: 0 }, Date.now());
       expect(page.total).toBe(1);
       expect(page.items[0]).toMatchObject({
         description: "new",
         lastUpdated: "2026-10-09T00:00:00.000Z",
       });
       expect(page.items[0]?.accepts.map((a) => a.asset)).toEqual(["COTHER"]);
-      expect(await store.get(key(url))).toEqual(page.items[0]);
+      // `get` gives the stored entry; `list` adds `curated` to it (0070).
+      const { curated, ...stored } = page.items[0]!;
+      expect(curated).toBe(false);
+      expect(await store.get(key(url))).toEqual(stored);
       expect(await store.get(key("https://seller.example.com/none"))).toBeUndefined();
     });
 
@@ -2037,7 +2042,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
           upsert({ key: key(url), resource: resource(url, { description: `d${i}` }) }, i),
         ),
       );
-      const page = await store.list({ limit: 10, offset: 0 });
+      const page = await store.list({ limit: 10, offset: 0 }, Date.now());
       expect(page.total).toBe(1);
       expect(page.items[0]?.description).toBe("d9");
     });
@@ -2074,7 +2079,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       });
 
       const urls = async (query: Parameters<CatalogStore["list"]>[0]) =>
-        (await store.list(query)).items.map((item) => item.resource);
+        (await store.list(query, Date.now())).items.map((item) => item.resource);
       expect(await urls({ limit: 10, offset: 0 })).toEqual([
         "https://a.example",
         "https://b.example",
@@ -2095,10 +2100,16 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       // neither does a key without a value (JSON storage drops it).
       expect(await urls({ extensions: "constructor", limit: 10, offset: 0 })).toEqual([]);
       expect(await urls({ extensions: "unset", limit: 10, offset: 0 })).toEqual([]);
-      const page = await store.list({ limit: 1, offset: 1 });
+      const page = await store.list({ limit: 1, offset: 1 }, Date.now());
       expect(page).toMatchObject({ total: 3, items: [{ resource: "https://b.example" }] });
-      expect(await store.list({ limit: 10, offset: 5 })).toEqual({ items: [], total: 3 });
-      expect(await store.list({ limit: 0, offset: 0 })).toEqual({ items: [], total: 3 });
+      expect(await store.list({ limit: 10, offset: 5 }, Date.now())).toEqual({
+        items: [],
+        total: 3,
+      });
+      expect(await store.list({ limit: 0, offset: 0 }, Date.now())).toEqual({
+        items: [],
+        total: 3,
+      });
     });
 
     it("filters on the stored fields after an update, and after a stale write", async () => {
@@ -2110,7 +2121,7 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
       // A check that started earlier keeps the stored fields, and with them the filters.
       expect(await at(9, { type: "http", extensions: { bazaar: {} } })).toBe("stale");
       const total = async (query: Omit<Parameters<CatalogStore["list"]>[0], "limit" | "offset">) =>
-        (await store.list({ ...query, limit: 10, offset: 0 })).total;
+        (await store.list({ ...query, limit: 10, offset: 0 }, Date.now())).total;
       expect(await total({ type: "mcp" })).toBe(1);
       expect(await total({ type: "http" })).toBe(0);
       expect(await total({ extensions: "bazaar" })).toBe(0);
@@ -2129,11 +2140,11 @@ export function catalogStoreContract(make: Make<CatalogStore>) {
             extensions: extensions as unknown as DiscoveryResource["extensions"],
           }),
         });
-      const page = await store.list({ extensions: "bazaar", limit: 10, offset: 0 });
+      const page = await store.list({ extensions: "bazaar", limit: 10, offset: 0 }, Date.now());
       expect(page.items.map((item) => item.resource)).toEqual(["https://object.example"]);
       expect(page.total).toBe(1);
       // An array's index is not an extension key either.
-      expect(await store.list({ extensions: "0", limit: 10, offset: 0 })).toEqual({
+      expect(await store.list({ extensions: "0", limit: 10, offset: 0 }, Date.now())).toEqual({
         items: [],
         total: 0,
       });
@@ -2656,6 +2667,8 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
 /** What the quality contract needs: the catalog, its vectors, and the settlements of one database. */
 export interface QualityFixture extends MeaningFixture {
   settlements: SettlementStore;
+  /** The stellar.toml proofs (0070), each counted as 3 paying wallets. */
+  curation: CurationStore;
 }
 
 const DAY_MS = 86_400_000;
@@ -2695,11 +2708,21 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
   describe("CatalogStore search quality factor (0154, ADR 0014; fused cases need pgvector)", () => {
     let catalog: CatalogStore;
     let settlements: SettlementStore;
+    let curation: CurationStore;
     let setVector: MeaningFixture["setVector"];
     let nonce = 0;
     beforeEach(async () => {
-      ({ catalog, settlements, setVector } = await make());
+      ({ catalog, settlements, curation, setVector } = await make());
     });
+    /** `k`'s host and payTo proved, or disproved, by stellar.toml (0070), in a check at `checkedAt`. */
+    const curate = (k: CatalogKey, curated = true, checkedAt = QUALITY_NOW) =>
+      curation.put({
+        network: k.network,
+        host: new URL(k.resourceUrl).hostname,
+        payTo: k.payTo,
+        curated,
+        checkedAt,
+      });
     type Search = Parameters<CatalogStore["search"]>[0];
     type Hit = Awaited<ReturnType<CatalogStore["search"]>>[number];
 
@@ -3176,6 +3199,82 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
           after = { rank: last.rank, key: last.key };
         }
         expect(seen).toEqual(all);
+      });
+    });
+
+    describe("curated (0070)", () => {
+      it("counts a curated listing's proof as 3 paying wallets: none ×1.12, 1 ×1.1333, 10 ×1.1733", async () => {
+        const urls = ["curated", "one", "ten", "disproved"].map(
+          (name) => `https://${name}.example/x`,
+        );
+        await listing(key(BASE), WEATHER);
+        for (const url of urls) await listing(key(url), WEATHER);
+        const tunnel = key("https://x.ts.net/x");
+        await listing(tunnel, WEATHER);
+        for (const url of ["curated", "one", "ten"]) await curate(key(`https://${url}.example/x`));
+        await curate(tunnel);
+        await curate(key("https://disproved.example/x"), false);
+        await payByWallets(key("https://one.example/x"), 1);
+        await payByWallets(key("https://ten.example/x"), 10);
+        expect(ratios(await words("weather"), BASE)).toEqual({
+          [BASE]: 1,
+          "https://curated.example/x": round6(qualityFactor(3)),
+          "https://one.example/x": round6(qualityFactor(1 + 3)),
+          "https://ten.example/x": round6(qualityFactor(10 + 3)),
+          "https://disproved.example/x": 1,
+          "https://x.ts.net/x": round6(qualityFactor(3, true)),
+        });
+      });
+
+      it("counts the proof as 3 wallets in the fused score too", async () => {
+        await listing(key("https://a.example/x"), { description: "Tides" }, 0.95);
+        await listing(key("https://b.example/x"), { description: "Tides" }, 0.9);
+        await curate(key("https://b.example/x"));
+        const hits = await fused("zebra");
+        expect(urlsOf(hits)).toEqual(["https://b.example/x", "https://a.example/x"]);
+        expect(hits.map((hit) => Number(hit.rank))).toEqual([
+          expect.closeTo(score(2) * qualityFactor(3), 6),
+          expect.closeTo(score(1), 6),
+        ]);
+      });
+
+      it("counts a proof checked 29 days ago, and not one checked 31 days ago", async () => {
+        const recent = key("https://recent.example/x");
+        const old = key("https://old.example/x");
+        await listing(key(BASE), WEATHER, 0.95);
+        await listing(recent, WEATHER, 0.95);
+        await listing(old, WEATHER, 0.95);
+        await curate(recent, true, QUALITY_NOW - 29 * DAY_MS);
+        await curate(old, true, QUALITY_NOW - 31 * DAY_MS);
+        expect(ratios(await words("weather"), BASE)).toEqual({
+          [BASE]: 1,
+          [recent.resourceUrl]: round6(qualityFactor(3)),
+          [old.resourceUrl]: 1,
+        });
+        // Equal by meaning and by words, the fused positions go by key: base, old, recent.
+        expect(
+          (await fused("weather")).map((hit) => [hit.key.resourceUrl, Number(hit.rank)]),
+        ).toEqual([
+          [recent.resourceUrl, expect.closeTo(score(3, 3) * qualityFactor(3), 6)],
+          [BASE, expect.closeTo(score(1, 1), 6)],
+          [old.resourceUrl, expect.closeTo(score(2, 2), 6)],
+        ]);
+        const curated = (resources: ListedResource[]) =>
+          Object.fromEntries(resources.map((resource) => [resource.resource, resource.curated]));
+        const listed = { [BASE]: false, [recent.resourceUrl]: true, [old.resourceUrl]: false };
+        expect(curated((await words("weather")).map((hit) => hit.resource))).toEqual(listed);
+        expect(curated((await fused("weather")).map((hit) => hit.resource))).toEqual(listed);
+        expect(curated((await catalog.list({ limit: 10, offset: 0 }, QUALITY_NOW)).items)).toEqual(
+          listed,
+        );
+      });
+
+      it("gives no bonus on another network's record", async () => {
+        await listing(key(BASE), WEATHER);
+        const k = key("https://curated.example/x");
+        await listing(k, WEATHER);
+        await curate({ ...k, network: "stellar:pubnet" });
+        expect(ratios(await words("weather"), BASE)["https://curated.example/x"]).toBe(1);
       });
     });
 

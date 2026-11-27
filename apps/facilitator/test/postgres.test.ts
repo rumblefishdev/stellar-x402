@@ -219,6 +219,7 @@ describe("PostgreSQL stores", () => {
     return {
       catalog: all.catalog,
       settlements: all.settlements,
+      curation: all.curation,
       setVector: (key, model, vector) => setVector(pool, key, model, vector),
     };
   });
@@ -875,9 +876,9 @@ describe("PostgreSQL stores", () => {
         await ranOn(() => app.stores.spend.reserve({ id: "a", amount: 1n, limits, now: 0 })),
       ).toEqual(["reserve"]);
       expect(await ranOn(() => app.stores.rateLimits.hit("k", 60_000, 0))).toEqual(["rateLimits"]);
-      expect(await ranOn(() => app.stores.catalog.list({ limit: 1, offset: 0 }))).toEqual([
-        "discovery",
-      ]);
+      expect(
+        await ranOn(() => app.stores.catalog.list({ limit: 1, offset: 0 }, Date.now())),
+      ).toEqual(["discovery"]);
       // Catalog writes come from `/settle`, so they stay off the public listings' pool.
       expect(await ranOn(() => app.stores.catalog.upsert(catalogEntry()))).toEqual(["main"]);
       expect(await ranOn(() => app.stores.settlements.claim(settlement("1")))).toEqual(["main"]);
@@ -1610,6 +1611,7 @@ describe("PostgreSQL stores", () => {
           "0019_settlement_listing",
           "0020_catalog_search_vector",
           "0021_catalog_search_host",
+          "0022_catalog_curation",
         ]);
         expect(await typeIndex(old), built).toBe(1);
       } finally {
@@ -1650,6 +1652,7 @@ describe("PostgreSQL stores", () => {
         "0019_settlement_listing",
         "0020_catalog_search_vector",
         "0021_catalog_search_host",
+        "0022_catalog_curation",
       ]);
       const { rows } = await old.query(
         "SELECT scope, at, amount FROM spend_reservation_scopes ORDER BY scope",

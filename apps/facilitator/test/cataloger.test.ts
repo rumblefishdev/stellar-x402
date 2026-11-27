@@ -90,7 +90,7 @@ function setup(deps: Partial<CatalogerDeps> = {}) {
     now: () => clock.now,
     ...deps,
   });
-  const list = async () => (await store.list({ limit: 10, offset: 0 })).items;
+  const list = async () => (await store.list({ limit: 10, offset: 0 }, Date.now())).items;
   const attempts = async () =>
     (
       await db.pool.query<Record<string, unknown>>(
