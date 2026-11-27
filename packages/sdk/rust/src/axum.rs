@@ -17,6 +17,9 @@
 //! # }
 //! ```
 //!
+//! [`PaymentGate::connect`] asks the facilitator at start; [`PaymentGate::lazy`] on the first
+//! request, for a seller whose start must not wait, such as an AWS Lambda.
+//!
 //! `route_layer`, not `layer`: `layer` also wraps the answer to a method the route does not have,
 //! so a `POST` or a browser's `OPTIONS` would get 402 in place of 405.
 //!
@@ -35,11 +38,12 @@
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use ::axum::body::Body;
-use ::axum::extract::{OriginalUri, Request};
+use ::axum::extract::{MatchedPath, OriginalUri, Request};
 use ::axum::http::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE, HOST, USER_AGENT};
 use ::axum::http::{HeaderValue, StatusCode};
 use ::axum::response::Response;
@@ -55,6 +59,10 @@ use crate::{
 const PAYMENT_SIGNATURE: &str = "PAYMENT-SIGNATURE";
 const PAYMENT_REQUIRED: &str = "PAYMENT-REQUIRED";
 const PAYMENT_RESPONSE: &str = "PAYMENT-RESPONSE";
+/// The longest a [`PaymentGate::lazy`] gate waits for `/supported` inside a request, whatever the
+/// facilitator's timeout allows `/verify` and `/settle`: a request without a payment costs its
+/// sender nothing, so it must not hold the seller for long.
+const LAZY_READ: Duration = Duration::from_secs(5);
 
 /// Why a gate or a paid route could not be made.
 #[derive(Debug, thiserror::Error)]
@@ -85,8 +93,12 @@ pub enum PaymentEvent<'a> {
     VerifyRefused(&'a VerifyResponse),
     /// The facilitator gave no answer to act on, or refused the seller itself, as with a wrong
     /// API key. The buyer got what `@x402/express` answers: 402 with the error's message, or 502
-    /// when the facilitator's answer could not be read or came too late.
+    /// when the facilitator's answer could not be read or came too late. For the first read of a
+    /// [`PaymentGate::lazy`] gate: 502 for those two, else 500.
     FacilitatorFailed(&'a FacilitatorError),
+    /// The facilitator of a [`PaymentGate::lazy`] gate answered, and does not settle the `exact`
+    /// scheme on the route's network. The route did not run; the buyer got 500, on every request.
+    Unsupported(Network),
 }
 
 type OnEvent = Arc<dyn Fn(&PaymentEvent<'_>) + Send + Sync>;
@@ -100,7 +112,8 @@ pub struct Payer(pub String);
 #[derive(Clone)]
 pub struct PaymentGate {
     facilitator: Facilitator,
-    supported: Supported,
+    /// Read by `connect`, or by the first request of a `lazy` gate; one for the gate's clones.
+    supported: Arc<OnceLock<Supported>>,
     base_url: Option<String>,
     on_event: Option<OnEvent>,
 }
@@ -111,11 +124,37 @@ impl PaymentGate {
     pub async fn connect(facilitator: Facilitator) -> Result<Self, GateError> {
         let supported = facilitator.supported().await?;
         Ok(Self {
+            supported: Arc::new(OnceLock::from(supported)),
+            ..Self::lazy(facilitator)
+        })
+    }
+
+    /// A gate that reads what the facilitator supports on its first request, not now: for a
+    /// seller whose start must not wait for the facilitator, such as an AWS Lambda.
+    ///
+    /// Until a read succeeds, a request to a paid route gets 502 or 500 as `@x402/express`
+    /// answers a facilitator it could not read at start, the route does not run, and the next
+    /// request reads again. A network the facilitator does not settle on is found then too, not
+    /// by [`Self::charge`]: watch for [`PaymentEvent::Unsupported`].
+    pub fn lazy(facilitator: Facilitator) -> Self {
+        Self {
             facilitator,
-            supported,
+            supported: Arc::default(),
             base_url: None,
             on_event: None,
-        })
+        }
+    }
+
+    /// What the facilitator supports, read now when no read has succeeded yet.
+    async fn supported(&self) -> Result<&Supported, FacilitatorError> {
+        if let Some(supported) = self.supported.get() {
+            return Ok(supported);
+        }
+        // shortcut: a failed read is not remembered, so every request during an outage waits up
+        // to LAZY_READ; remember the failure for a moment if such requests pile up.
+        let read = self.facilitator.within(LAZY_READ).supported().await?;
+        // Two first requests may both read: the first answer is kept.
+        Ok(self.supported.get_or_init(|| read))
     }
 
     /// The seller's public address, such as `https://api.example.com`: the 402 names the resource
@@ -136,7 +175,8 @@ impl PaymentGate {
 
     /// A layer that charges `price` for a route, paid to `pay_to` on `network`.
     ///
-    /// Fails when an address is mistyped or the facilitator does not settle on `network`.
+    /// Fails when an address is mistyped or the facilitator does not settle on `network`; a
+    /// [`Self::lazy`] gate has not asked yet, and its routes find that on their first request.
     pub fn charge(
         &self,
         network: Network,
@@ -144,12 +184,13 @@ impl PaymentGate {
         price: Price,
     ) -> Result<PaidRoute, GateError> {
         let terms = PaymentRequirements::exact(network, pay_to, price)?;
-        if !self.supported.supports(&terms) {
+        let known = self.supported.get();
+        if known.is_some_and(|supported| !supported.supports(&terms)) {
             return Err(GateError::Unsupported { network });
         }
         Ok(PaidRoute {
             gate: self.clone(),
-            terms: terms.with_supported(&self.supported),
+            terms,
             description: None,
             mime_type: None,
             listing: None,
@@ -161,6 +202,7 @@ impl PaymentGate {
 #[derive(Clone)]
 pub struct PaidRoute {
     gate: PaymentGate,
+    /// As `charge` built them: each request adds what the facilitator says about them.
     terms: PaymentRequirements,
     description: Option<String>,
     mime_type: Option<String>,
@@ -194,7 +236,7 @@ impl PaidRoute {
     }
 
     /// The 402 answer for `request`.
-    fn required(&self, request: &Request) -> PaymentRequired {
+    fn required(&self, request: &Request, terms: &PaymentRequirements) -> PaymentRequired {
         let uri = request
             .extensions()
             .get::<OriginalUri>()
@@ -217,9 +259,11 @@ impl PaidRoute {
         if let Some(mime_type) = &self.mime_type {
             resource = resource.mime_type(mime_type);
         }
-        let required = PaymentRequired::new(resource, vec![self.terms.clone()]);
+        let required = PaymentRequired::new(resource, vec![terms.clone()]);
+        let route = request.extensions().get::<MatchedPath>();
+        let route = route.map(|pattern| (pattern.as_str(), uri.path()));
         match &self.listing {
-            Some(listing) => required.with_listing(listing, request.method().as_str()),
+            Some(listing) => required.listed(listing, request.method().as_str(), route),
             None => required,
         }
     }
@@ -228,7 +272,22 @@ impl PaidRoute {
     where
         S: Service<Request, Response = Response, Error = Infallible>,
     {
-        let required = self.required(&request);
+        let supported = match self.gate.supported().await {
+            Ok(supported) => supported,
+            Err(error) => {
+                self.emit(PaymentEvent::FacilitatorFailed(&error));
+                return match error.is_response_error() {
+                    true => facilitator_error(&error),
+                    false => internal_error(),
+                };
+            }
+        };
+        if !supported.supports(&self.terms) {
+            self.emit(PaymentEvent::Unsupported(self.terms.network()));
+            return internal_error();
+        }
+        let terms = &self.terms.clone().with_supported(supported);
+        let required = self.required(&request, terms);
         // A header that cannot be read is no payment, as in upstream's middleware.
         let payment = request
             .headers()
@@ -241,12 +300,12 @@ impl PaidRoute {
             }
             return payment_required(&required);
         };
-        if !payment.accepts(&self.terms) {
+        if !payment.accepts(terms) {
             let required = required.with_error("No matching payment requirements");
             return payment_required(&required);
         }
 
-        let verified = match self.gate.facilitator.verify(&payment, &self.terms).await {
+        let verified = match self.gate.facilitator.verify(&payment, terms).await {
             Ok(verified) => verified,
             Err(error) => {
                 self.emit(PaymentEvent::FacilitatorFailed(&error));
@@ -274,7 +333,7 @@ impl PaidRoute {
             return response;
         }
 
-        match self.gate.facilitator.settle(&payment, &self.terms).await {
+        match self.gate.facilitator.settle(&payment, terms).await {
             Ok(settled) if settled.success => {
                 self.emit(PaymentEvent::Settled(&settled));
                 let headers = response.headers_mut();
@@ -292,7 +351,7 @@ impl PaidRoute {
                 if error.is_response_error() {
                     return facilitator_error(&error);
                 }
-                let network = self.terms.network().as_str();
+                let network = terms.network().as_str();
                 settlement_failed(&SettleResponse::failed(error.upstream_message(), network))
             }
         }
@@ -402,6 +461,15 @@ fn facilitator_error(error: &FacilitatorError) -> Response {
     json_response(
         StatusCode::BAD_GATEWAY,
         &json!({ "error": error.upstream_message() }),
+    )
+}
+
+/// Upstream's `sendInternalError`: its answer to a facilitator it could not read at start, for
+/// every failure that `facilitator_error` does not answer.
+fn internal_error() -> Response {
+    json_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        &json!({ "error": "Internal Server Error" }),
     )
 }
 

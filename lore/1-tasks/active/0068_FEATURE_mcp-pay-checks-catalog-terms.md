@@ -2,7 +2,8 @@
 id: "0068"
 title: "Refuse a paid call when the seller asks more than its catalog listing or names another payTo"
 type: FEATURE
-status: backlog
+status: active
+owner: bstruzyk
 milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0063", "0037", "0137", "0044"]
@@ -22,6 +23,11 @@ history:
     note: >
       Required before pubnet: the 0063 check doesn't prove who owns a listing's payTo, so a URL can
       name another seller's account and change its 402 later (ADR 0008).
+  - date: "2026-11-27"
+    status: active
+    who: bstruzyk
+    note: >
+      Started: call_paid_http compares the live 402 with the chosen Bazaar listing before signing.
 ---
 
 # Refuse a paid call when the seller asks more than its catalog listing or names another payTo

@@ -5,8 +5,9 @@
   2026-11-26: each network's catalog holds only its own listings), 2026-11-23 (task 0154: the
   quality score), 2026-11-24 (task 0120: each listing's search card in a table of its own; the
   vector on the card, the model's own server in the facilitator's image, when vectors are written,
-  the timeout, and no words-only window for a model change) and 2026-11-25 (task 0154: a payment's
-  listing on its settlement's row)
+  the timeout, and no words-only window for a model change), 2026-11-25 (task 0154: a payment's
+  listing on its settlement's row) and 2026-11-26 (task 0154: a payment counts only on the
+  listing's own terms; q is counted inside the search query)
 
 ## Context
 
@@ -161,6 +162,9 @@ The measurements are in
   - p's bonus grows quickly at first and then flattens: 1 wallet gives q = 1.07, 10 give 1.17,
     50 give 1.19.
   - A wallet paying its own `payTo` is not counted. Wallets the seller funded are counted.
+    Addresses are compared as text, so a seller paying a muxed `payTo` (`M…`) from its own base
+    account counts; no Stellar offer in the CDP catalog of 2026-11-27 had a muxed `payTo` (0 of
+    1,250), and a fresh wallet buys the seller the same.
   - Only distinct wallets count, not the number of payments.
   - The 30-day window is the recency: a listing last paid 31 days ago has p = 0.
   - Each network counts its own payments, testnet the same way as pubnet.
@@ -168,7 +172,8 @@ The measurements are in
     `ngrok.io`, `ngrok.app`, `ngrok-free.app`, `ngrok-free.dev`, `loca.lt`, `lhr.life`,
     `lhr.rocks`, `pinggy.link` and `pinggy-free.link`, or a name ending in a dot and one of them:
     `x.ts.net` is a tunnel host, `getbits.net` is not. Shared hosting such as `workers.dev` or
-    `vercel.app` gets no penalty.
+    `vercel.app` gets no penalty. The host is the listing URL's, as the WHATWG URL parser reads it
+    when the listing's search card is written; the card keeps it.
   - An empty description is a missing one, an empty one or one of spaces only. A short
     description gets no penalty.
   - q is computed when the search runs, from the payments stored at that moment.
@@ -177,10 +182,13 @@ The measurements are in
   payment's `extensions.bazaar` copy, with the same validation and key the catalog uses, and the
   claim stores them with the record, so no later write can miss them; a payment without a valid
   copy names no listing. A failure there leaves the record without one, logged and counted, and
-  never changes the settlement (AD-8). The asset counts because a payment's terms come from its
-  caller, not from the listing: a seller can pay itself in a token its listing never offers.
-  Every claim names its listing, so the count reads only `success` settlements, of the last 30
-  days; settlements are kept. Settlements from before the release name no listing, so the count
+  never changes the settlement (AD-8). A payment counts only when its scheme, network, `payTo`,
+  asset and amount equal one of the offers the catalog stored for the listing, which come from the
+  seller's own 402. A payment's terms come from its caller, not from the seller: anyone can call
+  `/settle` with terms of their own, so without this check one stroop to the seller would count
+  a payer. A listing whose price depends on the request never gains payers this way: the catalog
+  stores the price of its unpaid 402, and buyers pay other amounts. Every claim names its listing, so the count reads only `success` settlements, of the
+  last 30 days; settlements are kept. Settlements from before the release name no listing, so the count
   starts empty.
 - **Curation.** A listing is curated when its seller proved its `payTo` with `stellar.toml` (task
   0070). Task 0070 sets the bonus and how it meets the 1.2 cap. Until then no listing is curated.
@@ -271,8 +279,14 @@ The measurements are in
   2,539 and 15 ms at 25,000 without an index, and 0.7 and 1.6 ms with one (local PostgreSQL 18,
   synthetic payments of 4.3 KB, whose `payment_requirements` of about 260 bytes stays inline). It
   ships without an index; one comes when a measurement of the shipped search query needs it.
+- **q is counted inside the search query.** With 39,578 listings, a 4-word query by words took
+  143–170 ms without q, 324 ms with q at 2,539 successful payments in 30 days and 392 ms at
+  25,000. A table of payers per listing, written at each payment, took 263–294 ms: close to the
+  noise of a loaded machine, for a second write path and a copy to prune. A 32-word query takes
+  2.4–4.8 s in every variant, over the 2 s timeout even without q (local PostgreSQL 18.6,
+  synthetic data, load 7–13).
 - **The numbers above** are in
-  [R-quality-measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md).
+  [R-quality-measurement](../../lore/1-tasks/archive/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md).
 - **Curation needs a proof, not a judgement.** A list kept by hand would have the operator vouch
   for sellers; a `stellar.toml` proof is checkable.
 
@@ -364,7 +378,7 @@ The measurements are in
   [measurement](../../lore/1-tasks/archive/0134_RESEARCH_search-in-postgres/notes/R-search-measurement.md);
   tasks 0120 (the route), 0126 (both networks in one process), 0135 (the evaluation set), 0154
   (quality score and curation) and its
-  [measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md),
+  [measurement](../../lore/1-tasks/archive/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md),
   0069 (dead listings), 0070 (the verified seller), 0129 (x402 payments across Stellar)
 - Elasticsearch, `rank_feature` query, saturation function; N. Craswell, S. Robertson, H. Zaragoza,
   M. Taylor, "Relevance weighting for query independent evidence", SIGIR 2005

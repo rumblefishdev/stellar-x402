@@ -41,6 +41,7 @@ import {
   searchCardStoreContract,
   catalogSearchContract,
   catalogMeaningContract,
+  catalogQualityContract,
   rateLimitStoreContract,
   settlement,
   holdLease,
@@ -213,6 +214,14 @@ describe("PostgreSQL stores", () => {
     catalog: (await stores()).catalog,
     setVector: (key, model, vector) => setVector(pool, key, model, vector),
   }));
+  catalogQualityContract(async () => {
+    const all = await stores();
+    return {
+      catalog: all.catalog,
+      settlements: all.settlements,
+      setVector: (key, model, vector) => setVector(pool, key, model, vector),
+    };
+  });
   searchCardStoreContract(async () => {
     const all = await stores();
     return { catalog: all.catalog, cards: all.searchCards };
@@ -1112,7 +1121,7 @@ describe("PostgreSQL stores", () => {
     // The store writes each field of the listing's card to its column.
     await db.stores().searchCards.write({ seq, resource: {} as DiscoveryResource });
     const card = await pool.query(
-      "SELECT name, tags, description, parameters FROM catalog_search WHERE seq = $1",
+      "SELECT name, tags, description, parameters, host FROM catalog_search WHERE seq = $1",
       [seq],
     );
     expect(card.rows).toEqual([searchFields({} as DiscoveryResource)]);
@@ -1125,7 +1134,8 @@ describe("PostgreSQL stores", () => {
     await db.empty();
     const { catalog } = db.stores();
     const card = async () =>
-      (await pool.query("SELECT name, tags, description, parameters FROM catalog_search")).rows;
+      (await pool.query("SELECT name, tags, description, parameters, host FROM catalog_search"))
+        .rows;
     const listing = (checkedAt: number, description: string) => {
       const entry = catalogEntry();
       return { ...entry, checkedAt, resource: { ...entry.resource, description } };
@@ -1191,13 +1201,121 @@ describe("PostgreSQL stores", () => {
     };
     expect(await rewrite()).toContainEqual(expect.objectContaining({ written: 2 }));
     const { rows } = await pool.query(
-      `SELECT c.resource, s.name, s.tags, s.description, s.parameters
+      `SELECT c.resource, s.name, s.tags, s.description, s.parameters, s.host
          FROM catalog c JOIN catalog_search s USING (seq) ORDER BY c.seq`,
     );
     expect(rows).toHaveLength(2);
     for (const { resource, ...card } of rows) expect(card).toEqual(searchFields(resource));
     // The next start finds every card already holding its text, and writes none.
     expect(await rewrite()).toContainEqual(expect.objectContaining({ written: 0 }));
+  });
+
+  it("0021_catalog_search_host: adds host text NOT NULL DEFAULT '', '' on a card written before it, its text_hash kept (0154)", async () => {
+    const fresh = `${schema}_0020`;
+    await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    await pool.query(`CREATE SCHEMA ${fresh}`);
+    const old = poolFor(fresh, 2);
+    try {
+      const before = MIGRATIONS.findIndex((m) => m.name === "0021_catalog_search_host");
+      expect(before).toBe(20);
+      await migrate(old, 0, MIGRATIONS.slice(0, before));
+      // A card as the release before writes it: a listing on a tunnel, its four fields only.
+      const { rows: listing } = await old.query<{ seq: string }>(
+        `INSERT INTO catalog (network, pay_to, method, resource_url, key_version, ledger, checked_at,
+           resource, type, extension_keys)
+         VALUES ('stellar:testnet', 'G', 'GET', 'https://x.ts.net/x', 1, NULL, 1, '{}', 'http', '{}')
+         RETURNING seq`,
+      );
+      await old.query(
+        `INSERT INTO catalog_search (seq, name, tags, description, parameters)
+         VALUES ($1, 'Tides', 'ocean', 'Weather', 'city')`,
+        [listing[0]!.seq],
+      );
+      const hash = async () =>
+        (await old.query("SELECT text_hash FROM catalog_search")).rows[0].text_hash;
+      const hashBefore = await hash();
+      expect(await migrate(old, 0, MIGRATIONS.slice(0, before + 1))).toEqual([
+        "0021_catalog_search_host",
+      ]);
+      expect((await old.query("SELECT host FROM catalog_search")).rows).toEqual([{ host: "" }]);
+      expect(await hash()).toBe(hashBefore);
+      const { rows: added } = await old.query(
+        `SELECT data_type, is_nullable, column_default FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'catalog_search'
+           AND column_name = 'host'`,
+      );
+      expect(added).toEqual([{ data_type: "text", is_nullable: "NO", column_default: "''::text" }]);
+    } finally {
+      await old.end();
+      await pool.query(`DROP SCHEMA IF EXISTS ${fresh} CASCADE`);
+    }
+  });
+
+  it("stores the listing's host on its card in the catalog's write, on insert and on update (0154)", async () => {
+    await db.empty();
+    const { catalog } = db.stores();
+    const hosts = async () => (await pool.query("SELECT host FROM catalog_search")).rows;
+    const entry = catalogEntry();
+    const listing = (checkedAt: number, description: string) => ({
+      ...entry,
+      checkedAt,
+      resource: { ...entry.resource, description },
+    });
+    expect(await catalog.upsert(listing(1, "Weather"))).toBe("inserted");
+    expect(await hosts()).toEqual([{ host: "seller.example.com" }]);
+    // A card written before the host column, then its listing written again.
+    await pool.query("UPDATE catalog_search SET host = ''");
+    expect(await catalog.upsert(listing(2, "Tides"))).toBe("updated");
+    expect(await hosts()).toEqual([{ host: "seller.example.com" }]);
+  });
+
+  it("rewrites a card whose host differs at start, its text_hash and vector kept, and then writes it no more (0154)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const entry = catalogEntry();
+    await catalog.upsert(entry);
+    await setVector(pool, entry.key, SEARCH_MODEL_ID, unitVector(0.8));
+    const card = async () =>
+      (
+        await pool.query(
+          "SELECT name, tags, description, parameters, host, text_hash, model FROM catalog_search",
+        )
+      ).rows[0];
+    const written = await card();
+    expect(written).toMatchObject({ host: "seller.example.com", model: SEARCH_MODEL_ID });
+    // A card written before the host column: its text, hash and vector stand as they were.
+    await pool.query("UPDATE catalog_search SET host = ''");
+    expect(await card()).toEqual({ ...written, host: "" });
+    const [listing] = await searchCards.listings("0", 10);
+    expect(await searchCards.write(listing!)).toBe(true);
+    expect(await card()).toEqual(written);
+    expect(await searchCards.write(listing!)).toBe(false);
+  });
+
+  it("lowers a tunnel listing ×0.9 by its card's stored host: none on a card from before the host, applied once rewritten (0154)", async () => {
+    await db.empty();
+    const { catalog, searchCards } = db.stores();
+    const base = "https://base.example/x";
+    const tunnel = "https://x.ts.net/x";
+    for (const url of [base, tunnel]) {
+      const entry = catalogEntry();
+      await catalog.upsert({
+        ...entry,
+        key: { ...entry.key, resourceUrl: url },
+        resource: { ...entry.resource, resource: url, description: "weather" },
+      });
+    }
+    const ratio = async () => {
+      const hits = await catalog.search({ text: "weather", limit: 10 }, Date.now());
+      const rank = (url: string) => Number(hits.find((hit) => hit.key.resourceUrl === url)!.rank);
+      return Math.round((rank(tunnel) / rank(base)) * 1e6) / 1e6;
+    };
+    expect(await ratio()).toBe(0.9);
+    await pool.query("UPDATE catalog_search SET host = ''");
+    expect(await ratio()).toBe(1);
+    for (const listing of await searchCards.listings("0", 10))
+      expect(await searchCards.write(listing)).toBe(true);
+    expect(await ratio()).toBe(0.9);
   });
 
   it("waits for a listing write under way, and then writes no card over the newer one (0120)", async () => {
@@ -1290,11 +1408,14 @@ describe("PostgreSQL stores", () => {
       "Currency rates",
     ]);
     expect(
-      await catalog.search({
-        text: "x",
-        limit: 10,
-        meaning: unitVector(0.8),
-      }),
+      await catalog.search(
+        {
+          text: "x",
+          limit: 10,
+          meaning: unitVector(0.8),
+        },
+        Date.now(),
+      ),
     ).toEqual([]);
   });
 
@@ -1488,6 +1609,7 @@ describe("PostgreSQL stores", () => {
           "0018_account_plans",
           "0019_settlement_listing",
           "0020_catalog_search_vector",
+          "0021_catalog_search_host",
           "0022_catalog_curation",
         ]);
         expect(await typeIndex(old), built).toBe(1);
@@ -1528,6 +1650,7 @@ describe("PostgreSQL stores", () => {
         "0018_account_plans",
         "0019_settlement_listing",
         "0020_catalog_search_vector",
+        "0021_catalog_search_host",
         "0022_catalog_curation",
       ]);
       const { rows } = await old.query(

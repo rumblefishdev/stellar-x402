@@ -2173,7 +2173,7 @@ export function catalogSearchContract(make: Make<CatalogStore>) {
   describe("CatalogStore search by words (0120, ADR 0014)", () => {
     type Search = Parameters<CatalogStore["search"]>[0];
     const search = (text: string, query: Partial<Search> = {}) =>
-      store.search({ text, limit: 10, ...query });
+      store.search({ text, limit: 10, ...query }, Date.now());
     const urls = async (text: string, query: Partial<Search> = {}) =>
       (await search(text, query)).map((hit) => hit.resource.resource);
     const listing = (url: string, overrides: Partial<DiscoveryResource>) =>
@@ -2484,12 +2484,15 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
       if (cos !== null) await setVector(k, model, unitVector(cos));
     };
     const fused = (text: string, query: Partial<Search> = {}) =>
-      catalog.search({
-        text,
-        limit: 100,
-        meaning: QUERY_VECTOR,
-        ...query,
-      } as Search);
+      catalog.search(
+        {
+          text,
+          limit: 100,
+          meaning: QUERY_VECTOR,
+          ...query,
+        } as Search,
+        Date.now(),
+      );
     const hosts = (hits: { resource: DiscoveryResource }[]) =>
       hits.map((hit) => new URL(hit.resource.resource).hostname.split(".")[0]);
     /** The fused score of 0120 point G; a missing rank adds no term. */
@@ -2646,7 +2649,548 @@ export function catalogMeaningContract(make: Make<MeaningFixture>) {
 
     it("ranks by words alone without a query vector, listings without a vector included (H)", async () => {
       await listing(key("n"), { description: "weather" }, null);
-      expect(hosts(await catalog.search({ text: "weather", limit: 10 }))).toEqual(["n"]);
+      expect(hosts(await catalog.search({ text: "weather", limit: 10 }, Date.now()))).toEqual([
+        "n",
+      ]);
+    });
+  });
+}
+
+/** What the quality contract needs: the catalog, its vectors, and the settlements of one database. */
+export interface QualityFixture extends MeaningFixture {
+  settlements: SettlementStore;
+}
+
+const DAY_MS = 86_400_000;
+/**
+ * The search's clock in the quality cases, far from the database's own clock: a count that read
+ * the database clock instead of `now` would count other payments.
+ */
+const QUALITY_NOW = Date.UTC(2030, 0, 1);
+
+/** q of ADR 0014's "Quality score": p paying wallets, a tunnel host, an empty description. */
+const qualityFactor = (p: number, tunnel = false, empty = false) =>
+  (1 + (0.2 * p) / (p + 2)) * (tunnel ? 0.9 : 1) * (empty ? 0.9 : 1);
+
+/** The tunnel hosts of ADR 0014's "Quality score". */
+const TUNNEL_HOSTS = [
+  "trycloudflare.com",
+  "ts.net",
+  "serveo.net",
+  "serveousercontent.com",
+  "ngrok.io",
+  "ngrok.app",
+  "ngrok-free.app",
+  "ngrok-free.dev",
+  "loca.lt",
+  "lhr.life",
+  "lhr.rocks",
+  "pinggy.link",
+  "pinggy-free.link",
+];
+
+/**
+ * The quality factor q on search (0154, ADR 0014 "Quality score"): every final score is the base
+ * score times q, in the words ranking and in the fused one. Payments go through the settlement
+ * store as `/settle` writes them: a claim naming the listing, then the final state.
+ */
+export function catalogQualityContract(make: Make<QualityFixture>) {
+  describe("CatalogStore search quality factor (0154, ADR 0014; fused cases need pgvector)", () => {
+    let catalog: CatalogStore;
+    let settlements: SettlementStore;
+    let setVector: MeaningFixture["setVector"];
+    let nonce = 0;
+    beforeEach(async () => {
+      ({ catalog, settlements, setVector } = await make());
+    });
+    type Search = Parameters<CatalogStore["search"]>[0];
+    type Hit = Awaited<ReturnType<CatalogStore["search"]>>[number];
+
+    const key = (url: string, overrides: Partial<CatalogKey> = {}): CatalogKey => ({
+      network: "stellar:testnet",
+      payTo: PAY_TO,
+      method: "GET",
+      resourceUrl: url,
+      ...overrides,
+    });
+    /** A listing at `k` with one offer to its network and payTo, and a vector of cosine `cos`. */
+    const listing = async (
+      k: CatalogKey,
+      fields: Partial<DiscoveryResource> = {},
+      cos: number | null = null,
+    ) => {
+      await catalog.upsert({
+        keyVersion: CATALOG_KEY_VERSION,
+        ledger: 1,
+        checkedAt: 1,
+        key: k,
+        resource: {
+          resource: k.resourceUrl,
+          type: "http",
+          x402Version: 2,
+          accepts: [requirements({ network: k.network, payTo: k.payTo })],
+          lastUpdated: "2026-11-26T00:00:00.000Z",
+          ...fields,
+        },
+      });
+      if (cos !== null) await setVector(k, catalog.searchModel, unitVector(cos));
+    };
+
+    type Ending = "success" | "claimed" | "signed" | "pending" | "failed" | "rejected" | "expired";
+    interface Payment {
+      /** A wallet of its own per payment unless given. */
+      payer?: string;
+      createdAt?: number;
+      ending?: Ending | "refused";
+      /** Fields of the payment's requirements other than the listing's offer. */
+      terms?: Partial<PaymentRequirements>;
+      /** The listing the settlement names; `null` names none. Default: `k`'s. */
+      names?: { method: string; resourceUrl: string } | null;
+    }
+    /** A settlement paying for `k`'s listing, written as `/settle` writes it. */
+    const pay = async (k: CatalogKey, payment: Payment = {}) => {
+      const n = String(++nonce);
+      const network = k.network;
+      const payer = payment.payer ?? `GWALLET${n}`;
+      const accepted = requirements({ network, payTo: k.payTo, ...payment.terms });
+      const names =
+        payment.names === undefined
+          ? { method: k.method, resourceUrl: k.resourceUrl }
+          : (payment.names ?? undefined);
+      const s: NewSettlement = {
+        key: `${network}:${payer}:${n}` as SettlementKey,
+        network,
+        payer,
+        nonce: n,
+        fingerprint: `fp-${n}`,
+        paymentPayload: { x402Version: 2, accepted, payload: { tx: "AAAA" } },
+        paymentRequirements: accepted,
+        createdAt: payment.createdAt ?? QUALITY_NOW - DAY_MS,
+        ...(names === undefined ? {} : { listing: names }),
+      };
+      const ending = payment.ending ?? "success";
+      if (ending === "refused") {
+        await settlements.refuse(s, { errorReason: "invalid_payload" }, [], s.createdAt);
+        return;
+      }
+      expect(await settlements.claim(s)).toMatchObject({ claimed: true });
+      if (ending === "claimed") return;
+      if (ending === "signed") {
+        expect(
+          await settlements.addHash(s.key, `h${n}`, await holdLease(settlements), s.createdAt),
+        ).toBe(true);
+        return;
+      }
+      const update = {
+        state: ending,
+        updatedAt: s.createdAt,
+        ...(ending === "success" || ending === "pending" ? {} : { errorReason: "x" }),
+      };
+      expect(await settlements.transition(s.key, "claimed", update)).toMatchObject({
+        state: ending,
+      });
+    };
+    /** `count` payments of `k`, each by a wallet of its own. */
+    const payByWallets = async (k: CatalogKey, count: number) => {
+      for (let i = 0; i < count; i++) await pay(k);
+    };
+
+    const words = (text: string, query: Partial<Search> = {}, now = QUALITY_NOW) =>
+      catalog.search({ text, limit: 100, ...query }, now);
+    const fused = (text: string, query: Partial<Search> = {}) =>
+      catalog.search({ text, limit: 100, meaning: QUERY_VECTOR, ...query }, QUALITY_NOW);
+    const urlsOf = (hits: Hit[]) => hits.map((hit) => hit.resource.resource);
+    const hitOf = (hits: Hit[], url: string) => {
+      const hit = hits.find((h) => h.key.resourceUrl === url);
+      if (hit === undefined) throw new Error(`no hit for ${url}`);
+      return hit;
+    };
+    const round6 = (q: number) => Math.round(q * 1e6) / 1e6;
+    /**
+     * Each hit's rank over the base listing's, rounded to 6 places: words ranks are PostgreSQL
+     * `real`, and every listing here has the same base rank, so the ratio is the hit's q.
+     */
+    const ratios = (hits: Hit[], baseUrl: string) => {
+      const base = Number(hitOf(hits, baseUrl).rank);
+      return Object.fromEntries(
+        hits.map((hit) => [
+          `${hit.key.network === "stellar:pubnet" ? "pubnet " : ""}${hit.key.resourceUrl}`,
+          round6(Number(hit.rank) / base),
+        ]),
+      );
+    };
+    /** The fused score of 0120 point G, as in the meaning contract. */
+    const score = (byMeaning?: number, byWords?: number) =>
+      (byMeaning === undefined ? 0 : 4 / (20 + byMeaning)) +
+      (byWords === undefined ? 0 : 1 / (20 + byWords));
+    /** Every listing matches "weather" in its description, so words ranks them equal. */
+    const WEATHER = { description: "weather" };
+    const BASE = "https://base.example/x";
+
+    describe("by words", () => {
+      it("multiplies the rank by q = 1 + 0.2 p / (p + 2): 1 wallet ×1.0667, 10 ×1.1667, none ×1", async () => {
+        await listing(key(BASE), WEATHER);
+        await listing(key("https://one.example/x"), WEATHER);
+        await listing(key("https://ten.example/x"), WEATHER);
+        await payByWallets(key("https://one.example/x"), 1);
+        await payByWallets(key("https://ten.example/x"), 10);
+        const hits = await words("weather");
+        expect(urlsOf(hits)).toEqual(["https://ten.example/x", "https://one.example/x", BASE]);
+        expect(ratios(hits, BASE)).toEqual({
+          "https://ten.example/x": round6(qualityFactor(10)),
+          "https://one.example/x": round6(qualityFactor(1)),
+          [BASE]: 1,
+        });
+        expect(qualityFactor(1)).toBeCloseTo(1.0667, 4);
+        expect(qualityFactor(10)).toBeCloseTo(1.1667, 4);
+      });
+
+      it("counts only success settlements: claimed, signed, pending, failed, rejected, expired and refused ones don't", async () => {
+        const k = key("https://paid.example/x");
+        await listing(key(BASE), WEATHER);
+        await listing(k, WEATHER);
+        await pay(k);
+        for (const ending of [
+          "claimed",
+          "signed",
+          "pending",
+          "failed",
+          "rejected",
+          "expired",
+          "refused",
+        ] as const)
+          await pay(k, { ending });
+        expect(ratios(await words("weather"), BASE)).toMatchObject({
+          [k.resourceUrl]: round6(qualityFactor(1)),
+        });
+      });
+
+      it("counts distinct wallets, not payments: a wallet paying three times counts once", async () => {
+        const k = key("https://paid.example/x");
+        await listing(key(BASE), WEATHER);
+        await listing(k, WEATHER);
+        for (let i = 0; i < 3; i++) await pay(k, { payer: "GREPEAT" });
+        await pay(k, { payer: "GONCE" });
+        // p = 2 (q 1.1), not 4 payments (q 1.1333).
+        expect(ratios(await words("weather"), BASE)).toMatchObject({
+          [k.resourceUrl]: round6(qualityFactor(2)),
+        });
+      });
+
+      it("never counts a seller paying its own payTo (task AC3)", async () => {
+        const self = key("https://self.example/x");
+        const mixed = key("https://mixed.example/x");
+        await listing(key(BASE), WEATHER);
+        await listing(self, WEATHER);
+        await listing(mixed, WEATHER);
+        await pay(self, { payer: PAY_TO });
+        await pay(mixed, { payer: PAY_TO });
+        await pay(mixed, { payer: "GBUYER" });
+        expect(ratios(await words("weather"), BASE)).toEqual({
+          [BASE]: 1,
+          [self.resourceUrl]: 1,
+          [mixed.resourceUrl]: round6(qualityFactor(1)),
+        });
+      });
+
+      it("counts the 30 days that end at the search's now: exactly 30 days old counts, 1 ms older does not", async () => {
+        const k = key("https://paid.example/x");
+        await listing(key(BASE), WEATHER);
+        await listing(k, WEATHER);
+        await pay(k, { createdAt: QUALITY_NOW - 30 * DAY_MS });
+        await pay(k, { createdAt: QUALITY_NOW - 30 * DAY_MS - 1 });
+        expect(ratios(await words("weather"), BASE)).toMatchObject({
+          [k.resourceUrl]: round6(qualityFactor(1)),
+        });
+        // One ms later the payment of exactly 30 days is out too: the window moves with `now`.
+        expect(ratios(await words("weather", {}, QUALITY_NOW + 1), BASE)).toMatchObject({
+          [k.resourceUrl]: 1,
+        });
+      });
+
+      it("counts a payment for the listing it names: method and URL, network and payTo all equal", async () => {
+        const k = key("https://paid.example/x");
+        await listing(key(BASE), WEATHER);
+        await listing(k, WEATHER);
+        await pay(k);
+        // Another method, another URL, no listing named, another payTo.
+        await pay(k, { names: { method: "POST", resourceUrl: k.resourceUrl } });
+        await pay(k, { names: { method: "GET", resourceUrl: "https://paid.example/y" } });
+        await pay(k, { names: null });
+        await pay(key(k.resourceUrl, { payTo: "GOTHER" }));
+        expect(ratios(await words("weather"), BASE)).toMatchObject({
+          [k.resourceUrl]: round6(qualityFactor(1)),
+        });
+      });
+
+      it("counts each network's own payments, testnet as pubnet", async () => {
+        const url = "https://paid.example/x";
+        const testnet = key(url);
+        const pubnet = key(url, { network: "stellar:pubnet" });
+        await listing(key(BASE), WEATHER);
+        await listing(testnet, WEATHER);
+        await listing(pubnet, WEATHER);
+        await payByWallets(testnet, 1);
+        await payByWallets(pubnet, 3);
+        expect(ratios(await words("weather"), BASE)).toEqual({
+          [BASE]: 1,
+          [url]: round6(qualityFactor(1)),
+          [`pubnet ${url}`]: round6(qualityFactor(3)),
+        });
+      });
+
+      it("counts a payment only when its scheme, network, payTo, asset and amount equal one stored offer's", async () => {
+        const k = key("https://paid.example/x");
+        await listing(key(BASE), WEATHER);
+        const offer = requirements({ asset: "CASSET", amount: "1000" });
+        const second = requirements({ asset: "CSECOND", amount: "5000" });
+        await listing(k, { ...WEATHER, accepts: [offer, second] });
+        await pay(k, { terms: { asset: "CASSET", amount: "1000" } });
+        // Differs only in fields not compared: still counts.
+        await pay(k, {
+          terms: { asset: "CASSET", amount: "1000", maxTimeoutSeconds: 300, extra: { a: 1 } },
+        });
+        // The second offer counts as well.
+        await pay(k, { terms: { asset: "CSECOND", amount: "5000" } });
+        // A dust amount, another asset, another scheme, and fields of two offers mixed: none.
+        await pay(k, { terms: { asset: "CASSET", amount: "1" } });
+        await pay(k, { terms: { asset: "COTHER", amount: "1000" } });
+        await pay(k, { terms: { asset: "CASSET", amount: "1000", scheme: "upto" } });
+        await pay(k, { terms: { asset: "CASSET", amount: "5000" } });
+        // The requirements on another network than the settlement's, which names the listing.
+        await pay(k, { terms: { asset: "CASSET", amount: "1000", network: "stellar:pubnet" } });
+        expect(ratios(await words("weather"), BASE)).toMatchObject({
+          [k.resourceUrl]: round6(qualityFactor(3)),
+        });
+      });
+
+      it("stops counting payments on terms the listing no longer offers, and counts them again when it offers them again", async () => {
+        const k = key("https://paid.example/x");
+        await listing(key(BASE), WEATHER);
+        const offerAt = (amount: string, checkedAt: number) =>
+          catalog.upsert({
+            keyVersion: CATALOG_KEY_VERSION,
+            ledger: 1,
+            checkedAt,
+            key: k,
+            resource: {
+              resource: k.resourceUrl,
+              type: "http",
+              x402Version: 2,
+              accepts: [requirements({ network: k.network, payTo: k.payTo, amount })],
+              lastUpdated: "2026-11-26T00:00:00.000Z",
+              ...WEATHER,
+            },
+          });
+        expect(await offerAt("1000", 1)).toBe("inserted");
+        await pay(k, { terms: { amount: "1000" } });
+        await pay(k, { terms: { amount: "1000" } });
+        expect(ratios(await words("weather"), BASE)).toMatchObject({
+          [k.resourceUrl]: round6(qualityFactor(2)),
+        });
+        // The seller raises the price: the two payments match no offer now.
+        expect(await offerAt("2000", 2)).toBe("updated");
+        expect(ratios(await words("weather"), BASE)).toMatchObject({ [k.resourceUrl]: 1 });
+        // The old price returns: nothing was erased, they count again.
+        expect(await offerAt("1000", 3)).toBe("updated");
+        expect(ratios(await words("weather"), BASE)).toMatchObject({
+          [k.resourceUrl]: round6(qualityFactor(2)),
+        });
+      });
+
+      it("lowers a listing on a tunnel host ×0.9: each of the 13, a subdomain of one, with a port", async () => {
+        await listing(key(BASE), WEATHER);
+        const urls = [
+          ...TUNNEL_HOSTS.map((host) => `https://x.${host}/x`),
+          "https://ts.net/x",
+          "https://ngrok.io/x",
+          "https://a.b.trycloudflare.com/x",
+          "https://x.ngrok.io:8443/a",
+        ];
+        for (const url of urls) await listing(key(url), WEATHER);
+        expect(ratios(await words("weather"), BASE)).toEqual({
+          [BASE]: 1,
+          ...Object.fromEntries(urls.map((url) => [url, 0.9])),
+        });
+      });
+
+      it("gives no penalty to a host that only ends in a tunnel's letters or to shared hosting", async () => {
+        await listing(key(BASE), WEATHER);
+        const urls = [
+          "https://getbits.net/x",
+          "https://notts.net/x",
+          "https://seller.workers.dev/x",
+          "https://x.vercel.app/x",
+          "https://ngrok.io.example/x",
+        ];
+        for (const url of urls) await listing(key(url), WEATHER);
+        expect(ratios(await words("weather"), BASE)).toEqual({
+          [BASE]: 1,
+          ...Object.fromEntries(urls.map((url) => [url, 1])),
+        });
+      });
+
+      it("lowers a listing whose search card has no description ×0.9: missing, empty or spaces; a short one or an MCP tool's is no penalty", async () => {
+        const tags = { tags: ["weather"] };
+        await listing(key(BASE), { ...tags, description: "Rain and sun" });
+        await listing(key("https://missing.example/x"), tags);
+        await listing(key("https://empty.example/x"), { ...tags, description: "" });
+        await listing(key("https://spaces.example/x"), { ...tags, description: "   " });
+        await listing(key("https://short.example/x"), { ...tags, description: "ok" });
+        await listing(key("mcp://tool/tides"), {
+          ...tags,
+          type: "mcp",
+          extensions: {
+            bazaar: {
+              info: { input: { type: "mcp", toolName: "tides", description: "Tide tables" } },
+            },
+          },
+        });
+        expect(ratios(await words("weather"), BASE)).toEqual({
+          [BASE]: 1,
+          "https://missing.example/x": 0.9,
+          "https://empty.example/x": 0.9,
+          "https://spaces.example/x": 0.9,
+          "https://short.example/x": 1,
+          "mcp://tool/tides": 1,
+        });
+      });
+
+      it("multiplies the factors: tunnel and empty description ×0.81, with 10 wallets ×0.945", async () => {
+        await listing(key(BASE), WEATHER);
+        await listing(key("https://x.ts.net/x"), { tags: ["weather"] });
+        await listing(key("https://y.ts.net/x"), { tags: ["weather"] });
+        await listing(key("https://z.example/x"), { tags: ["weather"], description: "Rain" });
+        await payByWallets(key("https://y.ts.net/x"), 10);
+        const hits = await words("weather");
+        // Tags rank differently from a description: compare with the listing tagged alike.
+        const tagged = Number(hitOf(hits, "https://z.example/x").rank);
+        expect(Number(hitOf(hits, "https://x.ts.net/x").rank) / tagged).toBeCloseTo(0.81, 6);
+        expect(Number(hitOf(hits, "https://y.ts.net/x").rank) / tagged).toBeCloseTo(
+          qualityFactor(10, true, true),
+          6,
+        );
+      });
+
+      it("orders by the final score, and pages with `after` through every match once, in order", async () => {
+        const p = [0, 3, 1, 5, 2, 0];
+        for (const [i, count] of p.entries()) {
+          const k = key(`https://h${i}.example/x`);
+          await listing(k, WEATHER);
+          await payByWallets(k, count);
+        }
+        await listing(key("https://t.ts.net/x"), WEATHER);
+        const all = await words("weather");
+        expect(urlsOf(all)).toEqual([
+          "https://h3.example/x",
+          "https://h1.example/x",
+          "https://h4.example/x",
+          "https://h2.example/x",
+          "https://h0.example/x",
+          "https://h5.example/x",
+          "https://t.ts.net/x",
+        ]);
+        const seen: Hit[] = [];
+        let after: Search["after"];
+        for (let page = 0; page < 10; page++) {
+          const hits = await words("weather", { limit: 2, after });
+          seen.push(...hits);
+          if (hits.length < 2) break;
+          const last = hits.at(-1)!;
+          after = { rank: last.rank, key: last.key };
+        }
+        expect(seen).toEqual(all);
+      });
+    });
+
+    describe("fused, by meaning and words", () => {
+      it("multiplies the fused score by q, counting positions before q: 10 wallets lift the 4th by meaning past the 1st", async () => {
+        const hosts = ["a", "b", "c", "d"];
+        for (const [i, host] of hosts.entries())
+          await listing(
+            key(`https://${host}.example/x`),
+            { description: "Tides" },
+            0.95 - i * 0.05,
+          );
+        await payByWallets(key("https://d.example/x"), 10);
+        // "zebra" is in no listing: meaning alone ranks.
+        const hits = await fused("zebra");
+        expect(urlsOf(hits)).toEqual(
+          ["d", "a", "b", "c"].map((host) => `https://${host}.example/x`),
+        );
+        expect(hits.map((hit) => Number(hit.rank))).toEqual([
+          expect.closeTo(score(4) * qualityFactor(10), 6),
+          expect.closeTo(score(1), 6),
+          expect.closeTo(score(2), 6),
+          expect.closeTo(score(3), 6),
+        ]);
+      });
+
+      it("multiplies both terms, meaning's and words', by q", async () => {
+        // a: 1st by meaning, 2nd by words. b: 2nd by meaning, 1st by words (tags), 1 wallet.
+        await listing(key("https://a.example/x"), { description: "weather" }, 0.95);
+        await listing(key("https://b.example/x"), { tags: ["weather"], description: "Tides" }, 0.9);
+        await payByWallets(key("https://b.example/x"), 1);
+        const hits = await fused("weather");
+        expect(urlsOf(hits)).toEqual(["https://b.example/x", "https://a.example/x"]);
+        expect(hits.map((hit) => Number(hit.rank))).toEqual([
+          expect.closeTo(score(2, 1) * qualityFactor(1), 6),
+          expect.closeTo(score(1, 2), 6),
+        ]);
+      });
+
+      it("applies the tunnel and empty description penalties to the fused score", async () => {
+        await listing(key("https://x.ts.net/x"), { description: "Tides" }, 0.95);
+        await listing(key("https://getbits.net/x"), { description: "Waves" }, 0.9);
+        await listing(key("https://c.example/x"), {}, 0.85);
+        await listing(key("https://y.trycloudflare.com/x"), { description: " " }, 0.8);
+        const hits = await fused("zebra");
+        expect(urlsOf(hits)).toEqual([
+          "https://getbits.net/x",
+          "https://x.ts.net/x",
+          "https://c.example/x",
+          "https://y.trycloudflare.com/x",
+        ]);
+        expect(hits.map((hit) => Number(hit.rank))).toEqual([
+          expect.closeTo(score(2), 6),
+          expect.closeTo(score(1) * 0.9, 6),
+          expect.closeTo(score(3) * 0.9, 6),
+          expect.closeTo(score(4) * 0.81, 6),
+        ]);
+      });
+
+      it("pages with `after` through every match once, in the order of the final score", async () => {
+        for (let i = 0; i < 12; i++) {
+          const k = key(`https://h${String(i).padStart(2, "0")}.example/x`);
+          await listing(k, { description: "Tides" }, 0.95 - i * 0.02);
+          await payByWallets(k, i % 4);
+        }
+        const all = await fused("zebra");
+        expect(all).toHaveLength(12);
+        const ranks = all.map((hit) => Number(hit.rank));
+        expect(ranks).toEqual([...ranks].sort((x, y) => y - x));
+        const seen: Hit[] = [];
+        let after: Search["after"];
+        for (let page = 0; page < 10; page++) {
+          const hits = await fused("zebra", { limit: 5, after });
+          seen.push(...hits);
+          if (hits.length < 5) break;
+          const last = hits.at(-1)!;
+          after = { rank: last.rank, key: last.key };
+        }
+        expect(seen).toEqual(all);
+      });
+    });
+
+    it("task AC2: of two listings matching a query equally, the one with paying wallets ranks first", async () => {
+      // Without q, equal scores go by key: unpaid's URL sorts first.
+      const unpaid = key("https://a-unpaid.example/x");
+      const paid = key("https://b-paid.example/x");
+      await listing(unpaid, WEATHER, 0.9);
+      await listing(paid, WEATHER, 0.9);
+      await payByWallets(paid, 2);
+      expect(urlsOf(await words("weather"))).toEqual([paid.resourceUrl, unpaid.resourceUrl]);
+      expect(urlsOf(await fused("weather"))).toEqual([paid.resourceUrl, unpaid.resourceUrl]);
     });
   });
 }

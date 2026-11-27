@@ -118,7 +118,7 @@ describe("CatalogStore: curated", () => {
   });
 
   it("marks a listing in search the same way", async () => {
-    const hits = await stores.catalog.search({ text: "weather", limit: 10 });
+    const hits = await stores.catalog.search({ text: "weather", limit: 10 }, Date.now());
     expect(curatedOf(hits.map((hit) => hit.resource))).toEqual(EXPECTED);
   });
 

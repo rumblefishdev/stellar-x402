@@ -1,11 +1,15 @@
 import type { DiscoveryResource } from "@x402/extensions/bazaar";
 
-/** The four fields search ranks a listing by, weighted name, tags, description, parameters. */
+/**
+ * What search ranks a listing by: four fields of words, weighted name, tags, description,
+ * parameters, and the host its quality factor reads for a tunnel (ADR 0014).
+ */
 export interface SearchFields {
   name: string;
   tags: string;
   description: string;
   parameters: string;
+  host: string;
 }
 
 /** ADR 0014: at most 40 parameter entries, a name or a description each, cut at 300 characters. */
@@ -34,6 +38,7 @@ function pathWords(url: string): string {
  * - parameters: each input's name once, in name order, with its description, from the HTTP query
  *   and body fields or the MCP tool's arguments. An HTTP listing's `info` holds example values (`validate.ts`), so
  *   only its names are read there; descriptions come from the schemas.
+ * - host: the URL's host name, as the WHATWG URL parser reads it.
  * A field of an unexpected shape adds nothing.
  */
 export function searchFields(listing: DiscoveryResource): SearchFields {
@@ -84,5 +89,6 @@ export function searchFields(listing: DiscoveryResource): SearchFields {
       .slice(0, MAX_PARAMETER_ENTRIES)
       .map((entry) => Array.from(entry).slice(0, MAX_PARAMETER_CHARS).join(""))
       .join(" "),
+    host: (typeof listing.resource === "string" && URL.parse(listing.resource)?.hostname) || "",
   };
 }

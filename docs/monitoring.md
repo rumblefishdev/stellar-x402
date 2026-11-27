@@ -38,6 +38,8 @@ Since 0139's switch (2026-11-25 13:43 UTC) most checks are Prometheus rules on t
 | `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                                                                                          |
 | `protocol-changed`        | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                                                                            |
 | `protocol-upgrade-coming` | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                                                                          |
+| `upstream-changed`        | `upstream`  | 2026-11-27 09:08 UTC | 2026-11-27, `make fire-test` ([Drills](#2026-11-27-the-upstream-alarms)): ALARM 09:14:57, OK 09:16:10 UTC, both seen in Slack                                                             |
+| `upstream-silent`         | `upstream`  | 2026-11-27 09:08 UTC | 2026-11-27, `make fire-test` ([Drills](#2026-11-27-the-upstream-alarms)): ALARM 09:18:02, OK 09:39:03 UTC, both seen in Slack                                                             |
 | `audit-disk`              | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                                                                           |
 | `telemetry-silent`        | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                                                                          |
 | `credentials-stale`       | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                                                                           |
@@ -60,7 +62,7 @@ On since 2026-11-25 13:43 UTC ([The Prometheus rules](#the-prometheus-rules)). T
 | `x402-rpc-on-fallback`            | `facilitator`       | 2026-11-25, the drill textfile: 14:35:15 to 14:42:00 UTC                                                                                 |
 | `x402-sweeps-stopped`             | `facilitator`       | 2026-11-25, a flat counter in the drill textfile: 14:21:30 to 14:45:45 UTC                                                               |
 | `x402-openbao-down`               | `host`              | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
-| `x402-snapshot-age`               | `snapshots`         | Not yet: on from #268's merge, fired once after it                                                                                       |
+| `x402-snapshot-age`               | `snapshots`         | 2026-11-26, the stamp's mtime set 27 h back, then restored: firing 16:14, resolved 16:19 UTC, seen in Slack                              |
 | `x402-facilitator-silent`         | `facilitator`       | 2026-11-25, the stop window: 14:39:15 to 14:39:45 UTC (10 minutes after the stop)                                                        |
 | `x402-gauge-stale`                | `facilitator`       | 2026-11-25, a stale stamp in the drill textfile while the process ran: 14:46:45 to 14:54:30 UTC                                          |
 | `x402-target-down`                | `server`            | 2026-11-25, the stop window (`job` facilitator): 14:34:15 to 14:39:45 UTC                                                                |
@@ -95,8 +97,6 @@ once, by the task that turns it on.
 | `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
 | `hub-uptime`         | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
 | `portal-uptime`      | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
-| `upstream-changed`   | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
-| `upstream-silent`    | `upstream`      | 0026, as above                                                                         |
 | `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
 | `wal-stale`          | `backups`       | 0026, as above                                                                         |
 
@@ -1072,7 +1072,7 @@ CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are Clo
 | `spendable_stroops`                         | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
 | `protocol_version`                          | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
 | `protocol_supported_version`                | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |
-| `upstream_files_changed`                    | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed), [upstream-silent](#upstream-silent) (off)                              |
+| `upstream_files_changed`                    | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed), [upstream-silent](#upstream-silent)                                    |
 | `account_state_mismatches`                  | `x402-watch`       | gauge, Count   | `network`                                                | `account-state` (off)                                                                                         |
 | `account_effects_unexpected`                | `x402-watch`       | counter, Count | `network`                                                | `account-effects` (off)                                                                                       |
 | `backup_secret_reads`                       | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |
@@ -1261,3 +1261,22 @@ VM's `ALERTS{alertstate="firing"}`, UTC.
   `agent-certificate` (the on-table says why).
 - **In the metrics' history:** every series with `drill="1"` between 14:20 and 14:55 on
   2026-11-25 is the drill's, and the facilitator's and the agent's gaps are the windows above.
+
+### 2026-11-27: the upstream alarms
+
+- **Before:** `make check-series GROUP=upstream` passed at 08:13 and again at 09:05, after the
+  08:00 run's first point (`upstream_files_changed` 0, one sample). With 0, `upstream-changed`
+  can't fire on its first evaluation, and with a point today `upstream-silent` can't either.
+  The Alarms stack deployed both at 09:08:49 (`soroban-admin` SSO profile); `upstream-changed`
+  read OK at 09:09:18 and `upstream-silent` at 09:15:52.
+- **How:** `make fire-test ALARM=x402-production-upstream-changed`, then
+  `ALARM=x402-production-upstream-silent`: set-alarm-state, not a fake point. A fake point can't
+  fire `upstream-silent`, since a point is what keeps it OK, and a fake 1 for `upstream-changed`
+  would stay in its one-day window and keep it in ALARM until the window passes.
+- **What happened:** `upstream-changed` ALARM at 09:14:57 and OK at 09:16:10; `upstream-silent`
+  ALARM at 09:18:02 and OK at 09:39:03, 21 minutes later: CloudWatch evaluates the two-day alarm
+  less often, so wait for it. Each change was delivered by SNS and seen in `#stellar-x402-bot`.
+- **What it shows:** both alarms' path to Slack and their return to OK on the real point. The
+  OK message names the period as 09:00 to 09:00 UTC, not midnight, so the 08:00 run's point
+  falls in the period that ends at 09:00 the same day.
+- **In the metric's history:** nothing: no point was written by hand.

@@ -341,6 +341,15 @@ impl Facilitator {
         self
     }
 
+    /// This client with `limit` as its timeout, when that is the shorter one.
+    #[cfg(feature = "axum")]
+    pub(crate) fn within(&self, limit: Duration) -> Self {
+        Self {
+            timeout: self.timeout.min(limit),
+            ..self.clone()
+        }
+    }
+
     /// The schemes and networks the facilitator verifies and settles.
     pub async fn supported(&self) -> Result<Supported, FacilitatorError> {
         let route = "/supported";
