@@ -363,7 +363,6 @@ async function callRoute(
   const res = {
     status: (code: number) => ((status = code), res),
     json: (value: unknown) => ((body = value), res),
-    setHeader: () => res,
   } as unknown as Response;
   await handler({ query } as unknown as Request, res, () => {});
   return { status, body: body as SearchDiscoveryResourcesResponse };

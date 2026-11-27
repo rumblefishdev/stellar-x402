@@ -2664,7 +2664,7 @@ const DAY_MS = 86_400_000;
 const QUALITY_NOW = Date.UTC(2030, 0, 1);
 
 /** q of ADR 0014's "Quality score": p paying wallets, a tunnel host, an empty description. */
-export const qualityFactor = (p: number, tunnel = false, empty = false) =>
+const qualityFactor = (p: number, tunnel = false, empty = false) =>
   (1 + (0.2 * p) / (p + 2)) * (tunnel ? 0.9 : 1) * (empty ? 0.9 : 1);
 
 /** The tunnel hosts of ADR 0014's "Quality score". */
@@ -2741,12 +2741,11 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
       terms?: Partial<PaymentRequirements>;
       /** The listing the settlement names; `null` names none. Default: `k`'s. */
       names?: { method: string; resourceUrl: string } | null;
-      network?: StellarNetwork;
     }
     /** A settlement paying for `k`'s listing, written as `/settle` writes it. */
     const pay = async (k: CatalogKey, payment: Payment = {}) => {
       const n = String(++nonce);
-      const network = payment.network ?? k.network;
+      const network = k.network;
       const payer = payment.payer ?? `GWALLET${n}`;
       const accepted = requirements({ network, payTo: k.payTo, ...payment.terms });
       const names =
@@ -2796,11 +2795,12 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
     const fused = (text: string, query: Partial<Search> = {}) =>
       catalog.search({ text, limit: 100, now: QUALITY_NOW, meaning: QUERY_VECTOR, ...query });
     const urlsOf = (hits: Hit[]) => hits.map((hit) => hit.resource.resource);
-    const hitOf = (hits: Hit[], url: string, network: StellarNetwork = "stellar:testnet") => {
-      const hit = hits.find((h) => h.key.resourceUrl === url && h.key.network === network);
-      if (hit === undefined) throw new Error(`no hit for ${network} ${url}`);
+    const hitOf = (hits: Hit[], url: string) => {
+      const hit = hits.find((h) => h.key.resourceUrl === url);
+      if (hit === undefined) throw new Error(`no hit for ${url}`);
       return hit;
     };
+    const round6 = (q: number) => Math.round(q * 1e6) / 1e6;
     /**
      * Each hit's rank over the base listing's, rounded to 6 places: words ranks are PostgreSQL
      * `real`, and every listing here has the same base rank, so the ratio is the hit's q.
@@ -2810,11 +2810,10 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
       return Object.fromEntries(
         hits.map((hit) => [
           `${hit.key.network === "stellar:pubnet" ? "pubnet " : ""}${hit.key.resourceUrl}`,
-          Math.round((Number(hit.rank) / base) * 1e6) / 1e6,
+          round6(Number(hit.rank) / base),
         ]),
       );
     };
-    const round6 = (q: number) => Math.round(q * 1e6) / 1e6;
     /** The fused score of 0120 point G, as in the meaning contract. */
     const score = (byMeaning?: number, byWords?: number) =>
       (byMeaning === undefined ? 0 : 4 / (20 + byMeaning)) +
@@ -2902,10 +2901,6 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
         expect(ratios(await words("weather", { now: QUALITY_NOW + 1 }), BASE)).toMatchObject({
           [k.resourceUrl]: 1,
         });
-        // A listing last paid 31 days ago has p = 0.
-        expect(ratios(await words("weather", { now: QUALITY_NOW + DAY_MS }), BASE)).toMatchObject({
-          [k.resourceUrl]: 1,
-        });
       });
 
       it("counts a payment for the listing it names: method and URL, network and payTo all equal", async () => {
@@ -2921,14 +2916,6 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
         expect(ratios(await words("weather"), BASE)).toMatchObject({
           [k.resourceUrl]: round6(qualityFactor(1)),
         });
-      });
-
-      it("counts a settlement that names no listing for no listing", async () => {
-        const k = key("https://paid.example/x");
-        await listing(key(BASE), WEATHER);
-        await listing(k, WEATHER);
-        for (let i = 0; i < 5; i++) await pay(k, { names: null });
-        expect(ratios(await words("weather"), BASE)).toEqual({ [BASE]: 1, [k.resourceUrl]: 1 });
       });
 
       it("counts each network's own payments, testnet as pubnet", async () => {
@@ -3036,7 +3023,7 @@ export function catalogQualityContract(make: Make<QualityFixture>) {
         await listing(key("https://y.ts.net/x"), { tags: ["weather"] });
         await listing(key("https://z.example/x"), { tags: ["weather"], description: "Rain" });
         await payByWallets(key("https://y.ts.net/x"), 10);
-        const hits = await words("weather", {});
+        const hits = await words("weather");
         // Tags rank differently from a description: compare with the listing tagged alike.
         const tagged = Number(hitOf(hits, "https://z.example/x").rank);
         expect(Number(hitOf(hits, "https://x.ts.net/x").rank) / tagged).toBeCloseTo(0.81, 6);

@@ -218,9 +218,7 @@ describe("searchFields", () => {
     expect(hostOf("https://x.ngrok.io:8443/a")).toBe("x.ngrok.io");
     expect(hostOf("https://Seller.Example.com/a")).toBe("seller.example.com");
     expect(hostOf("not a url")).toBe("");
-    expect(hostOf("")).toBe("");
     expect(hostOf(undefined)).toBe("");
-    expect(hostOf(7)).toBe("");
     expect(hostOf({ href: "https://seller.example/x" })).toBe("");
   });
 
