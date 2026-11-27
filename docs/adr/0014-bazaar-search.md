@@ -286,7 +286,7 @@ The measurements are in
   2.4–4.8 s in every variant, over the 2 s timeout even without q (local PostgreSQL 18.6,
   synthetic data, load 7–13).
 - **The numbers above** are in
-  [R-quality-measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md).
+  [R-quality-measurement](../../lore/1-tasks/archive/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md).
 - **Curation needs a proof, not a judgement.** A list kept by hand would have the operator vouch
   for sellers; a `stellar.toml` proof is checkable.
 
@@ -378,7 +378,7 @@ The measurements are in
   [measurement](../../lore/1-tasks/archive/0134_RESEARCH_search-in-postgres/notes/R-search-measurement.md);
   tasks 0120 (the route), 0126 (both networks in one process), 0135 (the evaluation set), 0154
   (quality score and curation) and its
-  [measurement](../../lore/1-tasks/active/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md),
+  [measurement](../../lore/1-tasks/archive/0154_FEATURE_bazaar-quality-score/notes/R-quality-measurement.md),
   0069 (dead listings), 0070 (the verified seller), 0129 (x402 payments across Stellar)
 - Elasticsearch, `rank_feature` query, saturation function; N. Craswell, S. Robertson, H. Zaragoza,
   M. Taylor, "Relevance weighting for query independent evidence", SIGIR 2005
