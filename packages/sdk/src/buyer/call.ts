@@ -29,7 +29,84 @@ export interface BuyerConfig {
   budget?: BudgetStore;
   /** The clock that decides the day; tests set it. */
   now?: () => Date;
+  /**
+   * The terms the caller saw before calling, such as a catalog listing's `accepts`. With them, a
+   * seller's offer is paid only when it names a quoted `payTo` for its network and asks at most the
+   * quoted amount for the same scheme, network and asset; a lower price passes. Without them, any
+   * offer within the limits is paid.
+   */
+  quoted?: readonly QuotedOffer[];
 }
+
+/** One offer the caller saw before calling: a catalog listing's `accepts` entry. */
+export interface QuotedOffer {
+  scheme: string;
+  network: string;
+  asset: string;
+  payTo: string;
+  /** In the asset's atomic units. */
+  amount: string;
+}
+
+/** Why a seller's offer is not one the caller was quoted, or `undefined` when it is. */
+function unquoted(
+  offer: { scheme: string; network: string; asset: string; payTo: string; amount: string },
+  quoted: readonly QuotedOffer[],
+): "payto_changed" | "price_raised" | "terms_changed" | undefined {
+  const onNetwork = quoted.filter((quote) => quote.network === offer.network);
+  // A listing is keyed by network and payTo: another account on the same network is another seller.
+  if (onNetwork.length > 0 && !onNetwork.some((quote) => quote.payTo === offer.payTo)) {
+    return "payto_changed";
+  }
+  const same = onNetwork.filter(
+    (quote) =>
+      quote.payTo === offer.payTo && quote.scheme === offer.scheme && quote.asset === offer.asset,
+  );
+  if (same.length === 0) return "terms_changed";
+  // Both whole numbers of atomic units: a price that isn't one is left to the policy's own check.
+  if (!/^[0-9]+$/.test(offer.amount)) return undefined;
+  const price = BigInt(offer.amount);
+  return same.some((quote) => /^[0-9]+$/.test(quote.amount) && price <= BigInt(quote.amount))
+    ? undefined
+    : "price_raised";
+}
+
+/**
+ * The price refused as `price_raised`: what the offer asks, and the most a quote for its terms
+ * allows. Both are whole numbers of atomic units, so the message carries no seller text.
+ */
+function raisedPrice(
+  offer: { scheme: string; network: string; asset: string; payTo: string; amount: string },
+  quoted: readonly QuotedOffer[],
+): string | undefined {
+  const listed = quoted
+    .filter(
+      (quote) =>
+        quote.network === offer.network &&
+        quote.payTo === offer.payTo &&
+        quote.scheme === offer.scheme &&
+        quote.asset === offer.asset &&
+        /^[0-9]+$/.test(quote.amount),
+    )
+    .map((quote) => BigInt(quote.amount))
+    .reduce<bigint | undefined>(
+      (most, amount) => (most === undefined || amount > most ? amount : most),
+      undefined,
+    );
+  // A quote that isn't a whole number allows nothing, and has no amount to name.
+  if (listed === undefined) return undefined;
+  return (
+    `The seller asks ${BigInt(offer.amount)} atomic units, more than the listing's ${listed}, ` +
+    "in the same asset."
+  );
+}
+
+/** The refusal for the first reason, in this order, that stopped every offer. */
+const UNQUOTED_REFUSALS = {
+  payto_changed: "The seller names another account to pay than the listing does.",
+  price_raised: "The seller asks more than the listing's price.",
+  terms_changed: "The seller asks for a scheme, network or asset the listing does not offer.",
+} as const;
 
 /**
  * The longest a seller may keep a signed payment valid: 300 s is the `@x402/express` default. A
@@ -158,7 +235,28 @@ export function startCall(config: BuyerConfig): PaymentCall {
   // Of the seller's offers, keep those in an allowed asset, at a price above zero, with a short
   // enough authorization and within the per-call limit; the library pays the first one left, and
   // the daily budget is counted when it is chosen.
-  client.registerPolicy((_version, offers) => {
+  client.registerPolicy((_version, sellerOffers) => {
+    let offers = sellerOffers;
+    if (config.quoted) {
+      const quoted = config.quoted;
+      const reasons = new Set(offers.map((offer) => unquoted(offer, quoted)));
+      offers = offers.filter((offer) => unquoted(offer, quoted) === undefined);
+      if (offers.length === 0) {
+        const code = (Object.keys(UNQUOTED_REFUSALS) as (keyof typeof UNQUOTED_REFUSALS)[]).find(
+          (reason) => reasons.has(reason),
+        )!;
+        // The first offer refused for the code names its amounts; a raised price is the one
+        // refusal an agent may weigh, so it says by how much.
+        const raised =
+          code === "price_raised" &&
+          sellerOffers.find((offer) => unquoted(offer, quoted) === "price_raised");
+        refusal = new PaymentError(
+          code,
+          (raised && raisedPrice(raised, quoted)) || UNQUOTED_REFUSALS[code],
+        );
+        return [];
+      }
+    }
     const allowed = offers.filter((offer) => Object.hasOwn(config.assets, offer.asset));
     // A zero or negative price would be counted before the library refuses to sign it, and a
     // negative count raises the day's budget until it is given back.

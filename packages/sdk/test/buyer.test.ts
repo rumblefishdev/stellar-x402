@@ -46,6 +46,8 @@ function scheme(error?: Error): SchemeNetworkClient & { signed: number } {
 
 interface Seller {
   price: string;
+  /** Offers the 402 lists before its own, each its own terms changed so. */
+  others: Partial<PaymentRequired["accepts"][number]>[];
   /** What a signed retry gets: settled, refused by the facilitator, or a fetch that fails. */
   settle: "success" | "rejected" | "throws";
   paid: number;
@@ -56,6 +58,7 @@ interface Seller {
 function seller(): Seller {
   const state: Seller = {
     price: "10000",
+    others: [],
     settle: "success",
     paid: 0,
     fetch: async (input, init) => {
@@ -65,17 +68,16 @@ function seller(): Seller {
         const required: PaymentRequired = {
           x402Version: 2,
           resource: { url: request.url, description: "Forecast", mimeType: "application/json" },
-          accepts: [
-            {
-              scheme: "exact",
-              network: "stellar:testnet",
-              amount: state.price,
-              asset: USDC,
-              payTo: PAY_TO,
-              maxTimeoutSeconds: 60,
-              extra: { areFeesSponsored: true },
-            },
-          ],
+          accepts: [...state.others, {}].map((change) => ({
+            scheme: "exact",
+            network: "stellar:testnet",
+            amount: state.price,
+            asset: USDC,
+            payTo: PAY_TO,
+            maxTimeoutSeconds: 60,
+            extra: { areFeesSponsored: true },
+            ...change,
+          })),
         };
         return new Response("{}", {
           status: 402,
@@ -404,6 +406,79 @@ describe("createPayingFetch", () => {
     const error = await failure(createPayingFetch(config(shop))(PAID_URL));
     expect([error.code, error.paid]).toEqual(["payment_unknown", "unknown"]);
     expect(error.cause).toBeInstanceOf(ResponseBodyTooLargeError);
+  });
+});
+
+describe("createPayingFetch with quoted terms", () => {
+  const quote = {
+    scheme: "exact",
+    network: "stellar:testnet",
+    asset: USDC,
+    payTo: PAY_TO,
+    amount: "10000",
+  };
+
+  it.each([
+    ["price_raised", { amount: "9999" }],
+    ["payto_changed", { payTo: BUYER }],
+    ["terms_changed", { asset: "CBOTHERASSET" }],
+    ["terms_changed", { network: "stellar:pubnet" }],
+  ])("refuses with %s before anything is signed", async (code, change) => {
+    const shop = seller();
+    const signer = scheme();
+    const pay = createPayingFetch(config(shop, { quoted: [{ ...quote, ...change }] }, signer));
+    const error = await failure(pay(PAID_URL));
+    expect([error.code, error.paid]).toEqual([code, "none"]);
+    expect([signer.signed, shop.paid]).toEqual([0, 0]);
+  });
+
+  it("names the asked and the quoted amount of a raised price", async () => {
+    const shop = seller();
+    shop.price = "10001";
+    const error = await failure(createPayingFetch(config(shop, { quoted: [quote] }))(PAID_URL));
+    expect(error.code).toBe("price_raised");
+    expect(error.message).toContain("asks 10001 atomic units, more than the listing's 10000");
+  });
+
+  it("refuses a quote that is not a whole number, without naming an amount", async () => {
+    const shop = seller();
+    const pay = createPayingFetch(config(shop, { quoted: [{ ...quote, amount: "1e9" }] }));
+    const error = await failure(pay(PAID_URL));
+    expect([error.code, error.message]).toEqual([
+      "price_raised",
+      "The seller asks more than the listing's price.",
+    ]);
+    expect(shop.paid).toBe(0);
+  });
+
+  it.each(["10000", "9999"])("pays a price of %s against a quote of 10000", async (price) => {
+    const shop = seller();
+    shop.price = price;
+    const response = await createPayingFetch(config(shop, { quoted: [quote] }))(PAID_URL);
+    expect(response.payment?.amount).toBe(price);
+  });
+
+  it.each([
+    ["price_raised", "terms_changed", { asset: "CBOTHERASSET" }],
+    ["payto_changed", "price_raised", { payTo: BUYER, amount: "1" }],
+  ])("names %s, not %s, when the offers fail for both", async (code, _, change) => {
+    const shop = seller();
+    shop.price = "10001";
+    shop.others = [change];
+    const pay = createPayingFetch(config(shop, { quoted: [quote] }));
+    expect((await failure(pay(PAID_URL))).code).toBe(code);
+    expect(shop.paid).toBe(0);
+  });
+
+  it("counts nothing in the budget for a refused quote", async () => {
+    const shop = seller();
+    shop.price = "10001";
+    const budget = memoryBudget();
+    const assets = { [USDC]: { maxPerCall: 20_000n, daily: 10_001n } };
+    const quoted = createPayingFetch(config(shop, { quoted: [quote], assets, budget }));
+    expect((await failure(quoted(PAID_URL))).code).toBe("price_raised");
+    const unquoted = createPayingFetch(config(shop, { assets, budget }));
+    expect((await unquoted(PAID_URL)).payment?.amount).toBe("10001");
   });
 });
 

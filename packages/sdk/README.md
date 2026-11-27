@@ -55,11 +55,20 @@ back as it is, without `payment`.
 
 Checked before anything is signed, in this order; the first that leaves no offer gives the code:
 
-1. The asset is one of `assets` (`asset_not_allowed`).
-2. The price is a whole number of atomic units above zero, and the seller wants the payment valid
+1. With `quoted`, the terms the caller saw before calling (a catalog listing's `accepts`): the
+   offer names a quoted `payTo` for its network (`payto_changed`), and asks at most the quoted
+   amount for the same scheme, network and asset (`price_raised`); an offer whose scheme, network
+   or asset was not quoted is `terms_changed`. A lower price passes. Of offers refused for
+   different reasons, the code is the first of these three that any had. Only offers one of
+   `schemes` can pay, in a payment flow upstream knows, are checked: upstream drops the others
+   first, so a seller that now offers only another network or scheme, or only an unknown
+   `extra.paymentFlow`, is `unsupported_payment`, not `terms_changed`. A `price_raised` message
+   names the asked and the quoted amount.
+2. The asset is one of `assets` (`asset_not_allowed`).
+3. The price is a whole number of atomic units above zero, and the seller wants the payment valid
    for at most 300 s (`unsupported_payment`).
-3. The price is within `maxPerCall` (`over_price_limit`).
-4. With a `daily` budget, the price fits what is left of the UTC day (`over_budget`). It is counted
+4. The price is within `maxPerCall` (`over_price_limit`).
+5. With a `daily` budget, the price fits what is left of the UTC day (`over_budget`). It is counted
    when the offer is chosen, and given back only when nothing was signed or sent.
 
 `maxPerCall` is required for each asset. `daily` is optional; with one, `budget` is required, or
@@ -75,21 +84,24 @@ asset, and name why they refused.
 A payment that is refused or fails is a `PaymentError`. Branch on `code`; `message` is this
 library's own text, and what a seller or another library wrote is in `cause` only.
 
-| `code`                    | When                                                                                                             | `paid`        |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------- |
-| `asset_not_allowed`       | no offer is in one of `assets`                                                                                   | `none`        |
-| `unsupported_payment`     | no offer with a price above zero and valid for at most 300 s, or none the schemes can pay                        | `none`        |
-| `over_price_limit`        | every offer left costs more than `maxPerCall`                                                                    | `none`        |
-| `over_budget`             | the offer would pass what is left of the day                                                                     | `none`        |
-| `insufficient_funds`      | signing fails: the payer holds the trustline and too little of the asset                                         | `none`        |
-| `payer_trustline_missing` | signing fails: the payer has no trustline to the asset; the seller's account was not checked                     | `none`        |
-| `payto_trustline_missing` | signing fails: the seller's `payTo` has no trustline to the asset, or does not exist; only the seller can add it | `none`        |
-| `payment_failed`          | signing fails for another reason, or the budget store cannot be read or written                                  | `none`        |
-| `payment_rejected`        | after the payment was sent: the seller or its facilitator says it did not settle                                 | `not_settled` |
-| `payment_unknown`         | after the payment was sent, anything else goes wrong                                                             | `unknown`     |
+| `code`                    | When                                                                                                                                 | `paid`        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
+| `payto_changed`           | with `quoted`: an offer names a `payTo` not quoted for its network, and no offer passed (the first of the three codes any offer had) | `none`        |
+| `price_raised`            | with `quoted`: an offer asks more than its quote, no offer passed, and none had `payto_changed`                                      | `none`        |
+| `terms_changed`           | with `quoted`: no offer has a quoted scheme, network, asset and `payTo`, and none had one of the two codes above                     | `none`        |
+| `asset_not_allowed`       | no offer is in one of `assets`                                                                                                       | `none`        |
+| `unsupported_payment`     | no offer with a price above zero and valid for at most 300 s, or none the schemes can pay                                            | `none`        |
+| `over_price_limit`        | every offer left costs more than `maxPerCall`                                                                                        | `none`        |
+| `over_budget`             | the offer would pass what is left of the day                                                                                         | `none`        |
+| `insufficient_funds`      | signing fails: the payer holds the trustline and too little of the asset                                                             | `none`        |
+| `payer_trustline_missing` | signing fails: the payer has no trustline to the asset; the seller's account was not checked                                         | `none`        |
+| `payto_trustline_missing` | signing fails: the seller's `payTo` has no trustline to the asset, or does not exist; only the seller can add it                     | `none`        |
+| `payment_failed`          | signing fails for another reason, or the budget store cannot be read or written                                                      | `none`        |
+| `payment_rejected`        | after the payment was sent: the seller or its facilitator says it did not settle                                                     | `not_settled` |
+| `payment_unknown`         | after the payment was sent, anything else goes wrong                                                                                 | `unknown`     |
 
 `paid` says whether money may have moved. `none`: nothing was signed or sent, and an amount
-already counted went back to the budget (the four refusals up to `over_budget` counted nothing).
+already counted went back to the budget (the refusals up to `over_budget` counted nothing).
 `not_settled` and `unknown`: the signed payment left this process and counts as spent, since it
 stays valid until it expires; do not pay again for the same thing without checking. The
 two trustline codes also carry the `account` without the trustline and the `asset`.
