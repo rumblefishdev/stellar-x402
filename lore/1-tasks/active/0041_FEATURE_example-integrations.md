@@ -2,7 +2,8 @@
 id: "0041"
 title: "Two end-to-end example integrations"
 type: FEATURE
-status: backlog
+status: active
+owner: akot
 related_adr: []
 related_tasks: ["0037"]
 tags: [examples, docs, priority-medium, effort-medium]
@@ -15,6 +16,14 @@ history:
     note: >
       Spawned from 0037: its paid test endpoint became examples/http-api, a test seller and only
       the seed of Example 1, so the RFP deliverable gets its own task.
+  - date: "2026-11-26"
+    status: active
+    who: akot
+    note: >
+      Started. Example 1: stellar-prices-api sells its data through x402 (the Rust crate's axum
+      layer), bought with the TypeScript SDK. Example 2: an agent buys the facilitator's API key
+      through x402, with no Discord sign-in, on a paid plan for a period, its account the paying
+      address.
 ---
 
 # Two end-to-end example integrations

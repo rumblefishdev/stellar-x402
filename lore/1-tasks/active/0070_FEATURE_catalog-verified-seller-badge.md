@@ -2,7 +2,8 @@
 id: "0070"
 title: "Mark catalog listings whose seller proves its payTo with stellar.toml"
 type: FEATURE
-status: backlog
+status: active
+owner: karolkow
 milestone: 2
 related_adr: ["0008"]
 related_tasks: ["0063"]
@@ -16,6 +17,11 @@ history:
     note: >
       Spawned from 0063: copying a listing from the seller's 402 stops a payer's text, not a
       page of the attacker's own that names someone else's payTo.
+  - date: "2026-11-26"
+    status: active
+    who: karolkow
+    note: >
+      Started: the stellar.toml proof is the search's curation, a bonus in the ranking.
 ---
 
 # Mark catalog listings whose seller proves its payTo with stellar.toml

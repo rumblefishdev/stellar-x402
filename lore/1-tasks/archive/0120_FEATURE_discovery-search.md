@@ -2,7 +2,7 @@
 id: "0120"
 title: "Search the Bazaar: /discovery/search with ranking"
 type: FEATURE
-status: active
+status: completed
 owner: karolkow
 milestone: 2
 related_adr: ["0008", "0012", "0014"]
@@ -29,6 +29,13 @@ history:
     note: >
       Work starts. The open questions are settled; the first PR serves search by words, the second
       adds meaning and the model's container.
+  - date: "2026-11-26"
+    status: completed
+    who: karolkow
+    note: >
+      Five PRs merged: #224 (shared query schema), #225 (search cards), #226 (search by words),
+      #243 (coverage tool), #249 (search by meaning: model container, pgvector, fused ranking,
+      the search-words-only alarm).
 ---
 
 # Search the Bazaar: `/discovery/search` with ranking
@@ -71,8 +78,32 @@ ranked by fit, so that I can find a paid resource without knowing its seller or 
 
 ## Acceptance Criteria
 
-- [ ] Given listings in the catalog, when a client calls `/discovery/search` with a plain-words
+- [x] Given listings in the catalog, when a client calls `/discovery/search` with a plain-words
       query, then it gets matching listings ranked by fit, in upstream's response shape, with a
       cursor for the next page
 
 The MCP search tool over the route, and its criteria, moved to 0137.
+
+## Design Decisions
+
+### Emerged
+
+1. **Search data lives in its own table, one card per listing**: ADR 0014 put a generated words
+   column and the vector on `catalog`. Adding such a column rewrites the catalog under its lock
+   (5.5 s at 35,000 listings), so `catalog_search` holds the four fields, their words, and the
+   vector; the catalog write and its card go in one statement (#225, ADR 0014 amended).
+2. **The card's text is built in TypeScript, in `packages/bazaar`**: the listing's shape is then
+   known in one language; SQL only weighs the four fields A to D. The same rules in SQL and in
+   TypeScript gave 0 differences on 39,577 CDP listings.
+3. **The model is our own Node server on onnxruntime-node and @huggingface/tokenizers**:
+   transformers.js pulls sharp and libvips (LGPL-3.0). It runs from the facilitator's image as a
+   container of its own, 768 MiB and 1 CPU, on an internal network shared only with the facilitator.
+4. **The facilitator starts the model but never waits for it**: a model that can't start leaves
+   search on words alone (`partialResults` true, `search-words-only` fires), and `/settle` stays up.
+5. **One loop writes every vector**: it runs at start and every 30 s and embeds each card without
+   a vector of its current text; a listing written meanwhile is found by its words.
+6. **A fused cursor while search runs on words is a 503 with `Retry-After`**, not a 400: the client
+   did nothing wrong, and the same cursor works again once the model answers.
+7. **Request limits**: `limit` 20 by default, at most 100, as `/discovery/resources`; an empty
+   query or one over 2,000 characters is a 400; a query looks for its first 32 distinct words;
+   search shares `/discovery/*`'s per-IP budget.

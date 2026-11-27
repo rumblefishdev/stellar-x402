@@ -362,6 +362,19 @@ history:
       monitoring.md gets the snapshot-age section, and the runbook's turn-on step follows the
       rules. After the merge Stan puts the rules on the VM, okarcz fires it once, and Stan
       records it in monitoring.md.
+  - date: "2026-11-26"
+    status: active
+    who: okarcz
+    note: >
+      x402-snapshot-age fired on purpose after Stan put #268's rule on the VM. A drill textfile
+      can't fire it, since the rule takes the minimum over every snapshot_age_seconds series, so
+      okarcz set the real stamp's mtime (/var/lib/x402/last-ok/openbao-snapshot) 27 hours back
+      with touch -c; the probe wrote 97245, and Slack got FIRING at 16:14 and RESOLVED at 16:19
+      UTC after the mtime was restored to 1795691014 (11:03:34 UTC), checked with stat. The
+      snapshot and the Borg repository weren't touched. The journal shows the first unattended
+      night succeeded (openbao-2026-11-26T03:26:05Z, 32281 bytes) and the stamp's 11:03 is a run
+      by hand during 0048's drill (35353 bytes, after the new Transit key version); 3 archives so
+      far. The snapshots half of the decision-71 criterion is done; backups waits on pgBackRest.
 ---
 
 # Public testnet deployment

@@ -38,6 +38,8 @@ Since 0139's switch (2026-11-25 13:43 UTC) most checks are Prometheus rules on t
 | `watch-no-invocations`    | `watch`     | 2026-11-06 11:16 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:41:52, OK 13:51:52 UTC                                                                                                          |
 | `protocol-changed`        | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:22, OK 13:59:22 UTC                                                                                            |
 | `protocol-upgrade-coming` | `protocol`  | 2026-11-09 12:19 UTC | 2026-11-09, fake points for both networks ([Drills](#drills)): ALARM 13:55:15–13:55:52, OK 13:59:15–13:59:52 UTC                                                                          |
+| `upstream-changed`        | `upstream`  | Not yet: 0026        | Not yet: 0026 fires it after the Alarms deploy                                                                                                                                            |
+| `upstream-library-behind` | `upstream`  | Not yet: 0026        | Not yet: 0026 fires it after the Alarms deploy                                                                                                                                            |
 | `audit-disk`              | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:39:32, OK 13:49:32 UTC                                                                                           |
 | `telemetry-silent`        | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, the stop window ([Drills](#drills)): ALARM 13:40:23, OK 13:48:23 UTC                                                                                                          |
 | `credentials-stale`       | `host`      | 2026-11-09 12:19 UTC | 2026-11-09, fake points in the stop window ([Drills](#drills)): ALARM 13:31:13, OK 13:46:13 UTC                                                                                           |
@@ -60,7 +62,7 @@ On since 2026-11-25 13:43 UTC ([The Prometheus rules](#the-prometheus-rules)). T
 | `x402-rpc-on-fallback`            | `facilitator`       | 2026-11-25, the drill textfile: 14:35:15 to 14:42:00 UTC                                                                                 |
 | `x402-sweeps-stopped`             | `facilitator`       | 2026-11-25, a flat counter in the drill textfile: 14:21:30 to 14:45:45 UTC                                                               |
 | `x402-openbao-down`               | `host`              | 2026-11-25, the drill textfile: 14:23:15 to 14:42:00 UTC                                                                                 |
-| `x402-snapshot-age`               | `snapshots`         | Not yet: on from #268's merge, fired once after it                                                                                       |
+| `x402-snapshot-age`               | `snapshots`         | 2026-11-26, the stamp's mtime set 27 h back, then restored: firing 16:14, resolved 16:19 UTC, seen in Slack                              |
 | `x402-facilitator-silent`         | `facilitator`       | 2026-11-25, the stop window: 14:39:15 to 14:39:45 UTC (10 minutes after the stop)                                                        |
 | `x402-gauge-stale`                | `facilitator`       | 2026-11-25, a stale stamp in the drill textfile while the process ran: 14:46:45 to 14:54:30 UTC                                          |
 | `x402-target-down`                | `server`            | 2026-11-25, the stop window (`job` facilitator): 14:34:15 to 14:39:45 UTC                                                                |
@@ -86,19 +88,17 @@ Built in `infra/` and defined in the alarm list, but their group is off in
 `infra/envs/production.json` until what they read exists. Each gets its section here, and is fired
 once, by the task that turns it on.
 
-| Alarm                     | Group           | Turned on by                                                                           |
-| ------------------------- | --------------- | -------------------------------------------------------------------------------------- |
-| `account-effects`         | `watchSecurity` | 0127, the theft section                                                                |
-| `account-state`           | `watchSecurity` | 0127, the theft section                                                                |
-| `backup-age`              | `backups`       | 0026, once the first pgBackRest backup is made                                         |
-| `backup-secret-read`      | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
-| `channel-held`            | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
-| `hub-uptime`              | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
-| `portal-uptime`           | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
-| `upstream-changed`        | `upstream`      | 0026, `make check-series GROUP=upstream` in the 3 hours after a 08:00 UTC run          |
-| `upstream-library-behind` | `upstream`      | 0026, as above                                                                         |
-| `wal-failing`             | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
-| `wal-stale`               | `backups`       | 0026, as above                                                                         |
+| Alarm                | Group           | Turned on by                                                                           |
+| -------------------- | --------------- | -------------------------------------------------------------------------------------- |
+| `account-effects`    | `watchSecurity` | 0127, the theft section                                                                |
+| `account-state`      | `watchSecurity` | 0127, the theft section                                                                |
+| `backup-age`         | `backups`       | 0026, once the first pgBackRest backup is made                                         |
+| `backup-secret-read` | `watchSecurity` | 0127, the secret-read section, once 0026 creates the backup secret                     |
+| `channel-held`       | `channelHeld`   | 0089 builds `channel_longest_hold_seconds`; 0027 owns the alarm (alarm list, Deferred) |
+| `hub-uptime`         | `hubUptime`     | 0106, once the hub's backend is in the explorer's distribution and its probe reads 1   |
+| `portal-uptime`      | `portalUptime`  | 0106, `make check-series GROUP=portalUptime` once its probe has published              |
+| `wal-failing`        | `backups`       | 0026, once pgBackRest archives WAL (its decision-71 criterion)                         |
+| `wal-stale`          | `backups`       | 0026, as above                                                                         |
 
 **The logs.** The facilitator, the tunnel, Postgres, OpenBao and the deploy write their output to
 files under `/var/log/x402/` on the server, and the CloudWatch agent ships them ([runbook, The CloudWatch agent](runbook.md#the-cloudwatch-agent)):
@@ -1101,8 +1101,8 @@ CloudWatch from the host probe's EMF lines, and `x402-watch` and `AWS/*` are Clo
 | `spendable_stroops`                         | `x402-watch`       | gauge, None    | `network`                                                | [balance-critical](#balance-critical), [balance-low](#balance-low)                                            |
 | `protocol_version`                          | `x402-watch`       | gauge, None    | `network`                                                | [protocol-changed](#protocol-changed)                                                                         |
 | `protocol_supported_version`                | `x402-watch`       | gauge, None    | `network`                                                | [protocol-upgrade-coming](#protocol-upgrade-coming)                                                           |
-| `upstream_files_changed`                    | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed) (off)                                                                   |
-| `upstream_library_behind`                   | `x402-watch`       | gauge, Count   | none                                                     | [upstream-library-behind](#upstream-library-behind) (off)                                                     |
+| `upstream_files_changed`                    | `x402-watch`       | gauge, Count   | none                                                     | [upstream-changed](#upstream-changed)                                                                         |
+| `upstream_library_behind`                   | `x402-watch`       | gauge, Count   | none                                                     | [upstream-library-behind](#upstream-library-behind)                                                           |
 | `account_state_mismatches`                  | `x402-watch`       | gauge, Count   | `network`                                                | `account-state` (off)                                                                                         |
 | `account_effects_unexpected`                | `x402-watch`       | counter, Count | `network`                                                | `account-effects` (off)                                                                                       |
 | `backup_secret_reads`                       | `x402-watch`       | counter, Count | none                                                     | `backup-secret-read` (off)                                                                                    |
