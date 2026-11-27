@@ -46,7 +46,8 @@ else's account doesn't look as trusted as the real seller.
 
 ## Implementation
 
-- On a paid call whose listing passes its 402 check, at most once per 6 h per host, read the
+- On every paid call whose listing is in the catalog, apart from the check of the seller's 402,
+  at most once per 6 h per host and `payTo`, read the
   host's `stellar.toml` and the `payTo` account's `home_domain` on the facilitator's network. The
   listing is curated when `ACCOUNTS` lists the `payTo` and `home_domain` is the resource host.
 - Keep the result per network, host and `payTo`, with when it was checked. Any answer from the
@@ -55,7 +56,7 @@ else's account doesn't look as trusted as the real seller.
   does not start the 6 h wait.
 - Show `curated: true|false` on each item of `/discovery/resources` and `/discovery/search`, and
   in the MCP server's list and search results; a listing without the proof stays listed.
-- A curated listing's q is multiplied by 1.1, inside q's 1.2 cap (ADR 0014 "Curation"), once q
+- A curated listing's proof counts as 3 paying wallets in q (ADR 0014 "Curation"), once q
   from 0154 is on `develop`.
 - Out of scope: a contract (`C…`) `payTo` has no `home_domain`, so it is never curated.
 
@@ -70,4 +71,4 @@ else's account doesn't look as trusted as the real seller.
 - [ ] Given a check that fails, when the listing is read, then it is not curated and the failure
       is logged
 - [ ] `curated` is shown in `/discovery/resources`, `/discovery/search` and the MCP results
-- [ ] A curated listing's q is multiplied by 1.1 and stays at most 1.2
+- [ ] A curated listing's proof counts as 3 paying wallets in q, which stays below 1.2

@@ -154,9 +154,9 @@ The measurements are in
   answers partial. No words-only window: anything more is decided when a change comes.
 - **Quality score.** A listing's score is its fused score times a quality factor q (task 0154), in
   the fused ranking and in words alone:
-  - q = min(1.2, (1 + 0.2 × p / (p + 2)) × 1.1 when curated) × 0.9 on a tunnel host × 0.9 with an
-    empty description, where p is the number of distinct wallets that paid for the listing through
-    this facilitator in the last 30 days. q is at most 1.2, so it moves a listing only a few places: with 10 paying wallets
+  - q = (1 + 0.2 × p / (p + 2)) × 0.9 on a tunnel host × 0.9 with an empty description, where p is
+    the number of distinct wallets that paid for the listing through this facilitator in the last
+    30 days, plus 3 when the listing is curated. q is below 1.2, so it moves a listing only a few places: with 10 paying wallets
     the 4th match by meaning passes the 1st.
   - A listing with no payments, on its own host and with a description, gets q = 1: it is neither
     hidden nor raised, as §4.3 asks for new listings.
@@ -193,13 +193,16 @@ The measurements are in
   starts empty.
 - **Curation.** A listing is curated when its seller proves its `payTo` with `stellar.toml` both
   ways (task 0070): the host's file lists the `payTo` in `ACCOUNTS`, and the account's
-  `home_domain` is the host. The facilitator checks it on a paid call, at most once per 6 hours
-  per host and account. Any answer from the host finishes the check, a missing file as no proof;
+  `home_domain` is the host. The facilitator checks it on every paid call of a listing in the
+  catalog, whatever the check of the seller's 402 ended in, at most once per 6 hours per host and
+  account. Any answer from the host finishes the check, a missing file as no proof;
   a host that cannot be reached counts as no proof and is asked again on the next paid call. A
   proof not checked for 30 days, the window of q's payments, no longer counts: the check runs only
-  on a paid call, so an old proof may no longer hold. A curated listing's q gets × 1.1, about what 3 paying wallets give, within the 1.2 cap: a curated
-  listing with 10 wallets still has 1.2. On 3,000 CDP listings and 40 real queries, × 1.1 raised
-  a curated listing a median of 3 places. Every listing shows `curated` in `/discovery/resources`
+  on a paid call, so an old proof may no longer hold. The proof counts as 3 paying wallets in q: a new curated listing gets
+  1.12, one with 10 wallets 1.173 against 1.167 without the proof. On 3,000 CDP listings and 40
+  real queries, × 1.1, about the same as 3 wallets, raised a curated listing a median of 3 places.
+  As wallets rather than a factor, the bonus shrinks as real payers come, and payers still order
+  curated listings: a factor under the 1.2 cap gave every curated listing with 2 wallets 1.2. Every listing shows `curated` in `/discovery/resources`
   and `/discovery/search`. A contract (`C…`) `payTo` has no `home_domain`, so it is never curated.
 - **When the ranking is served.** There is no separate curation-only mode. 0135's run decides
   when search is offered on pubnet (task 0120): not before it reaches nDCG@10 ≥ 0.75, as §4
